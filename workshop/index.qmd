@@ -1,0 +1,141 @@
+---
+title: "Workshop: The Causal Roadmap and TMLE in Pharmacoepidemiology"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+---
+
+# Motivating Example: Post-Market Safety of Prolia
+
+This workshop introduces the *Causal Roadmap* and *Targeted Maximum Likelihood Estimation (TMLE)* through a motivating example: a post-market evaluation of **cardiovascular safety among patients treated with denosumab (Prolia) vs. zoledronic acid** for osteoporosis. The goal is to show how causal inference frameworks help produce transparent, reproducible real-world evidence.
+
+In 2023, Amgen conducted a large-scale retrospective cohort study across two US claims databases, comparing denosumab with zoledronic acid. After adjusting for confounding using inverse probability weighting, the study found **no increased risk of myocardial infarction or stroke** up to 36 months of follow-up【204†source】. Here, we will reconstruct a simplified version of this question using the *causal roadmap* and a TMLE implementation.
+
+::: {.callout-note}
+**Goal:** Learn how to define, identify, and estimate a causal effect with TMLE, using machine learning for nuisance function estimation.
+:::
+
+![Placeholder diagram: Flowchart of the Causal Roadmap steps.](../images/roadmap_placeholder.png)
+*Figure 1. The Causal Roadmap, adapted for pharmacoepidemiologic safety analysis.*
+
+---
+
+# 1. Step 1 — Define the Causal Question
+
+We start by translating the clinical question into a causal question that aligns with a target trial.
+
+**Scientific question:** Does denosumab increase the 36-month risk of cardiovascular events compared to zoledronic acid among postmenopausal adults with osteoporosis?
+
+**Population:** Postmenopausal women and men ≥55 initiating osteoporosis therapy.
+
+**Intervention:** Denosumab 60 mg every 6 months vs. zoledronic acid 5 mg yearly.
+
+**Outcome:** Myocardial infarction (MI) or stroke within 36 months.
+
+**Estimand:** Average treatment effect (ATE) — the difference in 36-month risk between treatment strategies.
+
+---
+
+# 2. Step 2 — Identify Confounders and Causal Structure
+
+To interpret the effect causally, we must assume **exchangeability**, **positivity**, and **consistency**. Important baseline confounders include age, prior CVD, chronic kidney disease, diabetes, and prior bisphosphonate use.
+
+We can visualize these relationships with a simple directed acyclic graph (DAG).
+
+![Placeholder diagram: DAG showing A (treatment), Y (outcome), W (confounders).](../images/dag_placeholder.png)
+*Figure 2. Simplified causal diagram for the Prolia cardiovascular safety example.*
+
+---
+
+# 3. Step 3 — Link Causal Estimand to the Observed Data
+
+Under causal assumptions, the target estimand is linked to the observed data distribution as:
+
+$$\Psi = E_W[E[Y|A=1,W] - E[Y|A=0,W]]$$
+
+This expresses the ATE as the difference in expected outcomes if everyone received treatment versus if no one did.
+
+---
+
+# 4. Step 4 — Choose the Estimator
+
+Traditional regression models assume a fixed functional form (e.g., logistic regression). TMLE allows us to replace these assumptions with flexible **machine learning** estimators while maintaining valid inference.
+
+## 4.1 Why TMLE?
+
+As described by Katherine Hoffman in *An Illustrated Guide to TMLE*【202†source】【203†source】, TMLE:
+- Targets a specific estimand (e.g., ATE), rather than model coefficients.
+- Incorporates data-adaptive methods like Super Learner.
+- Provides valid standard errors and confidence intervals.
+
+## 4.2 Why Super Learner?
+
+Super Learner (SL) combines multiple algorithms (GLM, LASSO, random forests, etc.) through cross-validation to minimize prediction error. This ensemble approach ensures flexibility and robustness when estimating nuisance parameters.
+
+```{r}
+library(SuperLearner)
+set.seed(123)
+sl_libs <- c('SL.glm', 'SL.glmnet', 'SL.ranger', 'SL.earth')
+```
+
+---
+
+# 5. Step 5 — Implement TMLE Step-by-Step
+
+Below, we illustrate a simplified TMLE algorithm using simulated data inspired by the Prolia study.
+
+```{r}
+library(tmle)
+set.seed(1234)
+n <- 1000
+W <- data.frame(age = rnorm(n, 70, 8), sex = rbinom(n, 1, 0.9), ckd = rbinom(n, 1, 0.2))
+A <- rbinom(n, 1, plogis(-0.3 + 0.02*W$age + 0.5*W$ckd))
+Y <- rbinom(n, 1, plogis(-2 + A + 0.05*W$age + 0.3*W$ckd))
+
+
+
+fit <- tmle(Y = Y, A = A, W = W, family = "binomial",
+            Q.SL.library = "SL.glm",
+            g.SL.library = "SL.glm")
+summary(fit)
+```
+
+Interpretation: The TMLE estimate represents the average difference in outcome risk under denosumab versus zoledronic acid, adjusted for confounders. Under causal assumptions, these estimates are causal risk ratio/difference.
+
+---
+
+# 6. Step 6 — Evaluate Model Performance and Diagnostics
+
+In practice, we evaluate how well Super Learner predicts treatment and outcome. Cross-validation helps balance bias and variance. The *targeting step* corrects remaining bias by solving the efficient influence function.
+
+```{r}
+
+#add plot
+#ggplot()
+```
+
+You can compare the TMLE estimate with simpler estimators like G-computation or IPTW to appreciate efficiency gains. **(Note: add comparisons)**
+
+---
+
+# 7. Step 7 — Sensitivity and Robustness Checks
+
+- Repeat analyses excluding patients with chronic kidney disease.
+- Evaluate outcomes under competing-risk scenarios (death as competing event).
+- Conduct quantitative bias analysis to explore unmeasured confounding【204†source】【206†source】.
+
+---
+
+# 8. Step 8 — Communicate and Interpret Results
+
+Summarize each step of the Causal Roadmap and report the findings transparently:
+
+| Step | Question | Example | Method |
+|------|-----------|----------|---------|
+| Define | What is the causal question? | Denosumab vs ZA on MI risk | Target Trial | 
+| Identify | What assumptions are needed? | Exchangeability, positivity | DAG, bias table |
+| Estimate | How to compute it? | TMLE using SL | `tmle()` |
+| Interpret | What does it mean? | 3-year ATE on risk difference | Risk-based interpretation |
+
+
