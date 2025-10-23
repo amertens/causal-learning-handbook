@@ -20,6 +20,40 @@ ul.task-list li input[type="checkbox"] {
   margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
   vertical-align: middle;
 }
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
 </style>
 
 
@@ -163,6 +197,47 @@ ul.task-list li input[type="checkbox"] {
 <p>This lesson introduces our motivating example: evaluating the post-market cardiovascular safety of <strong>denosumab (Prolia)</strong> compared to <strong>zoledronic acid</strong>.</p>
 <p>We’ll use this as our running example throughout the workshop to illustrate the Causal Roadmap.</p>
 <p><img src="../images/prolia_design_placeholder.png" class="img-fluid" alt="Placeholder: Conceptual diagram of study design (Prolia vs.&nbsp;ZA)."> <em>Figure 1. Study schematic for the Prolia vs.&nbsp;Zoledronic Acid cardiovascular safety study.</em></p>
+<div class="cell">
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co">#romain's EHR simulation package</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>remotes<span class="sc">::</span><span class="fu">install_github</span>(<span class="st">"romainkp/LtAtStructuR"</span>)</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(LtAtStructuR)</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(data.table)</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(lubridate)</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(future) <span class="co"># optional (for parallel processing)</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="co">#plan(multiprocess) # optional (for parallel processing)</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="do">## Define one cohort dataset, one exposure dataset, and one or more covariate</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="do">## datasets</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>cohort <span class="ot">&lt;-</span> <span class="fu">setCohort</span>(cohortDT, <span class="st">"ID"</span>, <span class="st">"IndexDate"</span>, <span class="st">"EOFDate"</span>, <span class="st">"EOFtype"</span>,</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>                    <span class="st">"AMI"</span>, <span class="fu">c</span>(<span class="st">"ageEntry"</span>, <span class="st">"sex"</span>, <span class="st">"race"</span>, <span class="st">"A1c"</span>, <span class="st">"eGFR"</span>),</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>                    <span class="fu">list</span>(<span class="st">"ageEntry"</span><span class="ot">=</span><span class="fu">list</span>(<span class="st">"categorical"</span><span class="ot">=</span><span class="cn">FALSE</span>,</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>                                        <span class="st">"impute"</span><span class="ot">=</span><span class="cn">NA</span>,</span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>                                        <span class="st">"impute_default_level"</span><span class="ot">=</span><span class="cn">NA</span>),</span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>                        <span class="st">"sex"</span><span class="ot">=</span><span class="fu">list</span>(<span class="st">"categorical"</span><span class="ot">=</span><span class="cn">TRUE</span>,</span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>                                   <span class="st">"impute"</span><span class="ot">=</span><span class="cn">NA</span>,</span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>                                   <span class="st">"impute_default_level"</span><span class="ot">=</span><span class="cn">NA</span>),</span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>                        <span class="st">"race"</span><span class="ot">=</span><span class="fu">list</span>(<span class="st">"categorical"</span><span class="ot">=</span><span class="cn">TRUE</span>,</span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>                                    <span class="st">"impute"</span><span class="ot">=</span><span class="cn">NA</span>,</span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>                                    <span class="st">"impute_default_level"</span><span class="ot">=</span><span class="cn">NA</span>)) )</span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>exposure <span class="ot">&lt;-</span> <span class="fu">setExposure</span>(expDT, <span class="st">"ID"</span>, <span class="st">"startA"</span>, <span class="st">"endA"</span>)</span>
+<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a>covariate1 <span class="ot">&lt;-</span> <span class="fu">setCovariate</span>(a1cDT, <span class="st">"sporadic"</span>, <span class="st">"ID"</span>, <span class="st">"A1cDate"</span>, <span class="st">"A1c"</span>,</span>
+<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a>                           <span class="at">categorical =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a>covariate2 <span class="ot">&lt;-</span> <span class="fu">setCovariate</span>(egfrDT, <span class="st">"sporadic"</span>, <span class="st">"ID"</span>, <span class="st">"eGFRDate"</span>, <span class="st">"eGFR"</span>,</span>
+<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a>                           <span class="at">categorical =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a><span class="do">## Gather each input dataset into a single object that specifies the content of</span></span>
+<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a><span class="do">## the output dataset to be constructed</span></span>
+<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a>LtAt.specification <span class="ot">&lt;-</span> cohort <span class="sc">+</span> exposure <span class="sc">+</span> covariate1 <span class="sc">+</span> covariate2</span>
+<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a><span class="do">## Construct the output dataset</span></span>
+<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a>LtAt.data <span class="ot">&lt;-</span> <span class="fu">construct</span>(LtAt.specification, <span class="at">time_unit =</span> <span class="dv">15</span>, <span class="at">first_exp_rule =</span> <span class="dv">1</span>,</span>
+<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a>                       <span class="at">exp_threshold =</span> <span class="fl">0.75</span>)</span>
+<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(LtAt.data)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+</div>
 
 
 </section>
