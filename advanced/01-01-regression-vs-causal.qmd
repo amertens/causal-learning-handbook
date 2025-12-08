@@ -1,0 +1,110 @@
+---
+title: 'Chapter 1.1: Limitations of Standard Regression Analyses'
+format: html
+---
+
+In this chapter, we motivate the need for modern causal inference tools by walking through real-world examples where traditional regression fails. We also introduce the counterfactual (potential outcomes) framework as the foundation for defining causal effects.
+
+## Why Not Just Use Regression?
+
+Multivariable regression has long been the standard tool in observational research for "adjusting" for confounders. But regression coefficients don’t always represent causal effects.
+
+Let’s consider a motivating example based on a real-world study comparing two osteoporosis treatments: **denosumab** (Prolia) and **zoledronic acid**.
+
+### Motivating Example: Comparing Osteoporosis Treatments
+
+Imagine we’re interested in whether patients who initiate denosumab have higher 3-year risk of heart attack or stroke compared to those initiating zoledronic acid.
+
+We might be tempted to run the following:
+
+```{r}
+# simulate crude comparison (not real data)
+set.seed(123)
+n <- 2000
+treatment <- rbinom(n, 1, 0.5) # 1 = denosumab, 0 = zoledronic acid
+age <- rnorm(n, 75, 6)
+cvd_history <- rbinom(n, 1, plogis(0.1 * (age - 70)))
+
+# outcome depends on age and history
+risk <- plogis(-2 + 0.4 * treatment + 0.05 * (age - 70) + 1 * cvd_history)
+outcome <- rbinom(n, 1, risk)
+
+model1 <- glm(outcome ~ treatment, family = binomial)
+summary(model1)
+```
+
+This gives us a crude estimate of association, which is confounded by differences in age and comorbidities.
+
+### Adjusting for Confounders
+
+We add adjustment:
+
+```{r}
+model2 <- glm(outcome ~ treatment + age + cvd_history, family = binomial)
+summary(model2)
+```
+
+But is this **causal**? Not necessarily. We’re making strong parametric assumptions (e.g., log-linear effect of age), and regression *implicitly* defines the estimand. The treatment coefficient reflects a log-odds ratio comparing denosumab vs ZA, conditional on covariates. But this is *not* the average treatment effect in the population.
+
+## Enter the Counterfactual Framework
+
+To define a causal effect, we introduce counterfactual outcomes:
+
+> **Y(1):** outcome if a person received denosumab  
+> **Y(0):** outcome if a person received zoledronic acid
+
+The **average treatment effect (ATE)** is:
+
+$$
+E[Y(1) - Y(0)]
+$$
+
+But in reality, each person only receives one treatment. The counterfactual under the other treatment is missing.
+
+Under assumptions (exchangeability, consistency, positivity), we can identify the causal effect from observed data. For example, we can estimate:
+
+$$
+E_W[ E[Y | A = 1, W] - E[Y | A = 0, W] ]
+$$
+
+This motivates **standardization**, **IPTW**, and **targeted learning**.
+
+## When Regression Fails
+
+Even if we include the right confounders, misspecification of functional form (e.g., assuming linearity, ignoring interactions) can bias results.
+
+Let’s compare regression to a nonparametric substitution estimator (g-computation):
+
+```{r}
+# Fit model
+model3 <- glm(outcome ~ treatment + age + cvd_history, family = binomial)
+
+# Predict counterfactual outcomes
+newdata1 <- data.frame(treatment = 1, age = age, cvd_history = cvd_history)
+p1 <- predict(model3, newdata = newdata1, type = "response")
+
+newdata0 <- data.frame(treatment = 0, age = age, cvd_history = cvd_history)
+p0 <- predict(model3, newdata = newdata0, type = "response")
+
+# Estimate marginal risk difference
+mean(p1 - p0)  # this is g-computation
+```
+
+Compare this to the regression coefficient:
+
+```{r}
+coef(model3)["treatment"]
+```
+
+The coefficient gives you a conditional odds ratio, but the g-comp version gives you a marginal risk difference — a more interpretable, population-level quantity.
+
+## Summary
+
+- Regression is not inherently causal — it estimates conditional associations under model assumptions.
+- Causal inference starts by defining a causal question and target estimand.
+- The counterfactual framework clarifies what we want to estimate.
+- G-computation, IPTW, and TMLE allow estimating causal effects without relying on regression coefficients.
+
+## Next
+
+In the next chapter, we’ll introduce the Causal Roadmap — a structured workflow for planning and executing causal analyses.

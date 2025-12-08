@@ -1,0 +1,413 @@
+---
+title: "Chapter 3.6: When RWD Meets RCT – Hybrid Designs"
+format: html
+---
+
+# Chapter 3.6  
+## When RWD Meets RCT – Hybrid Designs for Causal Inference  
+*Combining randomized and observational data to improve precision and generalizability*
+
+Randomized controlled trials (RCTs) are the gold standard for causal inference.  
+But they are:
+
+- Expensive and slow  
+- Often underpowered for rare events and subgroup effects  
+- Conducted in selective populations  
+- Not always feasible or ethical  
+
+Real-world data (RWD) — registries, EHR, claims — provide:
+
+- Large, diverse populations  
+- Naturalistic treatment patterns  
+- Long-term safety follow-up  
+
+**Hybrid RCT–RWD designs** aim to combine:
+
+- The *internal validity* of RCTs  
+- The *external validity* and scale of RWD  
+
+This chapter introduces:
+
+1. Why hybrid designs are needed  
+2. Types of hybrid designs with external controls  
+3. Transportability and generalizability concepts  
+4. ES-CV-TMLE (External Supervised Cross-Validated TMLE)  
+5. A-TMLE (Adaptive TMLE) for integrating multiple data sources  
+6. Practical considerations and diagnostics  
+
+---
+
+## 1. Why Combine RCT and RWD?
+
+### 1.1 Precision
+
+Trials may be underpowered for:
+
+- Rare safety endpoints  
+- Important subgroups  
+- Long-term secondary endpoints  
+
+External RWD can add information and boost precision without enrolling more randomized patients.
+
+### 1.2 Generalizability
+
+RCT participants tend to:
+
+- Be younger and healthier  
+- Have fewer comorbidities  
+- Be more adherent and monitored  
+
+Thus, trial results may not fully apply to routine-care populations.
+
+### 1.3 Feasibility and ethics
+
+Hybrid designs are useful when:
+
+- Placebo or standard randomized controls are unethical  
+- Only a single-arm trial is feasible  
+- Rapid evidence is needed (e.g., post-marketing surveillance, rare diseases)
+
+---
+
+## 2. Basic Hybrid Designs
+
+Several design patterns are commonly used.
+
+---
+
+### 2.1 External Control Arms
+
+A **single-arm trial** (all patients get experimental treatment) may be compared against an **external control** arm from RWD.
+
+Use cases:
+
+- Oncology (historical controls)  
+- Rare diseases  
+- When standard-of-care is well characterized
+
+Challenges:
+
+- Confounding by indication  
+- Differences in data capture, follow-up, eligibility  
+- Timing effects (calendar time, coding changes)  
+
+---
+
+### 2.2 Augmented Control Arms
+
+An RCT randomizes patients to:
+
+- Experimental treatment vs trial control (e.g., 2:1 randomization)  
+
+But the trial control arm is **augmented** with external RWD controls to:
+
+- Improve precision  
+- Reduce required randomized control sample size  
+- Support safety and rare-event evaluation  
+
+Borrowing can be:
+
+- Fixed (pre-specified)  
+- Dynamic / adaptive (data-driven)  
+
+---
+
+### 2.3 Transportability and Generalizability
+
+You may have:
+
+- An RCT effect estimate in a selected population  
+- A target population in RWD  
+
+Goal:
+
+> *Transport* or *generalize* the trial effect to the RWD population.
+
+Requires:
+
+- Modeling the difference between trial and target populations  
+- Adjusting for “sampling bias” (who joins the trial)
+
+Techniques:
+
+- Inverse odds of sampling weights (IOSW)  
+- Transport / generalizability TMLE  
+- Doubly robust methods combining outcome and sampling models  
+
+---
+
+## 3. Identification: Assumptions in Hybrid Settings
+
+Beyond usual RCT assumptions, hybrid designs require:
+
+### 3.1 No unmeasured confounding (for external / observational arms)
+
+Within the external data:
+
+- Treatment–outcome confounding must be controlled using available covariates  
+- Residual confounding may bias the hybrid estimate
+
+### 3.2 Common support (overlap)
+
+The joint covariate space of:
+
+- RCT participants  
+- RWD patients  
+
+must overlap, especially when:
+
+- Using RWD to estimate control outcomes  
+- Transporting effects across populations
+
+### 3.3 Consistency across sources
+
+Medical coding, endpoint definitions, and measurement schemes should be compatible (or harmonized).
+
+---
+
+## 4. ES-CV-TMLE: External Supervised Cross-Validated TMLE
+
+**ES-CV-TMLE (External Supervised Cross-Validated TMLE)** is a targeted learning approach that:
+
+- Uses **external data (RWD)** to help train nuisance models (e.g., outcome regressions)  
+- Validates and selects among them using **cross-validation in the RCT only**  
+- Ensures external data do not degrade the validity of RCT-based estimation  
+
+### 4.1 Key idea
+
+We may have poor precision in the RCT alone for nuisance functions \(Q\) and \(g\).  
+External data can improve the *learning* of these functions, but confounding in the RWD could distort:
+
+- Outcome relationships  
+- Treatment assignment mechanisms  
+
+ES-CV-TMLE protects against this by:
+
+1. Proposing multiple candidate nuisance models, some learned on:
+   - RCT only  
+   - RWD only  
+   - Combined data  
+
+2. Using **cross-validation on the RCT** to evaluate each model’s performance (e.g., via log-likelihood loss).  
+3. Choosing the best-performing nuisance model (or an ensemble of them) for TMLE.
+
+External data are “supervisors” but do not override the RCT.
+
+### 4.2 Conceptual algorithm
+
+1. Pool RCT and RWD data for training candidate models:
+   - \(Q_{	ext{RCT}}\): trained only on RCT  
+   - \(Q_{	ext{RWD}}\): trained only on RWD  
+   - \(Q_{	ext{pool}}\): trained on combined RCT+RWD  
+
+2. For each candidate Q-model:
+   - Use RCT data only  
+   - Run cross-validated evaluation (e.g., deviance, negative log-likelihood)  
+
+3. Select (or weight) candidate Qs via SuperLearner-style metalearning.  
+
+4. Use the chosen Q (and similarly chosen g, if desired) in TMLE on the RCT data.
+
+This preserves the RCT-based identification and uses RWD as an auxiliary data source for better prediction.
+
+---
+
+## 5. A-TMLE: Adaptive Targeted Maximum Likelihood Estimation
+
+**Adaptive TMLE (A-TMLE)** generalizes ES-CV-TMLE to the estimator level.
+
+Instead of combining candidate **nuisance models**, A-TMLE combines candidate **estimators** (e.g., separate hybrid analyses):
+
+- TMLE using RCT only  
+- TMLE using RWD only (carefully adjusted)  
+- TMLE using both RCT + RWD in a joint model  
+- Other candidate estimators
+
+It then uses a SuperLearner-style convex combination of these estimators to:
+
+> Minimize cross-validated risk, yielding an adaptive, doubly robust final estimate.
+
+### 5.1 Why A-TMLE?
+
+Multiple data sources can provide:
+
+- High internal validity (RCT)  
+- High external validity (RWD)  
+- Different types of bias and variance  
+
+A-TMLE lets the data decide the optimal combination, subject to:
+
+- Constraints (e.g., RCT estimator always included)  
+- Hierarchical preferences (e.g., more weight on RCT when conflict arises)
+
+### 5.2 Mathematical structure
+
+Let \( \hat\Psi_1, \dots, \hat\Psi_K\) be candidate estimators of the same target parameter \(\Psi\).
+
+A-TMLE constructs:
+
+\[
+\hat\Psi_{	ext{A-TMLE}} = \sum_{k=1}^K lpha_k \hat\Psi_k
+\]
+
+with
+
+- \(lpha_k \ge 0\)  
+- \(\sum_k lpha_k = 1\)
+
+Weights \(lpha\) are chosen to minimize cross-validated loss (e.g., squared error of influence curves).
+
+---
+
+## 6. Example Hybrid Workflow (Conceptual)
+
+Consider:
+
+- RCT: experimental vs placebo  
+- RWD: observational comparison between experimental drug and standard-of-care  
+
+### 6.1 TMLE using RCT only
+
+```r
+tmle_rct <- tmle(
+  Y = Y_rct,
+  A = A_rct,
+  W = W_rct,
+  family = "binomial",
+  Q.SL.library = c("SL.glm", "SL.ranger"),
+  g.SL.library = c("SL.glm", "SL.ranger")
+)
+psi_rct <- tmle_rct$estimates$ATE$psi
+```
+
+### 6.2 TMLE using RWD (careful confounding control)
+
+```r
+tmle_rwd <- tmle(
+  Y = Y_rwd,
+  A = A_rwd,
+  W = W_rwd,
+  family = "binomial",
+  Q.SL.library = c("SL.glm", "SL.ranger"),
+  g.SL.library = c("SL.glm", "SL.ranger")
+)
+psi_rwd <- tmle_rwd$estimates$ATE$psi
+```
+
+### 6.3 Pooled-source TMLE
+
+```r
+Y_pool <- c(Y_rct, Y_rwd)
+A_pool <- c(A_rct, A_rwd)
+W_pool <- rbind(W_rct, W_rwd)
+
+tmle_pool <- tmle(
+  Y = Y_pool,
+  A = A_pool,
+  W = W_pool,
+  family = "binomial",
+  Q.SL.library = c("SL.glm", "SL.ranger"),
+  g.SL.library = c("SL.glm", "SL.ranger")
+)
+psi_pool <- tmle_pool$estimates$ATE$psi
+```
+
+### 6.4 Adaptive combination (A-TMLE style idea)
+
+```r
+candidates <- c(psi_rct, psi_rwd, psi_pool)
+
+# Placeholder: in practice, you would build a loss function based on influence curves
+# and use constrained optimization (e.g., nnls) with cross-validation to find weights.
+
+weights <- c(0.6, 0.0, 0.4)  # e.g., chosen by cross-validation
+weights <- weights / sum(weights)
+
+psi_atmle <- sum(weights * candidates)
+psi_atmle
+```
+
+In a true A-TMLE implementation, the weights would be:
+
+- Estimated based on CV risk  
+- Possibly constrained to ensure heavier emphasis on RCT-based estimators  
+
+---
+
+## 7. Practical Considerations and Diagnostics for Hybrid Designs
+
+### 7.1 Harmonization
+
+Before attempting hybrid estimation:
+
+- Align endpoint definitions and censoring rules  
+- Harmonize covariates (coding, units, ranges)  
+- Confirm consistent definition of “treatment” across sources  
+
+### 7.2 Assess similarity between RCT and RWD
+
+Check covariate distributions:
+
+```r
+bind_rows(
+  W_rct %>% mutate(source = "RCT"),
+  W_rwd %>% mutate(source = "RWD")
+) %>%
+  pivot_longer(cols = -source) %>%
+  ggplot(aes(x = value, fill = source)) +
+  geom_density(alpha = 0.4) +
+  facet_wrap(~ name, scales = "free")
+```
+
+Look for:
+
+- Large discrepancies → may require transportability modeling  
+- Non-overlapping regions → positivity issues  
+
+### 7.3 Sensitivity analyses
+
+- Re-estimate using RCT-only TMLE  
+- Vary the degree of borrowing (e.g., by up-weighting/down-weighting RWD in hybrid estimators)  
+- Use E-values or QBA to examine impact of unmeasured confounding in RWD component  
+- Apply negative control analyses in the RWD part  
+
+---
+
+## 8. When to Use Hybrid Designs (and When Not To)
+
+Hybrid designs are **appropriate** when:
+
+- RWD is of reasonable quality  
+- Key confounders in RWD are measured  
+- Outcome definitions are compatible  
+- There is substantial overlap in covariate distributions  
+- The trial alone is underpowered or narrow in scope  
+
+They may be **inappropriate** when:
+
+- RWD is subject to severe unmeasured confounding  
+- Data sources are poorly harmonized  
+- There is little overlap in covariate or treatment patterns  
+
+In those cases, a pure RCT analysis with careful interpretation may be preferable.
+
+---
+
+## 9. Summary
+
+Hybrid RCT–RWD designs extend the causal roadmap to a richer evidence ecosystem:
+
+- **External controls** can augment sparse trial control arms  
+- **Transport and generalizability methods** can extend findings to broader populations  
+- **ES-CV-TMLE** leverages RWD for nuisance modeling while preserving internal validity  
+- **A-TMLE** adaptively combines estimators from multiple sources using targeted learning and cross-validation  
+
+Used carefully, these tools can:
+
+- Improve precision  
+- Enhance generalizability  
+- Provide robust, transparent evidence that respects the strengths and limitations of both RCT and RWD  
+
+```{r}
+sessionInfo()
+```

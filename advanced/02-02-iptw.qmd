@@ -1,0 +1,344 @@
+---
+title: "Chapter 2.2: Inverse Probability of Treatment Weighting (IPTW)"
+format: html
+---
+
+# Chapter 2.2: Inverse Probability of Treatment Weighting  
+
+Inverse probability of treatment weighting (IPTW) is a core method in modern causal inference. Instead of modeling the outcome directly as in g computation, IPTW uses a model for **treatment assignment** to create a pseudo population where treatment is independent of confounders.  
+
+In this chapter we will
+
+- Build intuition for IPTW
+- Derive the weights and connect them to the causal estimand
+- Show how to estimate and diagnose propensity scores
+- Implement IPTW in R with tidyverse style
+- Discuss stabilized weights and truncation
+- Compare IPTW to g computation on the same simulated data
+
+This is still point treatment only. Longitudinal extensions come later.
+
+---
+
+# 1. Intuition: Reweighting to Mimic a Trial
+
+In observational data, some types of patients are more likely to receive one treatment than another. This creates **confounding by indication**.
+
+IPTW tackles this by
+
+> Giving more weight to underrepresented patients and less weight to overrepresented ones, so that in the weighted sample, treatment looks as if it were randomized given the measured covariates.
+
+Formally, we use the **propensity score**
+
+$$
+e(W) = P(A = 1 \mid W)
+$$
+
+and define weights such as
+
+- For treated:  \( \displaystyle w_i = \frac{1}{e(W_i)} \)
+- For control: \( \displaystyle w_i = \frac{1}{1 - e(W_i)} \)
+
+Intuition
+
+- Patients who got a treatment that was unlikely for their covariate pattern receive a large weight
+- Patients who got the most expected treatment get a small weight
+
+In the weighted pseudo population, confounders are balanced between treatment groups (if the model is correct).
+
+---
+
+# 2. Identification Using IPTW
+
+Under the same causal assumptions as before
+
+- Consistency
+- Exchangeability: \( Y(a) \perp A \mid W \)
+- Positivity
+
+the average potential outcome under treatment can be expressed as
+
+$$
+E[Y(1)] = E\left[ \frac{I(A = 1) Y}{e(W)} \right]
+$$
+
+and under control
+
+$$
+E[Y(0)] = E\left[ \frac{I(A = 0) Y}{1 - e(W)} \right]
+$$
+
+The IPTW estimator replaces the expectation with the sample average and replaces the true \( e(W) \) with an estimated one.
+
+This is why IPTW is sometimes called a **Horvitz Thompson type** estimator.
+
+---
+
+# 3. Simulated Example
+
+We reuse a familiar setup: an osteoporosis like population with confounding by age and cardiovascular history.
+
+```{r}
+library(tidyverse)
+
+set.seed(2025)
+n <- 4000
+
+age <- rnorm(n, 75, 6)
+cvd <- rbinom(n, 1, plogis(0.12 * (age - 70)))
+
+# Treatment assignment with strong confounding
+A <- rbinom(n, 1, plogis(-1 + 0.09 * (age - 70) + 1.5 * cvd))
+
+# Outcome model
+Y <- rbinom(n, 1, plogis(-2 + 0.5*A + 0.10*(age - 70) + 1.0*cvd))
+
+dat <- tibble(age, cvd, A, Y)
+dat %>% head()
+```
+
+For simplicity
+
+- A = 1 can be thought of as denosumab
+- A = 0 can be thought of as zoledronic acid
+- Y = 1 indicates occurrence of a cardiovascular outcome
+
+---
+
+# 4. Estimating the Propensity Score
+
+We model the probability of receiving treatment given covariates.
+
+In practice, one might use logistic regression, SuperLearner, or other ML. Here we start with logistic regression for clarity.
+
+```{r}
+ps_mod <- glm(A ~ age + cvd, family = binomial, data = dat)
+summary(ps_mod)
+
+dat <- dat %>%
+  mutate(
+    ps = predict(ps_mod, type = "response")
+  )
+
+dat %>% 
+  summarize(
+    min_ps = min(ps),
+    max_ps = max(ps)
+  )
+```
+
+We can visualize the propensity score distribution.
+
+```{r}
+ggplot(dat, aes(x = ps, fill = factor(A))) +
+  geom_density(alpha = 0.4) +
+  labs(
+    x = "Estimated propensity score P(A=1 | W)",
+    fill = "Treatment",
+    title = "Propensity score overlap"
+  ) +
+  theme_minimal()
+```
+
+Interpretation
+
+- Good overlap is important for positivity
+- If treatment groups have little overlap in ps, IPTW will rely on extrapolation and produce unstable weights
+
+---
+
+# 5. Constructing IPTW Weights
+
+### 5.1 Unstabilized weights
+
+```{r}
+dat <- dat %>%
+  mutate(
+    w_ipw = if_else(A == 1, 1 / ps, 1 / (1 - ps))
+  )
+
+summary(dat$w_ipw)
+quantile(dat$w_ipw, probs = c(0.01, 0.99))
+```
+
+Keep an eye on
+
+- Very large weights
+- Range and extreme quantiles
+
+### 5.2 Stabilized weights
+
+Stabilized weights can improve variance properties and interpretability.
+
+For a binary treatment
+
+$$
+SW_i = \frac{P(A_i)}{e(W_i)} \text{ if } A_i = 1
+$$
+
+and
+
+$$
+SW_i = \frac{P(A_i)}{1 - e(W_i)} \text{ if } A_i = 0
+$$
+
+Here \( P(A_i) \) is the marginal probability of treatment.
+
+```{r}
+pA <- mean(dat$A)
+
+dat <- dat %>%
+  mutate(
+    sw_ipw = case_when(
+      A == 1 ~ pA / ps,
+      A == 0 ~ (1 - pA) / (1 - ps)
+    )
+  )
+
+summary(dat$sw_ipw)
+quantile(dat$sw_ipw, probs = c(0.01, 0.99))
+```
+
+Stabilized weights often have a smaller variance and can lead to more stable estimates.
+
+---
+
+# 6. Estimating the ATE via IPTW
+
+There are several equivalent ways to use the weights.
+
+## 6.1 Direct weighted mean of outcomes
+
+Estimated risk under treatment
+
+```{r}
+risk1_ipw <- with(dat, sum(sw_ipw * Y * (A == 1)) / sum(sw_ipw * (A == 1)))
+risk0_ipw <- with(dat, sum(sw_ipw * Y * (A == 0)) / sum(sw_ipw * (A == 0)))
+
+ate_ipw <- risk1_ipw - risk0_ipw
+c(risk1 = risk1_ipw, risk0 = risk0_ipw, ate = ate_ipw)
+```
+
+This matches the formula
+
+$$
+\hat E[Y(1)] = \frac{\sum_i SW_i Y_i I(A_i = 1)}{\sum_i SW_i I(A_i = 1)}
+$$
+
+## 6.2 Weighted regression model
+
+We can also fit a weighted regression with treatment as the only predictor.
+
+```{r}
+library(sandwich)
+library(lmtest)
+
+# Fit a simple weighted model
+fit_ipw <- glm(Y ~ A, family = binomial, weights = sw_ipw, data = dat)
+
+# Robust standard errors
+cov_ipw <- vcovHC(fit_ipw, type = "HC0")
+coeftest(fit_ipw, cov_ipw)
+```
+
+Interpretation
+
+- The coefficient of A (on the log odds scale) now estimates a marginal effect in the pseudo population
+- You can compute marginal risk differences or ratios by predicting from the model at A=1 and A=0 and standardizing
+
+---
+
+# 7. Comparing IPTW and G Computation
+
+We can compare the IPTW ATE to the g computation ATE from the previous chapter.
+
+```{r}
+# g computation
+g_mod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
+p1_g <- predict(g_mod, newdata = dat %>% mutate(A = 1), type = "response")
+p0_g <- predict(g_mod, newdata = dat %>% mutate(A = 0), type = "response")
+ate_g <- mean(p1_g - p0_g)
+
+c(ate_gcomp = ate_g, ate_iptw = ate_ipw)
+```
+
+Under correct models and adequate positivity, these methods should converge to similar estimates as sample size grows.
+
+However
+
+- g computation depends on correctly specifying the outcome model
+- IPTW depends on correctly specifying the treatment model
+- Neither uses both models at once, which motivates **doubly robust** methods (next chapter)
+
+---
+
+# 8. Diagnostics and Practical Tips
+
+IPTW is powerful but fragile if diagnostics are ignored.
+
+### 8.1 Check propensity score overlap
+
+- Plot densities by treatment group
+- Flag regions where one group is missing
+
+### 8.2 Check weights
+
+```{r}
+dat %>% 
+  summarize(
+    min_w = min(sw_ipw),
+    max_w = max(sw_ipw),
+    mean_w = mean(sw_ipw),
+    sd_w = sd(sw_ipw)
+  )
+```
+
+Large extreme values are a red flag.
+
+### 8.3 Consider truncation
+
+You can truncate weights at a chosen percentile, for example the 1st and 99th percentiles.
+
+```{r}
+lower <- quantile(dat$sw_ipw, 0.01)
+upper <- quantile(dat$sw_ipw, 0.99)
+
+dat <- dat %>%
+  mutate(
+    sw_trunc = pmin(pmax(sw_ipw, lower), upper)
+  )
+
+# recompute ATE with truncated weights
+risk1_trunc <- with(dat, sum(sw_trunc * Y * (A == 1)) / sum(sw_trunc * (A == 1)))
+risk0_trunc <- with(dat, sum(sw_trunc * Y * (A == 0)) / sum(sw_trunc * (A == 0)))
+ate_trunc   <- risk1_trunc - risk0_trunc
+
+c(ate_truncated = ate_trunc)
+```
+
+Truncation reduces variance at the cost of some bias. In practice it often improves mean squared error.
+
+---
+
+# 9. Summary
+
+In this chapter we covered
+
+- The intuition for IPTW as a method that reweights data to mimic a trial
+- The key role of the propensity score in computing weights
+- How to construct unstabilized and stabilized IPTW weights
+- How to estimate ATEs via weighted means or weighted regression
+- How to diagnose overlap and extreme weights
+- How IPTW compares to g computation
+
+Limitations
+
+- Depends entirely on a correct treatment model
+- Sensitive to violations of positivity
+- Does not use information from the outcome model, which motivates doubly robust approaches
+
+In the next chapter, we will introduce **doubly robust estimators** and **Targeted Maximum Likelihood Estimation (TMLE)**, which combine the strengths of g computation and IPTW and allow the use of machine learning for both nuisance models.
+
+```{r}
+sessionInfo()
+```

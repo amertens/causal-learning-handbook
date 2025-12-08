@@ -1,0 +1,178 @@
+---
+title: "Chapter 1.2: The Causal Roadmap"
+format: html
+---
+
+In this chapter, we introduce the **Causal Roadmap**, a structured approach for asking and answering causal questions with observational data. The roadmap helps researchers define their scientific question, translate it into a formal causal model, assess whether the causal effect is identifiable from data, and choose appropriate estimators to answer that question.
+
+## Why Use a Causal Roadmap?
+
+Traditional analysis often starts with: "Let's run a regression and see what we find." But modern causal inference begins by asking: **What is the causal question we are trying to answer?** 
+
+A causal roadmap ensures:
+- Transparency in how evidence is generated
+- Separation of scientific questions from statistical methods
+- Clear articulation of assumptions and their implications
+- Structured thinking in both trial and non-randomized settings
+
+We’ll walk step-by-step through each part of the roadmap, with illustrative examples.
+
+---
+
+## Step 1: Define the Causal Question
+
+This includes:
+- **Population**: Who are we studying?
+- **Intervention**: What exposure or treatment are we manipulating?
+- **Outcome**: What effect are we interested in?
+- **Timeframe**: Over what duration?
+
+Example:
+
+> What is the 3-year risk of cardiovascular events if all postmenopausal women with osteoporosis initiated **denosumab** compared to if all initiated **zoledronic acid**?
+
+This PICO-style framing is the foundation of causal inference.
+
+---
+
+## Step 2: Specify the Causal Model
+
+We now draw out how we believe the data were generated. This includes:
+
+- **Variables**: Treatment (A), outcome (Y), and covariates (W)
+- **DAGs**: Directed acyclic graphs to encode assumptions
+- **Potential Outcomes**: $Y(1)$ and $Y(0)$ for each individual
+
+We are making an implicit **Structural Causal Model (SCM)**:
+
+$$
+W = f_W(U_W),\
+A = f_A(W, U_A),\
+Y = f_Y(W, A, U_Y)
+$$
+
+Where $U$ terms represent unmeasured variables. 
+
+A simple DAG:
+
+```
+W → A → Y
+ \    ↘
+  →────→
+```
+
+This DAG implies:
+- W (confounders) affect both A and Y
+- A (treatment) affects Y
+- No unmeasured confounding (U nodes omitted for simplicity)
+
+---
+
+## Step 3: Define the Target Causal Estimand
+
+We often want the **Average Treatment Effect (ATE)**:
+
+$$
+ATE = E[Y(1) - Y(0)]
+$$
+
+Or equivalently, **Risk Difference**:
+
+$$
+E[Y | do(A=1)] - E[Y | do(A=0)]
+$$
+
+We might also want:
+- Risk ratios
+- Hazard ratios (with caveats)
+- Median survival differences
+- Effects in subgroups (CATEs)
+
+---
+
+## Step 4: Link the Causal Estimand to the Observed Data
+
+This is the **identification step**. It answers the question: *Can we estimate the causal effect from the data we have?*
+
+Requires three assumptions:
+- **Exchangeability (No unmeasured confounding)**: $Y(a) \perp A | W$
+- **Positivity**: Everyone has a nonzero probability of receiving each treatment, given W
+- **Consistency**: The observed outcome equals the potential outcome under the received treatment
+
+If satisfied, we can identify:
+
+$$
+E[Y(1) - Y(0)] = E_W[ E[Y | A = 1, W] - E[Y | A = 0, W] ]
+$$
+
+---
+
+## Step 5: Choose a Statistical Estimator
+
+This step translates the identified quantity into an algorithm we can apply to data.
+
+Options include:
+- **G-computation**: Predict outcomes under each treatment, average over W
+- **IPTW**: Weight observations by inverse probability of treatment
+- **TMLE**: Targeted learning that combines outcome and treatment models
+
+We’ll explore these in later chapters. The choice depends on:
+- Assumptions you’re willing to make
+- Sample size
+- Tolerance for model misspecification
+
+---
+
+## Step 6: Evaluate and Interpret
+
+Once you've estimated your parameter, interpretation is **not automatic**.
+
+- Are your assumptions plausible?
+- What does your estimate mean for real-world decisions?
+- Can you generalize to other populations?
+
+Tools for evaluation:
+- Sensitivity analyses
+- Negative control outcomes
+- Covariate balance checks
+- Expert consultation
+
+---
+
+## A Simple Simulated Example
+
+We'll simulate a small dataset to show how steps 1-5 look in practice.
+
+```{r}
+set.seed(42)
+n <- 1000
+age <- rnorm(n, 75, 6)
+cvd_history <- rbinom(n, 1, plogis(0.1 * (age - 70)))
+W <- data.frame(age, cvd_history)
+A <- rbinom(n, 1, plogis(-1 + 0.05 * (age - 70) + 1.5 * cvd_history))
+Y <- rbinom(n, 1, plogis(-2 + 0.4 * A + 0.1 * (age - 70) + 1 * cvd_history))
+data <- data.frame(W, A, Y)
+```
+
+Estimate ATE using g-computation:
+
+```{r}
+model <- glm(Y ~ A + age + cvd_history, family = binomial, data = data)
+newdata1 <- transform(data, A = 1)
+newdata0 <- transform(data, A = 0)
+p1 <- predict(model, newdata = newdata1, type = "response")
+p0 <- predict(model, newdata = newdata0, type = "response")
+mean(p1 - p0)
+```
+
+---
+
+## Summary
+
+The Causal Roadmap gives a rigorous framework for designing and evaluating real-world effect estimates. Before choosing a statistical method, start with the science:
+- Define your causal question
+- Specify your model and assumptions
+- Decide how to express the effect
+- Choose a transparent, defensible method
+
+In the next chapter, we’ll explore different estimation strategies in detail.

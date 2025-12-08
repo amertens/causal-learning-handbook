@@ -1,0 +1,244 @@
+---
+title: "Chapter 2.1: Outcome Modeling and Standardization (G-Computation)"
+format: html
+---
+
+# Chapter 2.1: Outcome Modeling and Standardization  
+*G-computation as a foundation for causal estimation*
+
+Outcome modeling and standardization—often referred to as **g-computation**—is one of the oldest and most intuitive approaches to causal inference. In this chapter, we'll build intuition, walk carefully through why the method works, show where it fails, and provide fully reproducible examples in R (using tidyverse style).  
+
+This chapter is intentionally thorough, designed for students new to causal inference but with working knowledge of regression.
+
+---
+
+# 1. Motivation: Why Start With G-Computation?
+
+G-computation provides a way to estimate causal effects without relying on regression coefficients. Instead, it reconstructs the potential outcomes:
+
+- **Y(1)** = outcome if treated  
+- **Y(0)** = outcome if untreated  
+
+G-computation estimates the **Average Treatment Effect (ATE)**:
+
+$$
+ATE = E[Y(1) - Y(0)]
+$$
+
+by using the identification formula:
+
+$$
+E[ Y(1) ] = E_W[ E[Y | A=1, W] ] \\
+E[ Y(0) ] = E_W[ E[Y | A=0, W] ] 
+$$
+
+Then:
+
+$$
+ATE = E[Y(1)] - E[Y(0)].
+$$
+
+This is conceptually simple and is often the easiest method for students to grasp when beginning causal inference.
+
+---
+
+# 2. Intuition: What Does G-Computation Actually Do?
+
+G-computation reconstructs what would have happened if *everyone* in the dataset had received treatment **A=1**, and independently what would have happened if *everyone* had received **A=0**.
+
+It does this by:
+
+1. Fitting an outcome model:  
+   $$ E[Y | A, W] $$  
+
+2. Predicting outcomes for *each* individual under:
+   - Treatment  
+   - Control  
+
+3. Averaging those predicted outcomes (standardization)
+
+This produces population-level risks that correspond to the causal estimand.
+
+---
+
+# 3. Implementation Example: Simulated Osteoporosis Cohort
+
+We simulate a small cohort similar to the denosumab vs zoledronic acid motivating example.
+
+```{r}
+library(tidyverse)
+
+set.seed(2025)
+n <- 3000
+
+# baseline covariates
+age <- rnorm(n, 75, 6)
+cvd <- rbinom(n, 1, plogis(0.12 * (age - 70)))
+
+# treatment assignment
+A <- rbinom(n, 1, plogis(-1 + 0.07 * (age - 70) + 1.4 * cvd))
+
+# outcome
+Y <- rbinom(n, 1, plogis(-2 + 0.6*A + 0.12*(age - 70) + 1.2*cvd))
+
+dat <- tibble(age, cvd, A, Y)
+```
+
+The treatment is strongly confounded by cardiovascular history—perfect for demonstrating g-computation.
+
+---
+
+# 4. Step-by-Step G-Computation
+
+## Step 1: Fit an Outcome Model
+
+We fit a logistic regression model predicting the outcome from treatment and confounders:
+
+```{r}
+mod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
+summary(mod)
+```
+
+This alone is *not* a causal effect. Instead, it's a conditional log-odds ratio.  
+We will now standardize using predictions.
+
+---
+
+## Step 2: Predict Counterfactual Outcomes
+
+```{r}
+# create counterfactual datasets
+dat1 <- dat %>% mutate(A = 1)
+dat0 <- dat %>% mutate(A = 0)
+
+# predict potential outcomes
+p1 <- predict(mod, newdata = dat1, type = "response")
+p0 <- predict(mod, newdata = dat0, type = "response")
+```
+
+Here:
+- `p1[i]` = predicted outcome for person *i* if treated  
+- `p0[i]` = predicted outcome for person *i* if untreated  
+
+---
+
+## Step 3: Standardize (Average Over Covariates)
+
+```{r}
+risk1 <- mean(p1)
+risk0 <- mean(p0)
+ate  <- risk1 - risk0
+
+list(risk1 = risk1, risk0 = risk0, ate = ate)
+```
+
+This gives:
+- **Risk under treatment**
+- **Risk under control**
+- **Risk difference (ATE)**
+
+Interpretation example:
+
+> “Initiating denosumab rather than ZA is estimated to increase/decrease 3-year MI/stroke risk by X percentage points.”
+
+---
+
+# 5. Why G-Computation Works
+
+It directly implements the identification formula:
+
+$$
+E_W[ E[Y | A=a, W] ].
+$$
+
+This contrasts with regression coefficients, which estimate:
+
+$$
+	ext{conditional log-odds ratios given W}
+$$
+
+—completely different from the marginal risk difference.
+
+Standardization always yields marginal (population-level) effects.
+
+---
+
+# 6. Diagnostics: When Can G-Computation Fail?
+
+## 6.1 Model Misspecification
+
+If your model for \(E[Y | A, W]\) is wrong (e.g., omits interactions, assumes linearity), g-computation may be biased.
+
+Check residuals, fit alternative models, or use machine learning (next chapter).
+
+---
+
+## 6.2 Poor Positivity
+
+If some strata almost never receive a treatment:
+
+```{r}
+ps <- predict(glm(A ~ age + cvd, family = binomial, data = dat), type = "response")
+summary(ps)
+```
+
+Look for:
+- Scores near 0 or 1 → dangerous for extrapolation  
+- G-computation may have to predict outcomes in unobserved regions
+
+---
+
+## 6.3 Unmeasured Confounding
+
+No modeling strategy fixes missing confounders.
+
+But g-computation makes assumptions very clear, which is an advantage for interpretation.
+
+---
+
+# 7. Using Flexible Models (Teaser for TMLE + SuperLearner)
+
+You can replace logistic regression with:
+- random forests  
+- gradient boosting  
+- generalized additive models  
+- SuperLearner ensembles  
+
+This reduces reliance on parametric assumptions.
+
+Example:
+
+```{r, eval=F}
+library(SuperLearner)
+
+sl_mod <- SuperLearner(
+  Y = dat$Y,
+  X = dat %>% select(A, age, cvd),
+  family = binomial(),
+  SL.library = c("SL.glm", "SL.ranger", "SL.gam")
+)
+
+# predict for counterfactuals
+p1_sl <- predict(sl_mod, newdata = dat1)$pred
+p0_sl <- predict(sl_mod, newdata = dat0)$pred
+
+mean(p1_sl - p0_sl)
+```
+
+In later chapters, we will systematically integrate SuperLearner with **TMLE**.
+
+---
+
+# 8. Summary
+
+In this chapter you learned:
+
+- What g-computation is and why it is foundational  
+- How to compute standardized risk differences  
+- How g-computation connects to the identification formula  
+- Where g-computation can fail (positivity, misspecification)  
+- How flexible ML-based models can help  
+
+Next: **IPTW**, another way to estimate causal effects by reweighting the data instead of modeling the outcome.
+
+

@@ -1,0 +1,238 @@
+---
+title: "Chapter 2.3: Doubly Robust Estimators and Targeted Learning (AIPW + TMLE)"
+format: html
+---
+
+# Chapter 2.3: Doubly Robust Estimation and Targeted Learning  
+*Bridging outcome modeling and weighting for more robust causal effect estimation*
+
+In previous chapters, you learned:
+
+- **G-computation** depends on correctly modeling the *outcome*  
+- **IPTW** depends on correctly modeling the *treatment mechanism*  
+
+But what if you could use **both models**, and as long as **either one is correct**, your estimator is still consistent?
+
+This is exactly what **doubly robust estimators** provide.
+
+We explore:
+
+- Why doubly robust estimators matter  
+- AIPW (Augmented IPTW)  
+- TMLE (Targeted Maximum Likelihood Estimation)  
+- How to implement both with tidyverse-friendly R code  
+- Why TMLE is preferred in modern causal inference  
+
+---
+
+# 1. Why Doubly Robust Estimators?
+
+A doubly robust estimator is consistent if **either**:
+
+- the treatment model is correct, **or**
+- the outcome model is correct
+
+This is especially important in real-world data where:
+
+- all models are approximations  
+- parametric models are easily misspecified  
+- ML-based models can have high variance  
+
+By combining both sources of information, doubly robust estimators often outperform either G-computation or IPTW individually.
+
+---
+
+# 2. AIPW: Augmented Inverse Probability Weighting
+
+AIPW adds a correction term to IPTW using the outcome regression.
+
+It is constructed so that:
+
+- If the treatment model is right → IPTW part works  
+- If the outcome model is right → augmentation part works  
+- If both are right → estimator achieves the **semiparametric efficiency bound**  
+
+## 2.1 Formula
+
+Let:
+
+- \( e(W) = P(A = 1 | W) \)  
+- \( m(a, W) = E[Y | A = a, W] \)  
+
+Then:
+
+\[
+\hat\mu_1 = rac{1}{n} \sum_i 
+\left[
+rac{A_i Y_i}{e(W_i)} - 
+rac{A_i - e(W_i)}{e(W_i)} m(1, W_i)
+ight]
+\]
+
+\[
+\hat\mu_0 = rac{1}{n} \sum_i 
+\left[
+rac{(1-A_i) Y_i}{1 - e(W_i)} +
+rac{A_i - e(W_i)}{1 - e(W_i)} m(0, W_i)
+ight]
+\]
+
+ATE = \( \hat\mu_1 - \hat\mu_0 \)
+
+---
+
+# 3. Simulated Osteoporosis Dataset
+
+```{r}
+library(tidyverse)
+
+set.seed(2026)
+n <- 4000
+
+age <- rnorm(n, 75, 6)
+cvd <- rbinom(n, 1, plogis(0.12 * (age - 70)))
+
+# Treatment model
+A <- rbinom(n, 1, plogis(-1 + 0.08*(age - 70) + 1.4*cvd))
+
+# Outcome model
+Y <- rbinom(n, 1, plogis(-2 + 0.6*A + 0.10*(age - 70) + 1.0*cvd))
+
+dat <- tibble(age, cvd, A, Y)
+```
+
+---
+
+# 4. Fit Outcome and Propensity Score Models
+
+```{r}
+Qmod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
+gmod <- glm(A ~ age + cvd, family = binomial, data = dat)
+
+dat <- dat %>%
+  mutate(
+    ps = predict(gmod, type = "response"),
+    Q1 = predict(Qmod, newdata = mutate(dat, A=1), type = "response"),
+    Q0 = predict(Qmod, newdata = mutate(dat, A=0), type = "response")
+  )
+```
+
+---
+
+# 5. Compute AIPW Estimator
+
+```{r}
+with(dat, {
+  mu1 <- mean( A*Y/ps + (1 - A/ps)*Q1 )
+  mu0 <- mean( (1-A)*Y/(1-ps) + (A/(1-ps))*Q0 )
+  ate <- mu1 - mu0
+  c(mu1=mu1, mu0=mu0, ate=ate)
+})
+```
+
+---
+
+# 6. TMLE: Targeted Maximum Likelihood Estimation
+
+AIPW is good—TMLE is better.
+
+TMLE:
+
+- Integrates ML naturally  
+- Ensures predictions stay within bounds  
+- Is efficient  
+- Automatically respects model structure  
+- Solves the efficient influence curve (EIC) equation  
+- Works with SuperLearner for flexible modeling  
+
+---
+
+# 7. TMLE Step-by-Step
+
+```{r}
+logit <- function(p) log(p/(1-p))
+expit <- function(x) 1/(1+exp(-x))
+
+# Step 1: Initial Q
+Qinit <- predict(Qmod, type="response")
+
+# Step 2: Propensity
+ps <- dat$ps
+
+# Step 3: Clever covariate
+H <- with(dat, A/ps - (1-A)/(1-ps))
+
+# Step 4: Fluctuation model
+epsilon <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H,
+               family = binomial)$coef
+
+Qstar <- expit(logit(Qinit) + epsilon * H)
+```
+
+---
+
+# 8. Counterfactual Predictions for TMLE
+
+```{r}
+Q1_star <- predict(Qmod, newdata = mutate(dat, A=1), type="response")
+Q0_star <- predict(Qmod, newdata = mutate(dat, A=0), type="response")
+
+tmle_ate <- mean(Q1_star - Q0_star)
+tmle_ate
+```
+
+---
+
+# 9. TMLE + SuperLearner (Recommended)
+
+```{r}
+library(SuperLearner)
+
+SL_lib <- c("SL.glm", "SL.glmnet", "SL.ranger", "SL.mean")
+
+Q_SL <- SuperLearner(
+  Y = dat$Y,
+  X = dat %>% select(A, age, cvd),
+  family = binomial(),
+  SL.library = SL_lib
+)
+
+g_SL <- SuperLearner(
+  Y = dat$A,
+  X = dat %>% select(age, cvd),
+  family = binomial(),
+  SL.library = SL_lib
+)
+```
+
+You can plug these flexible nuisance models directly into TMLE.
+
+---
+
+# 10. Comparison: AIPW vs TMLE
+
+| Property | AIPW | TMLE |
+|---|---|---|
+| Doubly robust | ✓ | ✓ |
+| Efficient | ✗ | ✓ |
+| Handles ML well | ⚠️ requires cross-fitting | ✓ |
+| Predictions bounded | ✗ | ✓ |
+| Implementation complexity | simple | moderate |
+
+---
+
+# 11. Summary
+
+You now understand:
+
+- The motivation for doubly robust estimators  
+- How AIPW works and how to compute it  
+- Why TMLE offers advantages  
+- How TMLE integrates with SuperLearner  
+- How these fit into the Causal Roadmap  
+
+In the next chapter, we move to **SuperLearner and machine learning integration**.
+
+```{r}
+sessionInfo()
+```

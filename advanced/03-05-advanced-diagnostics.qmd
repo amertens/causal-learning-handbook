@@ -1,0 +1,310 @@
+---
+title: "Chapter 3.5: Advanced Diagnostics and Sensitivity Analyses"
+format: html
+---
+
+# Chapter 3.5  
+## Advanced Diagnostics and Sensitivity Analyses  
+*Ensuring credible causal conclusions in real-world longitudinal data*
+
+Causal inference is never just about estimating an effect — it is about **credibly defending** that effect.  
+Diagnostics and sensitivity analyses are essential components of the causal roadmap because:
+
+- Identifying assumptions are never fully testable  
+- Real-world data contain missingness, selection, unmeasured confounding, and misclassification  
+- Positivity and model misspecification can quietly undermine estimation  
+- Regulatory-grade RWE requires transparency and robustness checks  
+
+This chapter walks through:
+
+1. Diagnostics for identification assumptions  
+2. Positivity and overlap assessment  
+3. Diagnostics for nuisance models (Q and g)  
+4. Weight diagnostics  
+5. Sensitivity analyses for unmeasured confounding  
+6. Negative controls  
+7. TMLE-specific diagnostics  
+8. Longitudinal diagnostics (LMTP / longitudinal TMLE)  
+
+--- 
+
+## 1. Diagnostics for Identification Assumptions
+
+The core identification assumptions are:
+
+- **Consistency**  
+- **Exchangeability (No unmeasured confounding)**  
+- **Positivity**  
+- **Correct nuisance model specification**
+
+While not directly testable, their **empirical implications** can be evaluated.
+
+### 1.1 Data structure and quality checks
+
+Before causal modeling:
+
+- Verify time ordering  
+- Confirm treatment and outcome timestamps  
+- Inspect missingness patterns  
+- Look for coding shifts (ICD-9 to ICD-10)  
+- Examine distributions and implausible values  
+
+### 1.2 DAG review
+
+A DAG clarifies:
+
+- Adjustment sets  
+- Potential unmeasured confounding  
+- Variables that should **not** be adjusted for (mediators, colliders)
+
+Use DAGs as a communication tool with clinical partners.
+
+---
+
+## 2. Positivity Diagnostics
+
+Positivity requires:
+
+> Every combination of covariates has a non-zero probability of receiving each treatment.
+
+Violations cause unstable weights and unreliable estimates.
+
+### 2.1 Propensity score overlap
+
+```r
+ps <- predict(glm(A ~ W1 + W2, family = binomial), type = "response")
+
+library(ggplot2)
+ggplot(tibble(ps = ps, A = A), aes(x = ps, fill = factor(A))) +
+  geom_density(alpha = 0.4)
+```
+
+Indicators of concern:
+
+- Mass near 0 or 1  
+- Disjoint distributions  
+
+### 2.2 Clever covariate range (TMLE)
+
+```r
+H <- A/ps - (1-A)/(1-ps)
+summary(H)
+```
+
+Extreme values imply near-positivity violations.
+
+### 2.3 Remedies
+
+- Restrict to regions with support (“overlap population”)
+- Truncate weights  
+- Use **stochastic interventions** instead of static ones  
+- Simplify interventions  
+
+---
+
+## 3. Diagnostics for Nuisance Functions (Q and g)
+
+Accurate nuisance models are crucial for TMLE, AIPW, and LMTP.
+
+### 3.1 Predictive accuracy
+
+- AUC for binary outcomes  
+- MSE/R² for continuous  
+- Cross-validated risk from SuperLearner  
+
+### 3.2 Calibration plots
+
+```r
+dat %>% 
+  mutate(pred = Qhat) %>% 
+  ggplot(aes(x = pred, y = Y)) +
+    geom_point(alpha = 0.3) +
+    geom_smooth()
+```
+
+### 3.3 Overfitting assessment
+
+Compare:
+
+- Training loss  
+- Cross-validated loss  
+
+Large discrepancy → overfitting.
+
+### 3.4 Variable-importance sanity check
+
+Ensure top predictors are *clinically plausible*.
+
+---
+
+## 4. Weight Diagnostics
+
+For IPTW, MSMs, and censoring weights.
+
+### 4.1 Weight summaries
+
+```r
+summary(weights)
+quantile(weights, probs = c(0.01, 0.99))
+```
+
+Red flags:
+
+- Mean far from 1  
+- Very heavy tail  
+- Huge max weights  
+
+### 4.2 Visual check
+
+```r
+ggplot(tibble(w = weights), aes(x = w)) +
+  geom_histogram()
+```
+
+### 4.3 Truncation
+
+```r
+lower <- quantile(weights, 0.01)
+upper <- quantile(weights, 0.99)
+w_trunc <- pmin(pmax(weights, lower), upper)
+```
+
+---
+
+## 5. Sensitivity Analyses for Unmeasured Confounding
+
+### 5.1 E-values
+
+Measures minimum strength of confounding needed to explain away an effect.
+
+### 5.2 Quantitative Bias Analysis (QBA)
+
+Simulates impact of:
+
+- Unmeasured confounder prevalence  
+- Unmeasured confounder associations  
+
+R packages: **episensr**, **causalsens**
+
+### 5.3 Rosenbaum sensitivity
+
+For matched studies.
+
+### 5.4 Sensitivity using stochastic interventions
+
+LMTP can quantify robustness of static intervention effects.
+
+---
+
+## 6. Negative Controls
+
+Negative control outcomes (NCOs):
+
+- Causally unrelated to treatment  
+- Share confounding structures  
+
+If TMLE of treatment → NCO ≠ 0 → likely confounding remains.
+
+Example:
+
+```r
+tmle_nco <- tmle(
+  Y = dat$negative_event,
+  A = dat$treatment,
+  W = dat[, confounders]
+)
+```
+
+Negative control exposures are also useful.
+
+---
+
+## 7. TMLE-Specific Diagnostics
+
+### 7.1 Clever covariate behavior
+
+Extreme clever covariate values lead to unstable targeting.
+
+### 7.2 Targeting step convergence
+
+Check for warnings in logistic fluctuation:
+
+```
+glm.fit: algorithm did not converge
+```
+
+### 7.3 Influence-curve distribution
+
+```r
+IC <- tmle_fit$ic
+mean(IC); var(IC)
+```
+
+Heavy tails → avoid Wald intervals, use bootstrap.
+
+---
+
+## 8. Longitudinal Diagnostics (LMTP & Longitudinal TMLE)
+
+### 8.1 Sequential positivity
+
+Check treatment probabilities at each timepoint.
+
+### 8.2 Cumulative weights
+
+```r
+cumw <- apply(weight_matrix, 1, prod)
+hist(cumw)
+```
+
+Extreme cumulative weights → instability.
+
+### 8.3 Truncation across time
+
+Truncate weights at each time step or truncate cumulative weights.
+
+### 8.4 Time-varying confounding sanity checks
+
+Ensure intermediate variables are not inappropriate colliders.
+
+---
+
+## 9. Recommended Diagnostics Workflow
+
+### Before estimation
+
+- Confirm time-ordering  
+- Draw a DAG  
+- Check missingness  
+- Summarize covariate distributions by treatment  
+
+### During estimation
+
+- Check PS overlap  
+- Evaluate weight distributions  
+- Inspect Q and g predictions  
+- Check TMLE targeting step  
+
+### After estimation
+
+- Sensitivity analyses  
+- Negative controls  
+- Compare across estimators (IPTW, TMLE, AIPW)  
+- Robustness checks (population restriction, alternative confounder sets)
+
+---
+
+## 10. Summary
+
+To produce defensible causal evidence, diagnostics must be:
+
+- Systematic  
+- Transparent  
+- Documented in the analysis plan  
+- Interpreted with domain expertise  
+
+With these tools, analysts can judge the **credibility**, **robustness**, and **transportability** of causal findings — essential for regulatory, clinical, and scientific decision‑making.
+
+```{r}
+sessionInfo()
+```
