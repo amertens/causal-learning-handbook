@@ -313,9 +313,22 @@ Simple.Subs <- mean(predict.outcome.A1 - predict.outcome.A0)
 Simple.Subs
 ```
 
+#### When can g-computation fail?
+
+- **Outcome model misspecification:** If \(E[Y \mid A, W]\) is misspecified (wrong functional form, missing interactions), the standardized estimate can be biased.
+- **Practical positivity violations:** If some covariate strata rarely receive one treatment, g-computation must extrapolate to regions with little or no support.
+- **Unmeasured confounding:** No outcome-modeling approach can correct for confounders that are not measured.
+
+These failure modes motivate (i) overlap diagnostics, (ii) flexible nuisance estimation (for example, SuperLearner), and (iii) doubly robust estimators such as TMLE.
+
+**Preview:** One way to reduce reliance on parametric assumptions is to estimate \(Q(A,W)\) with flexible learners (for example, generalized additive models, random forests, boosting) or an ensemble via SuperLearner. In the next sections, we use SuperLearner first for nuisance estimation and then integrate it with TMLE, which targets the causal estimand while retaining a basis for statistical inference.
+
 
 
 ### IPTW- Inverse Probability of Treatment Weighting estimator
+
+**Intuition (pseudo-population):** IPTW treats confounding as a form of biased sampling. Units who received a treatment that was unlikely given their covariates receive larger weights, and units who received an expected treatment receive smaller weights. In the resulting weighted pseudo-population, treatment is approximately independent of measured covariates (if the propensity score model is correct), mimicking a randomized experiment.
+
 
 * The intuition behind this estimation approach is to think of confounding as a problem of biased sampling, where certain exposure–covariate subgroups are overrepresented relative to what we would observe in a randomized trial, while others are underrepresented.
 * We apply weights to up-weight under-represented units and down-weight over-represented units
@@ -326,6 +339,15 @@ pscore.regression <- glm(A~ W1+W2+W3+W4, family='binomial',
                          data=data)
 summary(pscore.regression)
 ```
+
+**Identification link:** Under consistency, exchangeability given \(W\), and positivity, we can write
+\[
+E\{Y(1)\} = E\left[\frac{\mathbb{I}(A=1)Y}{e(W)}\right], \qquad
+E\{Y(0)\} = E\left[\frac{\mathbb{I}(A=0)Y}{1-e(W)}\right],
+\]
+where \(e(W)=P(A=1\mid W)\). IPTW replaces the expectation with a sample average and replaces \(e(W)\) with an estimate.
+
+
 
 2. We then use estimates from 1 above to calculate exposed/treated weights: 1/$\mathbb{P}(A=1\mid W)$ and unexposed/untreated weights:1/$\mathbb{P}(A=0\mid W)$
 ```{r}
@@ -346,9 +368,54 @@ IPW
 mean( (wt1-wt0)*data$Y)
 ```
 
+#### Stabilized weights (optional but common in practice)
+
+Unstabilized weights can be variable in finite samples. A common alternative is to use stabilized weights, which multiply by the marginal probability of observed treatment:
+\[
+SW_i =
+\begin{cases}
+\frac{P(A=1)}{e(W_i)}, & A_i=1 \\
+\frac{P(A=0)}{1-e(W_i)}, & A_i=0.
+\end{cases}
+\]
+Stabilized weights often reduce variance and improve numerical stability without changing the large-sample target under correct specification.
+
+```{r}
+pA <- mean(data$A)
+sw1 <- as.numeric(data$A==1) * pA / predict.prob.A1
+sw0 <- as.numeric(data$A==0) * (1-pA) / (1 - predict.prob.A1)
+sw  <- sw1 + sw0
+summary(sw)
+
+```
+
+
+**Implementation note:** IPTW can be implemented either by directly computing weighted means of \(Y\) within treatment groups (as shown here) or by fitting a weighted regression of \(Y\) on \(A\) using robust standard errors. These approaches target the same marginal contrast when implemented consistently.
+
+#### Diagnostics and practical tips (IPTW)
+
+- **Overlap:** Inspect the distribution of \(e(W)\) by treatment group. Limited overlap indicates practical positivity problems and increases variance.
+- **Weight tails:** Summarize weights (mean, sd, extreme quantiles). A heavy right tail indicates instability and sensitivity to a small number of observations.
+- **Truncation:** Truncating weights (for example, at the 1st and 99th percentiles) can reduce variance at the cost of potential bias. In finite samples, truncation can improve mean squared error, but it should be reported transparently as a sensitivity analysis.
+
+```{r}
+w <- wt1 + wt0
+lo <- quantile(w, 0.01)
+hi <- quantile(w, 0.99)
+w_trunc <- pmin(pmax(w, lo), hi)
+summary(w_trunc)
+
+```
+
+
 
 
 ### TMLE- targeted maximum likelihood estimation
+
+###$ Why doubly robust estimators?
+
+Both g-computation and IPTW rely on strong modeling assumptions: g-computation requires a correct outcome model, while IPTW requires a correct treatment model. Doubly robust estimators combine both approaches and are consistent if **either** the outcome model or the treatment model is correctly specified. This property is particularly valuable in real-world data settings, where all models are approximations.
+
 
 * For intuition here,  we again think of causal inference as a problem of missing information. 
 * We predict the outcomes for all units under both exposed and unexposed conditions. We use a flexible estimation approach e.g. Super Learner to avoid assuming regression models that are not known or we use parametric knowledge if known.
