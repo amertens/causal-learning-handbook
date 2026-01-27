@@ -1,19 +1,484 @@
 ---
-title: "Targeted Learning for Real-World Evidence"
+title: "Workshop: The Causal Roadmap and TMLE in Pharmacoepidemiology"
+bibliography: "Gilead_workshop.bib"
+format:
+  html:
+    toc: true
+    toc-depth: 3
 ---
 
-Welcome!  
-This site introduces the **Causal Roadmap**, **Targeted Maximum Likelihood Estimation (TMLE)**, and **Super Learner** for modern causal inference in epidemiology, with an emphasis on pharmacoepidemiology and clinical trial analysis.
+# Motivating Example: Post-Market Safety of Prolia
 
-```{r, eval=FALSE}
+This workshop introduces the *Causal Roadmap* and *Targeted Maximum Likelihood Estimation (TMLE)* through a motivating example: a post-market evaluation of **cardiovascular safety among patients treated with denosumab (Prolia) vs. zoledronic acid** for osteoporosis. The goal is to show how causal inference frameworks help produce transparent, reproducible real-world evidence.
 
-# to build the site
+In 2023, Amgen conducted a large-scale retrospective cohort study across two US claims databases, comparing denosumab with zoledronic acid. After adjusting for confounding using inverse probability weighting, the study found **no increased risk of myocardial infarction or stroke** up to 36 months of follow-up【204†source】. Here, we will reconstruct a simplified version of this question using the *causal roadmap* and a TMLE implementation.
 
-library(quarto)
-quarto::quarto_preview()
+::: {.callout-note}
+**Goal:** Learn how to define, identify, and estimate a causal effect with TMLE, using machine learning for nuisance function estimation.
+:::
 
-#code to deploy
-quarto::quarto_publish_site(title="causal-learning-handbook")
+![Placeholder diagram: Flowchart of the Causal Roadmap steps.](../images/roadmap_placeholder.png)
+*Figure 1. The Causal Roadmap, adapted for pharmacoepidemiologic safety analysis.*
 
+
+
+## To add:
+
+-   (Joy) Make a bit more narrative versus bullet pointed
+-   (Andrew) Add more on the causal roadmap
+-   (Andrew) Include a Worked Interpretation Section (Not Just the computation)
+-   Maybe add Q&A's throughout for those taking it asynchronously?
+-   (joy) add references (key roadmap, tmle, and superlearner papers- ask Andrew if you need any specific ones)
+-   (joy) figure out how to make code showing the default
+
+## Introduction
+
+This tutorial provides a gentle introduction to the Causal Roadmap and its applications in pharmaco-epidemiologic research. It is designed for a broad audience, including learners from both academia and industry. We systematically walk through each step of the Causal Roadmap—from explicitly formulating a research question, to translating it into a formal causal estimand, to identifying and estimating that estimand from observed data, and finally to drawing valid inferences and interpreting results. Each step is illustrated using a working example from a pharmaco-epidemiology setting, accompanied by interactive, built-in code to facilitate hands-on learning. The structure and content of this tutorial follow, in an analytical way, the Introduction to Causal Inference and the causal Roadmap course (htp://www.ucbbiostat.com/) Petersen and Balzer.
+
+## Why venture down a new path?
+
+Adopting the Causal Roadmap in our approach to research in causal inference enables us to clearly state a scientific question and select an analtyic approach that matches the question being asked while ensuring systematic assessment of our ability/feasibility to answer this question from the data we observe (identifiability). Head to head analysis method comparison lets us select the best approach.
+
+We will now formally introduce the Causal Roadmap but before let us go over some notation!
+
+## Notation
+
+-   ***A***: Exposure/Treatement
+    -   The term treatment is often used in causal inference even with exposures that are not medical treatments. We shall use A=1 for exposed (treated) and A=0 for unexposed (untreated)
+-   ***Y***: outcome
+-   ***W***: set of measured confounding variables
+-   ***U***: set of unmeasured factors
+-   $\mathbb{E}[Y|A=a]$: expected outcome Y among those who experience exposure A=a in our population. This is a descriptive measure
+-   $\mathbb{E}[Y_{a}]$: expected counterfactual outcome $Y_a$ when all experience exposure A=a in our population. This is a causal quantity. Generally $\mathbb{E}[Y|A=a]$ does not equal to $\mathbb{E}[Y_{a}]$ and this is the fundamental problem of causal inference
+-   $\mathbb{E}[Y|A=a,W=w]$: expected outcome Y among those who expereince exposure A=a and have covariates W=w, in our population. For example this can be the mean outcome among exposed men. These conditional expectations are often estimated using multivariable regression models.
+-   $\mathbb{E}[\mathbb{E}[Y|A=a,W=w]]$:expected outcome Y among those who experience exposure A=a and have covariates W=w,averaged across covariate strata in the population. This is a marginal expectation.
+
+## Motivation
+
+Given our motivating example, suppose we are interested in understanding the causal impact of denosumab (Prolia) versus zoledronic acid on the risk of myocardial infarction or stroke among postmenopausal women with osteoporosis. In many applied settings, a common analytic approach would be to collect data on treatment assignment, the binary cardiovascular outcome, and a set of measured covariates. Because the outcome is binary, analysts often default to fitting a logistic regression model and interpreting the exponentiated coefficient on treatment as an estimate of the conditional odds ratio.
+
+However, this approach has an important limitation: it allows the statistical tool i.e. logistic regression to implicitly define the scientific question being answered. Rather than starting with a clearly articulated causal question and picking amongst the tools that allow us answer it, we risk answering a question that is convenient for the model, such as a conditional odds ratio, which may not align with the effect measure of true scientific or clinical interest.
+
+To address this issue, we introduce the Causal Roadmap, a principled framework that emphasizes starting with a well-defined causal question and then selecting appropriate statistical tools to answer that question. By separating the scientific question from the estimation method, the Causal Roadmap helps ensure that our analyses are aligned with the causal effect we truly care about, rather than being driven by default modeling choices.
+
+
+## The Causal Roadmap
+
+**NOTE** Make below a numbered list, reference Dang et al 2022 JCTS paper (and make sure the steps line up)
+
+The Causal Roadmap is a framework that provides a systematic process to move from a research question to estimation and interpretation which guides investigators on how to design and analyse their studies a priori. This framework has the following steps [@dang_causal_2022];
+
+- Step 1a: Stating the research question and defining the causal estimand.
+- Step 1b: Defining the causal model and parameter of interest
+- Step 2: Linking the causal model to the observed data and defining the statistical model
+- Step 3: Assessing identifiability: are the data and knowledge about their generation sufficient to answer the causal question of interest?
+- Step 4: Defining the statistical estimand
+- Step 5: Selecting and applying the estimator and an estimate of the sampling distribution (method of inference)
+- Step 6: Specify the sensitivity analyses (interpreting findings)
+- Step 7: Compare feasible study designs.
+
+We shall now delve into each of these steps in details!
+
+## Step 1a: State the question and define the causal estimand
+
+The first step of the Causal Roadmap is to clearly state the scientific question and define the corresponding causal estimand. A helpful way to do this is to explicitly state the hypothetical experiment that would unambiguously yield an estimate of the causal effect of interest.For example, consider the question: What is the effect of  denosumab (Prolia) versus zoledronic acid on the risk of myocardial infarction or stroke among postmenopausal women with osteoporosis?
+
+One way to formalize this question is to imagine a hypothetical  experiment in which all eligible women are assigned to receive denosumab (Prolia), and to compare their myocardial infarction or stroke  incidence to what would have been observed had all the same women instead received  zoledronic. 
+To sharply define this research question, it is important to be explicit about several components of the hypothetical experiment. These include the target population (e.g., postmenopausal women of a particular age range or geographic region), the exposure or intervention (including dosage, formulation, and frequency), the outcome (and the time window over which it is measured), and the intervention strategies under consideration.
+
+Importantly, many different hypothetical experiments may be of interest, even within the same clinical context. For instance, one could ask what the difference in myocardial infarction or stroke incidence would be if patients were initiated on denosumab (Prolia) only after reaching a certain cardiovascular risk threshold, compared to initiating denosumab (Prolia) regardless of baseline risk.
+
+Alternatively, one might consider a policy-relevant estimand, such as the difference in cardiovascular disease incidence if an additional 10% of patients received the intervention compared to if treatment uptake remained at its observed level. These examples highlight that there is substantial flexibility in how hypothetical experiments can be defined. 
+
+Once a causal question is clearly define, the causal estimand represents the question in mathematical terms must be defined. The ICH E9 (R1) [@ich_e9r1_2021] and Target Trial Emulation [@hernan_using_2016] frameworks provide detailed guidelines of defining a causal question and estimand. 
+
+## notes
+- Adding something about ICH E9 (R1) estimand framework and target trial emulation
+
+## Step 1b: Define the causal model
+
+Causal modeling provides a formal way to encode our scientific knowledge, however limited it may be,about how variables relate to one another. By explicitly stating assumptions, causal models allow us to explore which variables affect each other, consider the potential role of unmeasured factors, and reason about the functional form of relationships among variables.
+In this tutorial, we focus on structural causal models and their corresponding causal graphs as introduced by Pearl (2000). We note, however, that this is only one of several available causal inference frameworks, each with its own strengths and areas of application.
+
+-   The figure 1 below corresponds to a simple causal graph with corresponding structural casual model as follows;
+    -   $W= f_w(U_w)$
+    -   $A= f_A(W,U_A)$
+    -   $Y = f_Y(W,A,U_Y)$
+-   We make no assumptions on the background factors $(U_w,U_A,U_Y)$ or on the functional forms of functions $(f_w,f_A,f_Y)$
+
+```{r include-image, echo=FALSE, out.width="70%", fig.align="center"}
+knitr::include_graphics("cm1.png")
+```
+
+-   If you believed no unmeasured confounding, a possible causal model and graph (figure 2) would be;
+    -   $W= f_w(U_w)$
+    -   $A= f_A(W,U_A)$
+    -   $Y = f_Y(W,A,U_Y)$
+-   Here we assume that the background factors are all independent but still make no assumption on the functional forms of $(f_w,f_A,f_Y)$
+-   However, it is important to note that wishing for something does not make it true.
+
+```{r echo=FALSE, out.width="70%", fig.align="center"}
+knitr::include_graphics("cm2.png")
+```
+
+-   We now define counterfactuals by intervening on the causal model. We can do this by setting the exposure to a specific level e.g A=1 for all units.
+    -   $W= f_w(U_w)$
+    -   $A= 1$
+    -   $Y_1 = f_Y(W,1,U_Y)$ where $Y_1$ is the outcome if possibly-contrary to fact, the unit was exposed (A=1)
+
+```{r echo=FALSE, out.width="70%", fig.align="center"}
+knitr::include_graphics("cm3.png")
+```
+
+-   Analogously, we can intervene on the causal model by setting A=0
+    -   $W= f_w(U_w)$
+    -   $A= 0$
+    -   $Y_0 = f_Y(W,0,U_Y)$ where $Y_0$ is the outcome if possibly-contrary to fact, the unit was exposed (A=0)
+
+```{r echo=FALSE, out.width="70%", fig.align="center"}
+knitr::include_graphics("cm5.png")
+```
+
+We use counterfactual outcomes to formally define causal parameters. For example, one common estimand is the average treatment effect (ATE), defined as the difference between the expected outcomes under two interventions i.e $\mathbb{E}[Y_1]-\mathbb{E}[Y_0]$.When the outcome is binary, this contrast is often expressed as the causal risk difference (CRD) given by  $\mathbb{P}(Y_1=1)-\mathbb{P}(Y_0=1)$.
+
+Importantly, these are just two examples. Many other causal parameters can be defined depending on the scientific question of interest, the outcome type, and the decision context.
+
+## Step 2: Link to observed data
+
+We denote the observed data by O=(W,A,Y), where W represents measured covariates, A is the exposure, and Y is the outcome. We assume that the causal model describes the data-generating process both under the existing conditions of the real world (the observed data) and under hypothetical interventions (the counterfactual world).This provides a link between the causal world and the observed world. 
+
+As a result, the causal model implies a statistical model, defined as the set of possible probability distributions for the observed data. The causal model may but often does not place any restrictions on the statistical model in which case the statistical model is ***non parametric***.For example, a causal model may state that the exposure A,is generated as a function of covariates W, and unmeasured factors  $U_A$, written as  A= $f_A(W,U_A)$ but does not  specify the functional form of $f_A$.If substantive knowledge justifies a particular functional form, that information should be encoded explicitly in the causal model; otherwise, the model remains agnostic, leading to a flexible, nonparametric statistical model.
+
+
+## Step 3: Assess Identifiablity
+
+-  This step of the roadmap involves linking the causal effect to the parameter estimable from observed data. This requires some assumptions as follows:
+
+    -   Temporality: exposure precedes the outcome. This is indicated by an arrow on the causal graph from A to Y
+    -   Consistency: $Y_a$=Y where A=a. If an individual received treatment A=a, then their observed outcome Y is equal to their potential outcome under that treatment $Y_a$.
+    -   Stability: We require no interference between units. This is indicated by the fact that the outcomes Y are only a function of each unit's exposure A in the causal model and graph.
+    -   Randomization:No unmeasured confounding such that $Y_a \perp A \mid W$
+    -   Positivity: We require sufficient variability in exposure within confounder values i.e. $0 < \mathbb{P}(A=1|W)<1$.
+    
+## Step 4: Define the Statistical Estimand
+
+Under these assumptions, we can express our causal target parameter—which is defined in terms of counterfactuals as a function of the observed data. Specifically i.e $$
+    \begin{aligned}
+    \mathbb{E}(Y_a)
+      &= \mathbb{E}\big[ \mathbb{E}(Y_a \mid W) \big] \\
+      &= \mathbb{E}\big[ \mathbb{E}(Y_a \mid A=a, W) \big]  under \ randomization\\ 
+      &= \mathbb{E}\big[ \mathbb{E}(Y \mid A=a, W) \big] under \ consistency
+    \end{aligned}
+    $$
+
+Of course, simply wishing these assumptions to hold does not make them true. Their plausibility must be carefully assessed using subject-matter knowledge, study design considerations, and an understanding of the data-generating process.
+
+When the assumptions are deemed reasonable, we obtain the G-computation identifiability result (Robins, 1986). In particular, the average treatment effect can be written as $\mathbb{E}[Y_1-Y_0] = \mathbb{E}\big[\mathbb{E}(Y\mid A=1,W)-\mathbb{E}(Y\mid A=0,W)]$ where the right-hand side is a function of the observed data distribution and therefore defines our statistical estimand.
+For a binary outcome, this corresponds to the marginal risk difference, $\mathbb{E}\big[\mathbb{P}(Y=1\mid A=1,W)-\mathbb{P}(Y=1\mid A=0,W)]\$. This is marginal because the outer expectation averages over the confounder distribution.
+
+Finally, it is important to consider what happens when one or more of the identifying assumptions may not hold—for example, if there is concern about unmeasured confounding or if the data structure does not clearly establish temporality. In such cases, possible options include:
+
+- Giving up (rarely the most satisfying choice)
+- Changing the research question, the exposure, the outcome or the target population
+- Proceeding to do the best job possible estimating the target parameter provided the question is still well-defined and interpretable and that we can still get as close as possible to the wished for causal parameter given the limitations in the data.
+
+## Step 5: Choose and apply the estimator
+
+An estimator is an algorithm that, when applied to observed data, produces an estimate of the statistical parameter of interest. In our setting, this statistical parameter corresponds to the average treatment effect (ATE) when the identifiability assumptions hold.
+There are several classes of estimators that can be used to estimate this parameter. These include substitution estimators, such as parametric G-computation; propensity score–based estimators, including inverse probability of treatment weighting (IPTW) and matching; and doubly robust estimators, such as targeted maximum likelihood estimation (TMLE) and augmented IPTW (A-IPTW). Each of these approaches relies on different modeling strategies and assumptions, and each has its own strengths and limitations.
+
+Before exploring these estimators in detail, it is helpful to pause and reflect on the approach that is most commonly used in practice. In many applied analyses, one would simply fit a logistic regression model for the binary outcome Y (e.g., risk of cardiovascular disease) as a function of the exposure (denosumab (Prolia) versus zoledronic acid) and baseline confounders W, and then interpret the resulting coefficient on the exposure as the effect of interest.
+
+$$
+\text{logit}\big( \mathbb{E}(Y \mid A, W) \big)
+    = \beta_0 + \beta_1 A + \beta_2 W_1 + \cdots + \beta_{19} W_{18}.
+$$
+
+They would then exponentiate the coefficient on the exposure and interpret the result as an odds ratio, often described as a conditional effect, meaning the association between treatment and outcome while holding other covariates constant.The problem here is that our target parameter (ATE) does not equal $e^{\beta_{1}}$. Rather we are letting the estimation approach drive the question. Additionally, this estimation approach relies on the main terms logisitic regression being correct.
+
+Estimation strategies can be broadly categorized as parametric, nonparametric, or semiparametric, depending on the assumptions made about the relationships among the covariates W, the exposure A and the outcome Y.
+
+A **parametric** estimation approach assumes we know the relationship between covariates W, the exposure A and the outcome Y and have correctly specified this relation with a finite set of constants called "parameters". For example, we can specify a regression with main terms for covariates and a few interactions or squared terms that we think are reasonable. If we had this knowledge, we should encode it in our causal model so we avoid introducing new assumptions during estimation.
+However, with parametric regression models, we are likely assuming we know more than we actually know.
+
+ A **non-parametric** estimation approach acknowledges that we do not know the form of the relations beetween the covariates W, the exposure A and the outcome Y.For example, one could divide the data into all combinations of (A,W), calculate and average the stratum specific A and Y relations. Unfortunately, when the number of covariates is large or when covariates are continuous, this approach quickly becomes infeasible due to sparse or empty strata. This phenomenon is commonly referred to as  the curse of dimensionality since the number of strata increases exponentially with dimension of W!
+ 
+ In a **semi parametric** estimation approach, we often "know nothing" (i.e. have a non-paramteric statistical model) but also need to smooth over regions of data with weak support during estimation.This is typically achieved using data-adaptive methods or machine learning.
+Rather than committing to a single algorithm such as stepwise regression, LOESS, or polynomial splines without a principled basis for choosing among them, we allow a broad class of candidate algorithms to compete and we select the best algorithm with cross-validation. This is the basis of ***Super Learner*** which we will focus on in this tutorial.
+
+Recall our statistical parameter is $\mathbb{E}\big[\mathbb{E}(Y\mid A=1,W)-\mathbb{E}(Y\mid A=0,W)\big]$ which equals the ATE if the identifiability results hold.
+We shall now discuss the following estimators and provide example implementations  in R;
+    -   Simple substitution estimator a.k.a paramteric G-computation or parametric g-formula
+    -   Inverse probability of treatment weighting (IPTW)
+    -   Targeted maximum likelihood estimation (TMLE) with Super Learner
+
+### Simple substitution estimator
+
+To build intuition for the simple substitution estimator, it is helpful to think of causal inference as a problem of missing information. For each individual, we observe the outcome under the  observed exposure, but we are missing the outcome under the alternative exposure condition. 
+In this approach, we use a parametric regression model to estimate the conditional mean outcome as a function of the exposure and measured confounders. This model is then used to predict each individual’s outcome under both exposure conditions. Finally, we average these predicted outcomes across individuals and compare them to obtain an estimate of the causal effect.
+We now describe this procedure step by step. First, we load the simulated dataset, CausalWorkshop.csv, and set the random seed to ensure reproducibility.
+
+
+
+```{r}
+library(readr)
+data <-  read_csv("CausalWorkshop.csv")
+head(data)
+tail(data)
+dim(data)
+set.seed(1)
 
 ```
+
+1.  We the estimate the mean outcome Y as a function of exposure (treatment) A and measured confounders W. In this example we run a main terms logistic regression.
+
+```{r}
+outcome.regression <- glm(Y ~ A + W1+W2+W3+W4, family='binomial', data=data)
+```
+
+2.  We use estimates from 1 above to predict outcomes for each unit while "setting" the exposure to different values e.g. A=1 and A=0
+
+```{r}
+data.A1 <- data.A0 <- data
+data.A1$A <- 1
+data.A0$A <- 0
+colMeans(data.A1)
+colMeans(data.A0)
+predict.outcome.A1 <- predict( outcome.regression, newdata=data.A1, 
+                               type='response')
+predict.outcome.A0 <- predict(outcome.regression, newdata=data.A0, 
+                              type='response')
+```
+
+3.  Average predictions to estimate the marginal risks in the population under exposure and no exposure. To compare estimates, take the difference in means.
+
+```{r}
+mean(predict.outcome.A1)
+mean(predict.outcome.A0)
+Simple.Subs <- mean(predict.outcome.A1 - predict.outcome.A0)
+Simple.Subs
+```
+
+### IPTW- Inverse Probability of Treatment Weighting estimator
+
+The intuition behind inverse probability of treatment weighting (IPTW) is to view confounding as a problem of biased sampling. In observational data, some exposure–covariate subgroups are overrepresented, while others are underrepresented, relative to what we would expect in a randomized trial.
+
+IPTW addresses this issue by reweighting the data to create a pseudo-population in which treatment assignment is independent of measured confounders. Weights are  applied  to up-weight under-represented units and down-weight over-represented units. Causal effects are then estimated by averaging and comparing the weighted outcomes across treatment groups. The algorithm for implementing the IPTW estimator is described below.
+
+
+1.  Estimate the probability of being exposed/treated A as a function of measured confounders W:$\mathbb{P}(A=1\mid W)$. This is often referred to as the propensity score. We can estimate the propensity score by running a main terms logistic regression as illustrated below
+
+```{r}
+pscore.regression <- glm(A~ W1+W2+W3+W4, family='binomial',
+                         data=data)
+summary(pscore.regression)
+```
+
+2.  We then use estimates from 1 above to calculate exposed/treated weights: 1/$\mathbb{P}(A=1\mid W)$ and unexposed/untreated weights:1/$\mathbb{P}(A=0\mid W)$
+
+```{r}
+predict.prob.A1 <- predict(pscore.regression, type='response')
+summary(predict.prob.A1)
+predict.prob.A0 <- 1 - predict.prob.A1
+wt1 <- as.numeric( data$A==1)/predict.prob.A1
+wt0 <- as.numeric( data$A==0)/predict.prob.A0
+head(data.frame(cbind(A=data$A, 1/predict.prob.A1, wt1, wt0)))
+```
+
+3.  We then apply the weights and average the weighted outcomes to estimate the marginal risks in the population under A=1 and A=0. To compare estimates, we take the difference in weighted means.
+
+```{r}
+mean(wt1*data$Y)
+mean(wt0*data$Y)
+IPW <- mean(wt1*data$Y) - mean(wt0*data$Y)
+IPW
+mean( (wt1-wt0)*data$Y)
+```
+
+### TMLE- targeted maximum likelihood estimation
+
+To build intuition for targeted maximum likelihood estimation (TMLE)[@van_der_laan_targeted_2011], we again view causal inference as a problem of missing information.As in simple substitution, the first step is to predict outcomes for all units under both the exposed and unexposed conditions.TMLE begins by fitting an initial outcome regression using a flexible estimation approach, such as Super Learner[@van_der_laan_super_2007], to avoid relying on strong parametric assumptions when the true regression model is unknown. When reliable parametric knowledge is available, it can be incorporated directly.
+
+TMLE then incorporates information about the exposure–covariate relationship through a targeted update of the initial estimator.This targeting step is designed specifically to improve estimation of the causal parameter of interest. Because TMLE uses both the outcome model and the exposure model, it offers double robustness: the estimator remains consistent if at least one of these models is correctly specified. This estimator is also asymptotically linear and therefore we can obtain normal curve inference.Finally, causal effects are obtained by averaging and comparing the targeted predicted outcomes under exposure and no exposure.
+
+
+#### What is Super Learner?
+
+This is a supervised machine learning algorithm that offers a flexible and data daptive approach to learn complex relationships from data. This algorithm uses cross-validation(sample splitting) to evaluate the performance of a library of candidate estimators.The library should be diverse including simple (e.g expert informed parametric regressions) and more adaptive algorithms (e.g penalized regressions, stepwise regression, adaptive splines)
+Performance is assessed using a specified loss function, such as the squared prediction error, which quantifies how well each algorithm predicts outcomes on new data.
+
+Cross-validation allows us to compare algorithms based on how they perform on independent data. The data are partitioned into folds, and each algorithm is repeatedly trained on a subset of the data and evaluated on the held-out validation set. This process is rotated across folds, and the resulting risk estimates are averaged to obtain a single cross-validated performance measure for each algorithm.
+Rather than selecting only the single best-performing algorithm, Super Learner constructs an optimal weighted combination of algorithm-specific predictions. 
+In the next section, we illustrate how to fit a Super Learner in practice.
+
+```{r,message=FALSE}
+library('SuperLearner')
+SL.library <- c('SL.glm', 'SL.step.interaction', 'SL.gam'
+)
+SL.outcome.regression <- suppressWarnings(SuperLearner(Y=data$Y, 
+                                      X=subset(data, select=-Y),
+                                      SL.library=SL.library, 
+                                      family='binomial'))
+SL.outcome.regression
+
+SL.predict.outcome <- predict(SL.outcome.regression, 
+                              newdata=subset(data, select=-Y))$pred
+head(SL.predict.outcome)
+```
+
+#### Why do I need to target?
+
+We could use Super Learner to predict the outcomes for each unit while "setting" the exposure to different levels and then average and contrast the predictions.
+
+```{r}
+SL.predict.outcome.A1 <- predict(SL.outcome.regression, 
+                                 newdata=subset(data.A1, select=-Y))$pred
+head(SL.predict.outcome.A1)
+
+SL.predict.outcome.A0 <- predict(SL.outcome.regression, newdata=subset(data.A0, select=-Y))$pred
+
+# simple subst estimator
+mean(SL.predict.outcome.A1) - mean(SL.predict.outcome.A0)
+```
+
+However, Super Learner is focused on $\mathbb{E}(Y\mid A,W)$ and not our parameter of interest. It makes the wrong bias-variance trade-off and specifically incurs too much bias.There is also no reliable way to obtain statistical inference (i.e create 95% confidence intervals)
+
+#### What is targeting?
+
+Targeting step uses information in the estimated propensity score $\mathbb{P}(A=1\mid W)$ to update the initial (Super Learner) estimator of $\mathbb{E}(Y\mid A,W)$.
+It involves running a univariate regression of the outcome Y on a clever covariate with offset the initial estimator. Why "clever"? It ensures that the targeting step moves the initial estimator in a direction that removes bias.
+The estimated coefficient from this regression is then used to update the initial predicted outcomes under both the exposed and unexposed conditions.
+
+#### How do i target? (One approach)
+
+1.  Use Super Learner to estimate the propensity score $\mathbb{P}(A=1\mid W)$
+
+```{r}
+SL.pscore <- SuperLearner(Y=data$A, X=subset(data, select=-c(A,Y)),
+                          SL.library=SL.library, family='binomial')
+SL.pscore
+
+SL.predict.prob.A1 <- SL.pscore$SL.predict
+summary(SL.predict.prob.A1 - predict(SL.pscore, newdata=subset(data,select=-c(A,Y)))$pred)
+summary(SL.predict.prob.A1)
+SL.predict.prob.A0 <- 1 - SL.predict.prob.A1
+```
+
+***Note***: As you run this code you might encounter a warning "non-integer #successes in a binomial glm!". This simply means that our outcome Y is not binary much as it's bounded between 0 and 1. This is okay and can be ignored.
+
+2.  Calculate the "clever covariate"
+
+$$H(A,W)= \frac{\mathbb{I}(A=1)}{\mathbb{P}(A=1\mid W)}- \frac{\mathbb{I}(A=0)}{\mathbb{P}(A=0\mid W)}$$
+
+Here's code to evaluate the "clever covariate"
+
+```{r}
+H.AW <- (data$A==1)/SL.predict.prob.A1 - (data$A==0)/SL.predict.prob.A0
+summary(H.AW)
+H.1W <- 1/SL.predict.prob.A1
+H.0W <- -1/SL.predict.prob.A0
+tail(data.frame(A=data$A, H.AW, H.1W, H.0W))
+```
+
+3.Run logistic regression of the outcome on this covariate using logit of the initial estimator $\mathbb{E}(Y\mid A,W)$ as offset where logit(x)= log\[x/(1-x)\]
+
+```{r}
+logitUpdate <- glm( data$Y ~ -1 +offset( qlogis(SL.predict.outcome)) +
+                      H.AW, family='binomial')
+epsilon <- logitUpdate$coef
+epsilon
+
+```
+
+4.  Plug in the estimated coefficient $\epsilon$ to yield our targeted estimator $\mathbb{E^*}(Y\mid A,W)$ and use the targeted estimator $\mathbb{E^*}(Y\mid A,W)$ to predict outcomes for all under A=1 and A=0
+
+```{r}
+target.predict.outcome.A1 <- plogis( qlogis(SL.predict.outcome.A1)+
+                                       epsilon*H.1W)
+target.predict.outcome.A0 <- plogis( qlogis(SL.predict.outcome.A0)+
+                                      epsilon*H.0W)
+```
+
+5.  Average the predictions to estimate the marginal risks in the population under exposure and no exposure. Compare the estimates by taking the difference.
+
+```{r}
+TMLE <- mean( target.predict.outcome.A1 - target.predict.outcome.A0)
+TMLE
+```
+
+### Estimator Properties
+
+We have now discussed three estimators and walked through their implementation. We next summarize the key properties of each estimator and highlight important considerations when choosing among them;
+
+-   Simple substitution estimator
+    -  This  relies on consistently estimating the mean outcome $\mathbb{E^*}(Y\mid A,W)$. In settings where there is strong substantive knowledge about the relationship between the outcome and the exposure–covariate set, a correctly specified parametric regression model may perform well. However, in many applications our knowledge of this relationship is limited. In such cases, assuming an incorrect parametric form can lead to biased estimates and misleading inference
+    
+-   IPTW
+    -   Relies on consistently estimating the propensity score $\mathbb{P}(A=1\mid W)$. While sometimes we have a lot of knowledge about how the exposure was assigned, other times our knowledge is limited and assuming a parametric regression model can result in bias and misleading inference.
+This estimator is also unstable under positivity violations. When covariate groups only have a few exposed or unexposed observations, weights can blow up!!. If some strata contain no exposed or no unexposed observations, the estimator may appear numerically stable, but it will generally be biased and its variance underestimated.
+
+-   TMLE
+    -  This estimator is doubly robust i.e. yields a consistent estimate if either the conditional mean $\mathbb{E^*}(Y\mid A,W)$ or the propensity score $\mathbb{P}(A=1\mid W)$ is consistently estimated. We get two chances to get it right !!TMLE is also semiparametrically efficient, achieving the lowest possible asymptotic variance among a broad class of estimators when both models are estimated at sufficient rates. Importantly, TMLE is supported by formal theory that allows for valid statistical inference under mild conditions even when machine learning methods are used.Being a substitution estimator (plug-in), it is robust under positivity violations,strong confounding and rare outcomes. In addition, there is well-developed software available for implementation, including packages such as ltmle,lmptp packages in R.
+    
+After estimating the parameter of interest, the next step is to quantify statistical uncertainty.Doing so requires an estimate of the sampling distribution.We can consider doing a non-parametric bootstrap where we re-sample the observed data with replacement, apply the entire estimation process (including machine learning algorithms) to the re-sampled data, repeat X times and estimate the variance with the bootstrapped point estimates. Alternatively, we can use influence curve based inference asymptotic linearity to directly estimate standard errors. We shall not discuss this here but this form of inference is available in the R packages.
+
+
+With this, we conclude the estimation component of the analysis. Having selected an estimator and obtained an estimate of our parameter of interest and inference, we now return to the broader Causal Roadmap to consider interpretation, diagnostics, and sensitivity to assumptions
+
+
+## Step 6: Specify the sensitivity analyses (interpreting findings)
+
+
+
+
+
+## Step 7: Interpret findings
+
+-   The final step of the Causal Roadmap is to interpret the findings. At this stage, we evaluate whether and to what extent the underlying assumptions have been met in order to determine the strength of interpretation.
+
+-   Findings support a statistical interpretation if (1) the statistical estimator has negligible bias and its variance is well estimated
+
+-   Findings support a causal interpretation if 1 holds and (2) if the non testable identifiability assumptions hold.
+
+-   Can be interpreted as if implemented in the real-world if 1 and 2 hold and if (3) the intervention is feasible and applicable to the real world population.
+
+-   Findings can be interpreted as if we had emulated a randomized trial if 1-3 hold and the exposure could have been randomized to that population.
+
+-   If there are concerns about causal assumptions (e.g. temporal odering is unclear, unmeasured confounding), the results can be interpreted as ***associational***. In this case the estimand, $\mathbb{E}\big[\mathbb{E}(Y\mid A=1,W)-\mathbb{E}(Y\mid A=0,W)]$ can be interpreted as;
+
+    -   The marginal difference in the expected outcome associated with the exposure, after accounting for the measured confounders
+    -   The difference in the mean outcome between persons exposed versus unexposed but with the same values of the adjustment covariates (averaged with respect to the distribution of those covariates in the population).e.g The difference in the risk of cardiovascular disease with intervention A vs B is X, accounting for region,age,sex,SES etc
+    -   Alternatively one can report that this is as close as we can get to the causal effet of A on Y given the limitations of the data detailing all limitations and including a causal graph to empower the reader to assess the plausibility of assumptions.
+
+-   If the authors believe causal assumptions are met, the parameter can be interpreted as the population average treatment effect $\mathbb{E}\big[Y_1-Y_0\big]$.
+
+    -   In words, this would be the difference in the expected outcome if everyone were exposed compared if everyone were unexposed. For example, there would be an X difference in the risk of cardiovascular disease if all patients in the population received intervention A vs B.
+    
+## Step 7: Compare Alternative Study Designs    
+    
+
+
+## Caution: Use your tools well.
+
+TMLE with Super Learner is a powerful approach, but it should be viewed as one tool within a broader toolbox. No matter how sophisticated the estimator, careful thinking throughout the earlier steps of the Causal Roadmap remains essential.
+
+It is especially important to formally derive adjustment sets and clearly define the statistical parameter before estimation. Failure to do so can lead to errors of causal model neglect, where the quantity being estimated differs meaningfully from any interpretable causal effect.
+
+ Doubly robust estimators (e.g TMLE or A-IPW) can incorporate machine learning while maintaining basis for valid statistical inference. This helps us avoid errors of "statistical model neglect", occurring when relying on unsubstantiated (parametric) assumptions during estimation.However, these benefits  depend on careful implementation. In particular, the Super Learner library must be specified thoughtfully: diversity among candidate learners is crucial, and overfitting should be avoided through proper sample splitting and cross-validation. 
+ 
+ In practice, positivity violations can and do occur. Poor support for certain exposure–covariate combinations may lead to bias and underestimated variance. Potential strategies for addressing these issues include using substitution estimators such as G-computation or TMLE, modifying the targeting step in TMLE (e.g., via weighted regression), employing robust variance estimators (e.g., Tran et al., 2018; Benkeser et al., 2017), or bounding estimated propensity scores away from zero and one.
+ 
+Finally, simulation studies play a critical role in responsible causal analysis. By simulating data that mimic key features of the observed setting—such as sample size, confounding structure, missingness mechanisms, sparsity, dependence, or practical positivity challenges—we can better understand estimator behavior and use these insights to guide analytic decisions.
+
+## Summary and Discussion
+
+Congratulations! You have successfully worked through this tutorial and implemented three core estimators for causal inference: the simple substitution estimator, inverse probability of treatment weighting (IPTW), and targeted maximum likelihood estimation (TMLE). Along the way, you have built both intuitive and technical understanding of how these estimators operate, what assumptions they rely on, and how they behave in practice.
+
+You have also completed a high-speed tour of the Causal Roadmap, and by now its strengths should be apparent. The Roadmap emphasizes the importance of starting with clearly defined scientific questions and ensures that the parameters we estimate are aligned with those questions. It makes explicit the assumptions required to interpret estimates as causal effects.When assumptions are not met, the unmet assumptions provide clear guidance on how future research must be improved to increase the potential of causal interpretation.Working in this framework can improve interpretability and relevance of epidemiologic research.
+
+Although this tutorial focused on estimating the average treatment effect, the same framework naturally extends to a wide range of causal questions and data structures, including effects among treated or untreated populations, mediation analyses, longitudinal interventions, and dynamic treatment regimes.
+
+For readers interested in exploring these more advanced settings, we provide links to additional resources below.
+
+
+
