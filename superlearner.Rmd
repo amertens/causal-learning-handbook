@@ -1,0 +1,384 @@
+---
+title: "Chapter 2.4: SuperLearner and Machine Learning for Causal Inference"
+format: html
+---
+
+# Chapter 2.4: SuperLearner and Machine Learning for Causal Inference  
+*Flexible prediction to strengthen causal effect estimation*
+
+Modern causal inference relies on estimating **nuisance functions** (outcome regressions and treatment / censoring mechanisms) that are as accurate as possible. If these models are mis-specified, even sophisticated causal estimators can be biased.
+
+Rather than gambling on a single model (e.g., logistic regression), we can **stack** many candidate learners and let the data decide how to combine them. This is what **SuperLearner** does.
+
+In this chapter you will learn:
+
+- The intuition behind SuperLearner (SL) and stacking  
+- How cross-validation is used to avoid overfitting  
+- How to build and interpret SuperLearner models in R  
+- When and why to choose different **loss functions** (MSE, log-likelihood, AUC)  
+- How to customize SL libraries and tune algorithms  
+- How SL integrates with TMLE and other causal estimators  
+
+This chapter leans heavily on the excellent visual tutorial by Katherine Hoffman and the SuperLearner demo by David Benkeser (both provided as PDFs), and recasts them in a causal-inference focused Quarto format.
+
+---
+
+## 1. Why Use SuperLearner in Causal Inference?
+
+Causal estimators such as g-computation, IPTW, AIPW, and TMLE rely on estimating:
+
+- The **outcome regression**:  
+  \( Q(W, A) = E[Y \mid W, A] \)
+
+- The **treatment (or censoring) mechanism**:  
+  \( g(W) = P(A = 1 \mid W) \)
+
+In traditional practice, both are often modeled with simple GLMs. This is dangerous when:
+
+- Relationships are nonlinear
+- Interactions are present
+- There are many covariates
+- We are unsure about which variables to include or in what functional form
+
+SuperLearner helps by:
+
+- Combining multiple algorithms (GLM, random forests, LASSO, boosted trees, etc.)
+- Using **K-fold cross-validation** to evaluate and weight each algorithm
+- Producing an ensemble predictor with theoretical guarantees (an “oracle inequality”): asymptotically, SL performs nearly as well as the best algorithm in the library
+
+In causal inference, we rarely care about prediction for its own sake, but good prediction of nuisance functions leads to **better causal effect estimation**.
+
+---
+
+## 2. Conceptual Overview of SuperLearner
+
+At a high level, SuperLearner does the following:
+
+1. Pick a **set of candidate learners** (the library).
+2. Split the data into **K folds**.
+3. For each learner:
+   - Fit on K-1 folds (training data),
+   - Predict on the held-out fold (validation data).
+4. Collect **cross-validated predictions** for every observation and every learner.
+5. Fit a **metalearner** (often a linear regression) that finds the optimal weighted combination of the learners’ predictions to minimize a chosen **loss function** (e.g., mean squared error, negative log-likelihood).
+6. Refit each base learner on the full dataset.
+7. Use the metalearner and the refit base learners to form the final ensemble and obtain predictions for new data.
+
+This is exactly the workflow illustrated in the “VISUAL GUIDE TO SUPERLEARNING” figure in the KHstats tutorial.
+
+---
+
+## 3. A Minimal Working Example
+
+We’ll start with a simple prediction problem, then connect it back to causal inference later.
+
+### 3.1 Simulated data
+
+```{r, cache=TRUE}
+library(tidyverse)
+library(SuperLearner)
+
+set.seed(7)
+n <- 2000
+
+obs <- tibble(
+  id = 1:n,
+  x1 = rnorm(n),
+  x2 = rbinom(n, 1, plogis(10 * x1)),
+  x3 = rbinom(n, 1, plogis(x1 * x2 + 0.5 * x2)),
+  x4 = rnorm(n, mean = x1 * x2, sd = 0.5 * x3),
+  y  = x1 + x2 + x2 * x3 + sin(x4) + rnorm(n, sd = 0.2)
+)
+
+glimpse(obs)
+```
+
+The outcome `y` is a nonlinear function of the covariates, with interactions and a sine term. GLMs will struggle here.
+
+---
+
+## 4. Using the `SuperLearner` Package
+
+### 4.1 Basic call
+
+We’ll start with a small library for illustration.
+
+```{r, cache=TRUE}
+set.seed(1234)
+
+X <- obs %>% select(x1:x4) %>% as.data.frame()
+Y <- obs$y
+
+SL.lib <- c("SL.glm",      # simple GLM
+            "SL.mean",     # intercept-only
+            "SL.earth",    # multivariate adaptive regression splines (MARS)
+            "SL.ranger")   # random forest
+
+sl_fit <- SuperLearner(
+  Y = Y,
+  X = X,
+  newX = NULL,
+  family = gaussian(),
+  SL.library = SL.lib,
+  method = "method.NNLS",  # non-negative least squares metalearner
+  cvControl = list(V = 10L)
+)
+
+sl_fit
+```
+
+Key outputs:
+
+- `Risk`: cross-validated risk (e.g., MSE) for each learner
+- `Coef`: weight given to each learner in the ensemble
+
+The learner with the smallest CV-risk often gets the largest weight, but SL can combine learners.
+
+We can access the **ensemble predictions**:
+
+```{r, cache=TRUE}
+head(sl_fit$SL.predict)
+```
+
+and predictions from individual learners:
+
+```{r, cache=TRUE}
+head(sl_fit$library.predict)
+```
+
+---
+
+## 5. Choosing a Loss Function: MSE vs Log-Likelihood vs AUC
+
+SuperLearner allows different **loss functions**, which define what we mean by “best” prediction.
+
+### 5.1 Mean Squared Error (MSE)
+
+- Default for `family = gaussian()`
+- Appropriate for **continuous outcomes** when we care about squared error:
+  $$ L(y, \hat{y}) = (y - \hat{y})^2 $$
+- Good when we want well-calibrated mean predictions
+
+Example (already used above): `method = "method.NNLS"` with `family = gaussian()`
+
+### 5.2 Negative Log-Likelihood (Binomial deviance)
+
+- Natural choice for **binary outcomes** when we care about probability calibration:
+  $$ L(y, \hat{p}) = -[y \log(\hat{p}) + (1-y) \log(1-\hat{p})] $$
+- Strongly penalizes confident but wrong predictions
+- Recommended for:
+  - Outcome models (`Y` binary)
+  - Treatment models (`A` binary) in causal inference
+
+Use `method = "method.NNloglik"` with `family = binomial()`.
+
+Example:
+
+```{r, cache=TRUE}
+# suppose Y is binary
+Y_bin <- rbinom(n, 1, plogis(X$x1 + X$x2))
+
+sl_loglik <- SuperLearner(
+  Y = Y_bin,
+  X = X,
+  family = binomial(),
+  SL.library = c("SL.glm", "SL.mean", "SL.ranger"),
+  method = "method.NNloglik"
+)
+
+sl_loglik
+```
+
+### 5.3 AUC / Rank Loss
+
+- For classification problems where the **ranking** of probabilities matters more than calibration
+- Common when choosing a threshold later (e.g., risk stratification)
+- SuperLearner implementation: `method = "method.AUC"`
+- Particularly useful when interested in discriminatory ability (e.g., disease risk scores)
+
+Example:
+
+```{r, cache=TRUE}
+library(cvAUC)   # required by method.AUC
+
+sl_auc <- SuperLearner(
+  Y = Y_bin,
+  X = X,
+  family = binomial(),
+  SL.library = c("SL.glm", "SL.mean", "SL.ranger"),
+  method = "method.AUC"
+)
+
+sl_auc
+```
+
+### 5.4 Which loss should I choose?
+
+- **For outcome models in TMLE/AIPW:**  
+  - If binary → log-likelihood (binomial deviance)  
+  - If continuous → MSE or other appropriate distribution-based loss  
+- **For treatment / censoring models in causal inference:**  
+  - Typically log-likelihood (because we want accurate estimates of `P(A | W)`)
+- **For pure classification (no causal estimation):**  
+  - Consider AUC loss (`method.AUC`) if ranking is the priority
+
+---
+
+## 6. Interpreting CV-Risk and Coefficient Weights
+
+```{r, cache=TRUE}
+sl_fit$cvRisk
+sl_fit$coef
+```
+
+- `cvRisk` shows cross-validated risk for each algorithm
+- `coef` gives the ensemble weights (metalearner solution)
+
+An algorithm might have:
+
+- Low risk → high weight  
+- High risk → weight near zero (effectively excluded)
+
+This matches the demonstration in the Benkeser notes where GLM dominates mean-only models when predicting MI.  
+
+---
+
+## 7. Customizing the Library and Tuning Learners
+
+### 7.1 Adding tuned versions of a learner (e.g., Random Forest)
+
+We can define bounded random forest variants with different hyperparameters.
+
+```{r, cache=TRUE}
+SL.ranger_mtry3 <- function(..., mtry = 3){
+  SL.ranger(..., mtry = mtry)
+}
+
+SL.ranger_mtry4 <- function(..., mtry = 4){
+  SL.ranger(..., mtry = mtry)
+}
+
+SL.lib_tuned <- c("SL.glm",
+                  "SL.earth",
+                  "SL.ranger_mtry3",
+                  "SL.ranger_mtry4")
+```
+
+Then run:
+
+```{r, cache=TRUE}
+set.seed(123)
+sl_tuned <- SuperLearner(
+  Y = Y,
+  X = X,
+  family = gaussian(),
+  SL.library = SL.lib_tuned,
+  method = "method.NNLS"
+)
+
+sl_tuned$cvRisk
+sl_tuned$coef
+```
+
+SuperLearner automatically picks which tuned version (or combination) works best.
+
+---
+
+## 8. Cross-Validated SuperLearner (`CV.SuperLearner`)
+
+`CV.SuperLearner` adds an **outer layer** of cross-validation to evaluate SL versus its components objectively.
+
+```{r, cache=TRUE}
+set.seed(123)
+cv_sl <- CV.SuperLearner(
+  Y = Y,
+  X = X,
+  V = 5,
+  family = gaussian(),
+  SL.library = SL.lib
+)
+
+cv_sl
+plot(cv_sl)
+```
+
+The plot shows:
+
+- Cross-validated risks and confidence intervals for each learner
+- Performance of the discrete and continuous SuperLearner
+
+This step is particularly helpful when you want to justify using SL rather than a single, simpler algorithm.
+
+---
+
+## 9. Integrating SuperLearner into Causal Inference
+
+So far we focused on prediction. How does this relate to causal inference?
+
+For a point-treatment ATE, a TMLE analysis might look like:
+
+```{r, cache=TRUE, eval=F}
+# Example skeleton (you will flesh this out later with your own data)
+library(tmle)
+
+tmle_fit <- tmle(
+  Y = Y_bin,          # binary outcome
+  A = A,              # treatment
+  W = X,              # covariates
+  family = "binomial",
+  Q.SL.library = c("SL.glm", "SL.ranger", "SL.earth"),
+  g.SL.library = c("SL.glm", "SL.ranger", "SL.mean")
+)
+
+tmle_fit$estimates$ATE
+```
+
+Here:
+
+- `Q.SL.library` is used to estimate outcome regression `E[Y|A,W]`
+- `g.SL.library` is used to estimate propensity scores `P(A|W)`
+- TMLE combines these with targeting to produce an efficient, doubly robust estimate
+
+Key advantages:
+
+- You no longer need to guess the “right” model for Y or A  
+- You can include many flexible learners without overfitting (thanks to SL + CV)  
+- Your causal inference relies less on arbitrary parametric modeling choices  
+
+---
+
+## 10. Practical Tips for Using SuperLearner
+
+1. **Start with a modest but diverse library**  
+   - GLM (`SL.glm`)  
+   - Random forest (`SL.ranger` or `SL.randomForest`)  
+   - MARS (`SL.earth`)  
+   - Penalized regression (`SL.glmnet`)  
+
+2. **Pick loss functions that match your problem**  
+   - Binary → log-likelihood (for calibration) or AUC (for ranking)  
+   - Continuous → MSE  
+
+3. **Watch computation time**  
+   - SL is more expensive than a single GLM, especially with many learners and CV folds.
+
+4. **Use SL primarily on nuisance functions**  
+   - Don’t use SL to directly estimate the causal effect; instead, use SL to estimate `Q` and `g` and feed these into TMLE, AIPW, etc.
+
+5. **Inspect SL outputs**  
+   - Which learners are getting weight?  
+   - Are any learners consistently poor performers?  
+   - Do you need to adjust your library?  
+
+---
+
+## 11. Summary
+
+In this chapter you learned
+
+- How SuperLearner combines multiple algorithms using cross-validation and a metalearner  
+- The role of loss functions (MSE, log-likelihood, AUC) and when to choose each  
+- How to implement SuperLearner in R, inspect CV-risk and weights, and customize the library  
+- How SuperLearner supports reliable causal inference by improving nuisance function estimation and integrating seamlessly with TMLE and other estimators  
+
+Next, we move to **Module 3**, where we tackle longitudinal data, dynamic treatment regimes, and modified treatment policies, often using SuperLearner as a core building block.

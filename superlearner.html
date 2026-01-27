@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.6.42">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>Chapter 2.4: SuperLearner and Machine Learning for Causal Inference</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="superlearner_files/libs/clipboard/clipboard.min.js"></script>
+<script src="superlearner_files/libs/quarto-html/quarto.js"></script>
+<script src="superlearner_files/libs/quarto-html/popper.min.js"></script>
+<script src="superlearner_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="superlearner_files/libs/quarto-html/anchor.min.js"></script>
+<link href="superlearner_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="superlearner_files/libs/quarto-html/quarto-syntax-highlighting-2f5df379a58b258e96c21c0638c20c03.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="superlearner_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="superlearner_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="superlearner_files/libs/bootstrap/bootstrap-1bc8a17f135ab3d594c857e9f48e611b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+  <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+const typesetMath = (el) => {
+  if (window.MathJax) {
+    // MathJax Typeset
+    window.MathJax.typeset([el]);
+  } else if (window.katex) {
+    // KaTeX Render
+    var mathElements = el.getElementsByClassName("math");
+    var macros = [];
+    for (var i = 0; i < mathElements.length; i++) {
+      var texText = mathElements[i].firstChild;
+      if (mathElements[i].tagName == "SPAN") {
+        window.katex.render(texText.data, mathElements[i], {
+          displayMode: mathElements[i].classList.contains('display'),
+          throwOnError: false,
+          macros: macros,
+          fleqn: false
+        });
+      }
+    }
+  }
+}
+window.Quarto = {
+  typesetMath
+};
+</script>
+
+</head>
+
+<body class="fullcontent">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Chapter 2.4: SuperLearner and Machine Learning for Causal Inference</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="chapter-2.4-superlearner-and-machine-learning-for-causal-inference" class="level1">
+<h1>Chapter 2.4: SuperLearner and Machine Learning for Causal Inference</h1>
+<p><em>Flexible prediction to strengthen causal effect estimation</em></p>
+<p>Modern causal inference relies on estimating <strong>nuisance functions</strong> (outcome regressions and treatment / censoring mechanisms) that are as accurate as possible. If these models are mis-specified, even sophisticated causal estimators can be biased.</p>
+<p>Rather than gambling on a single model (e.g., logistic regression), we can <strong>stack</strong> many candidate learners and let the data decide how to combine them. This is what <strong>SuperLearner</strong> does.</p>
+<p>In this chapter you will learn:</p>
+<ul>
+<li>The intuition behind SuperLearner (SL) and stacking<br>
+</li>
+<li>How cross-validation is used to avoid overfitting<br>
+</li>
+<li>How to build and interpret SuperLearner models in R<br>
+</li>
+<li>When and why to choose different <strong>loss functions</strong> (MSE, log-likelihood, AUC)<br>
+</li>
+<li>How to customize SL libraries and tune algorithms<br>
+</li>
+<li>How SL integrates with TMLE and other causal estimators</li>
+</ul>
+<p>This chapter leans heavily on the excellent visual tutorial by Katherine Hoffman and the SuperLearner demo by David Benkeser (both provided as PDFs), and recasts them in a causal-inference focused Quarto format.</p>
+<hr>
+<section id="why-use-superlearner-in-causal-inference" class="level2">
+<h2 class="anchored" data-anchor-id="why-use-superlearner-in-causal-inference">1. Why Use SuperLearner in Causal Inference?</h2>
+<p>Causal estimators such as g-computation, IPTW, AIPW, and TMLE rely on estimating:</p>
+<ul>
+<li><p>The <strong>outcome regression</strong>:<br>
+( Q(W, A) = E[Y W, A] )</p></li>
+<li><p>The <strong>treatment (or censoring) mechanism</strong>:<br>
+( g(W) = P(A = 1 W) )</p></li>
+</ul>
+<p>In traditional practice, both are often modeled with simple GLMs. This is dangerous when:</p>
+<ul>
+<li>Relationships are nonlinear</li>
+<li>Interactions are present</li>
+<li>There are many covariates</li>
+<li>We are unsure about which variables to include or in what functional form</li>
+</ul>
+<p>SuperLearner helps by:</p>
+<ul>
+<li>Combining multiple algorithms (GLM, random forests, LASSO, boosted trees, etc.)</li>
+<li>Using <strong>K-fold cross-validation</strong> to evaluate and weight each algorithm</li>
+<li>Producing an ensemble predictor with theoretical guarantees (an “oracle inequality”): asymptotically, SL performs nearly as well as the best algorithm in the library</li>
+</ul>
+<p>In causal inference, we rarely care about prediction for its own sake, but good prediction of nuisance functions leads to <strong>better causal effect estimation</strong>.</p>
+<hr>
+</section>
+<section id="conceptual-overview-of-superlearner" class="level2">
+<h2 class="anchored" data-anchor-id="conceptual-overview-of-superlearner">2. Conceptual Overview of SuperLearner</h2>
+<p>At a high level, SuperLearner does the following:</p>
+<ol type="1">
+<li>Pick a <strong>set of candidate learners</strong> (the library).</li>
+<li>Split the data into <strong>K folds</strong>.</li>
+<li>For each learner:
+<ul>
+<li>Fit on K-1 folds (training data),</li>
+<li>Predict on the held-out fold (validation data).</li>
+</ul></li>
+<li>Collect <strong>cross-validated predictions</strong> for every observation and every learner.</li>
+<li>Fit a <strong>metalearner</strong> (often a linear regression) that finds the optimal weighted combination of the learners’ predictions to minimize a chosen <strong>loss function</strong> (e.g., mean squared error, negative log-likelihood).</li>
+<li>Refit each base learner on the full dataset.</li>
+<li>Use the metalearner and the refit base learners to form the final ensemble and obtain predictions for new data.</li>
+</ol>
+<p>This is exactly the workflow illustrated in the “VISUAL GUIDE TO SUPERLEARNING” figure in the KHstats tutorial.</p>
+<hr>
+</section>
+<section id="a-minimal-working-example" class="level2">
+<h2 class="anchored" data-anchor-id="a-minimal-working-example">3. A Minimal Working Example</h2>
+<p>We’ll start with a simple prediction problem, then connect it back to causal inference later.</p>
+<section id="simulated-data" class="level3">
+<h3 class="anchored" data-anchor-id="simulated-data">3.1 Simulated data</h3>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: package 'ggplot2' was built under R version 4.4.3</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: package 'stringr' was built under R version 4.4.3</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>── Attaching core tidyverse packages ──────────────────────── tidyverse 2.0.0 ──
+✔ dplyr     1.1.4     ✔ readr     2.1.5
+✔ forcats   1.0.0     ✔ stringr   1.6.0
+✔ ggplot2   3.5.2     ✔ tibble    3.2.1
+✔ lubridate 1.9.3     ✔ tidyr     1.3.1
+✔ purrr     1.0.2     
+── Conflicts ────────────────────────────────────────── tidyverse_conflicts() ──
+✖ dplyr::filter() masks stats::filter()
+✖ dplyr::lag()    masks stats::lag()
+ℹ Use the conflicted package (&lt;http://conflicted.r-lib.org/&gt;) to force all conflicts to become errors</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(SuperLearner)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Loading required package: nnls
+Loading required package: gam
+Loading required package: splines
+Loading required package: foreach
+
+Attaching package: 'foreach'
+
+The following objects are masked from 'package:purrr':
+
+    accumulate, when
+
+Loaded gam 1.22-5
+
+Super Learner
+Version: 2.0-29
+Package created on 2024-02-06</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">7</span>)</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">2000</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>obs <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">id =</span> <span class="dv">1</span><span class="sc">:</span>n,</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">x1 =</span> <span class="fu">rnorm</span>(n),</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">x2 =</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(<span class="dv">10</span> <span class="sc">*</span> x1)),</span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">x3 =</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(x1 <span class="sc">*</span> x2 <span class="sc">+</span> <span class="fl">0.5</span> <span class="sc">*</span> x2)),</span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">x4 =</span> <span class="fu">rnorm</span>(n, <span class="at">mean =</span> x1 <span class="sc">*</span> x2, <span class="at">sd =</span> <span class="fl">0.5</span> <span class="sc">*</span> x3),</span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">y  =</span> x1 <span class="sc">+</span> x2 <span class="sc">+</span> x2 <span class="sc">*</span> x3 <span class="sc">+</span> <span class="fu">sin</span>(x4) <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="at">sd =</span> <span class="fl">0.2</span>)</span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a><span class="fu">glimpse</span>(obs)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Rows: 2,000
+Columns: 6
+$ id &lt;int&gt; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, …
+$ x1 &lt;dbl&gt; 2.287247161, -1.196771682, -0.694292510, -0.412292951, -0.970673341…
+$ x2 &lt;int&gt; 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1…
+$ x3 &lt;int&gt; 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1…
+$ x4 &lt;dbl&gt; 1.50283924, 0.04260947, 0.00000000, 0.00000000, 0.00000000, 1.07555…
+$ y  &lt;dbl&gt; 5.03669124, -1.13306036, -0.38284042, -0.28671230, -0.87539307, -0.…</code></pre>
+</div>
+</div>
+<p>The outcome <code>y</code> is a nonlinear function of the covariates, with interactions and a sine term. GLMs will struggle here.</p>
+<hr>
+</section>
+</section>
+<section id="using-the-superlearner-package" class="level2">
+<h2 class="anchored" data-anchor-id="using-the-superlearner-package">4. Using the <code>SuperLearner</code> Package</h2>
+<section id="basic-call" class="level3">
+<h3 class="anchored" data-anchor-id="basic-call">4.1 Basic call</h3>
+<p>We’ll start with a small library for illustration.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1234</span>)</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>X <span class="ot">&lt;-</span> obs <span class="sc">%&gt;%</span> <span class="fu">select</span>(x1<span class="sc">:</span>x4) <span class="sc">%&gt;%</span> <span class="fu">as.data.frame</span>()</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>Y <span class="ot">&lt;-</span> obs<span class="sc">$</span>y</span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>SL.lib <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>,      <span class="co"># simple GLM</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>            <span class="st">"SL.mean"</span>,     <span class="co"># intercept-only</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>            <span class="st">"SL.earth"</span>,    <span class="co"># multivariate adaptive regression splines (MARS)</span></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>            <span class="st">"SL.ranger"</span>)   <span class="co"># random forest</span></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>sl_fit <span class="ot">&lt;-</span> <span class="fu">SuperLearner</span>(</span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> Y,</span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">X =</span> X,</span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>  <span class="at">newX =</span> <span class="cn">NULL</span>,</span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="fu">gaussian</span>(),</span>
+<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>  <span class="at">SL.library =</span> SL.lib,</span>
+<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">method =</span> <span class="st">"method.NNLS"</span>,  <span class="co"># non-negative least squares metalearner</span></span>
+<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>  <span class="at">cvControl =</span> <span class="fu">list</span>(<span class="at">V =</span> <span class="dv">10</span>L)</span>
+<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Loading required namespace: earth</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Loading required namespace: ranger</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>sl_fit</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Call:  
+SuperLearner(Y = Y, X = X, newX = NULL, family = gaussian(), SL.library = SL.lib,  
+    method = "method.NNLS", cvControl = list(V = 10L)) 
+
+                    Risk      Coef
+SL.glm_All    0.15038334 0.0000000
+SL.mean_All   4.52716718 0.0000000
+SL.earth_All  0.04408952 0.8593302
+SL.ranger_All 0.05735981 0.1406698</code></pre>
+</div>
+</div>
+<p>Key outputs:</p>
+<ul>
+<li><code>Risk</code>: cross-validated risk (e.g., MSE) for each learner</li>
+<li><code>Coef</code>: weight given to each learner in the ensemble</li>
+</ul>
+<p>The learner with the smallest CV-risk often gets the largest weight, but SL can combine learners.</p>
+<p>We can access the <strong>ensemble predictions</strong>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(sl_fit<span class="sc">$</span>SL.predict)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>         [,1]
+1  5.36960217
+2 -1.15651994
+3 -0.66557910
+4 -0.39653932
+5 -0.94879355
+6 -0.04451723</code></pre>
+</div>
+</div>
+<p>and predictions from individual learners:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(sl_fit<span class="sc">$</span>library.predict)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  SL.glm_All SL.mean_All SL.earth_All SL.ranger_All
+1  4.9119003    1.145784   5.44169210     4.9292158
+2 -0.9619611    1.145784  -1.14585410    -1.2216759
+3 -0.8907976    1.145784  -0.67326080    -0.6186528
+4 -0.6300543    1.145784  -0.40211488    -0.3624791
+5 -1.1463457    1.145784  -0.94947428    -0.9446351
+6 -0.1673960    1.145784  -0.01723667    -0.2111701</code></pre>
+</div>
+</div>
+<hr>
+</section>
+</section>
+<section id="choosing-a-loss-function-mse-vs-log-likelihood-vs-auc" class="level2">
+<h2 class="anchored" data-anchor-id="choosing-a-loss-function-mse-vs-log-likelihood-vs-auc">5. Choosing a Loss Function: MSE vs Log-Likelihood vs AUC</h2>
+<p>SuperLearner allows different <strong>loss functions</strong>, which define what we mean by “best” prediction.</p>
+<section id="mean-squared-error-mse" class="level3">
+<h3 class="anchored" data-anchor-id="mean-squared-error-mse">5.1 Mean Squared Error (MSE)</h3>
+<ul>
+<li>Default for <code>family = gaussian()</code></li>
+<li>Appropriate for <strong>continuous outcomes</strong> when we care about squared error: <span class="math display">\[ L(y, \hat{y}) = (y - \hat{y})^2 \]</span></li>
+<li>Good when we want well-calibrated mean predictions</li>
+</ul>
+<p>Example (already used above): <code>method = "method.NNLS"</code> with <code>family = gaussian()</code></p>
+</section>
+<section id="negative-log-likelihood-binomial-deviance" class="level3">
+<h3 class="anchored" data-anchor-id="negative-log-likelihood-binomial-deviance">5.2 Negative Log-Likelihood (Binomial deviance)</h3>
+<ul>
+<li>Natural choice for <strong>binary outcomes</strong> when we care about probability calibration: <span class="math display">\[ L(y, \hat{p}) = -[y \log(\hat{p}) + (1-y) \log(1-\hat{p})] \]</span></li>
+<li>Strongly penalizes confident but wrong predictions</li>
+<li>Recommended for:
+<ul>
+<li>Outcome models (<code>Y</code> binary)</li>
+<li>Treatment models (<code>A</code> binary) in causal inference</li>
+</ul></li>
+</ul>
+<p>Use <code>method = "method.NNloglik"</code> with <code>family = binomial()</code>.</p>
+<p>Example:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="co"># suppose Y is binary</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>Y_bin <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(X<span class="sc">$</span>x1 <span class="sc">+</span> X<span class="sc">$</span>x2))</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>sl_loglik <span class="ot">&lt;-</span> <span class="fu">SuperLearner</span>(</span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> Y_bin,</span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">X =</span> X,</span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="fu">binomial</span>(),</span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>, <span class="st">"SL.ranger"</span>),</span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">method =</span> <span class="st">"method.NNloglik"</span></span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a>sl_loglik</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Call:  
+SuperLearner(Y = Y_bin, X = X, family = binomial(), SL.library = c("SL.glm",  
+    "SL.mean", "SL.ranger"), method = "method.NNloglik") 
+
+                   Risk      Coef
+SL.glm_All    0.5286216 0.8914129
+SL.mean_All   0.6818619 0.0000000
+SL.ranger_All 0.5537130 0.1085871</code></pre>
+</div>
+</div>
+</section>
+<section id="auc-rank-loss" class="level3">
+<h3 class="anchored" data-anchor-id="auc-rank-loss">5.3 AUC / Rank Loss</h3>
+<ul>
+<li>For classification problems where the <strong>ranking</strong> of probabilities matters more than calibration</li>
+<li>Common when choosing a threshold later (e.g., risk stratification)</li>
+<li>SuperLearner implementation: <code>method = "method.AUC"</code></li>
+<li>Particularly useful when interested in discriminatory ability (e.g., disease risk scores)</li>
+</ul>
+<p>Example:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(cvAUC)   <span class="co"># required by method.AUC</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>sl_auc <span class="ot">&lt;-</span> <span class="fu">SuperLearner</span>(</span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> Y_bin,</span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">X =</span> X,</span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="fu">binomial</span>(),</span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>, <span class="st">"SL.ranger"</span>),</span>
+<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">method =</span> <span class="st">"method.AUC"</span></span>
+<span id="cb20-9"><a href="#cb20-9" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in method$computeCoef(Z = Z, Y = Y, libraryNames = libraryNames, :
+optim didn't converge when estimating the super learner coefficients, reason
+(see ?optim): 52 optim message: ERROR: ABNORMAL_TERMINATION_IN_LNSRCH</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a>sl_auc</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Call:  
+SuperLearner(Y = Y_bin, X = X, family = binomial(), SL.library = c("SL.glm",  
+    "SL.mean", "SL.ranger"), method = "method.AUC") 
+
+                   Risk         Coef
+SL.glm_All    0.1938743 0.9988292700
+SL.mean_All   0.5268196 0.0006672332
+SL.ranger_All 0.2104779 0.0005034968</code></pre>
+</div>
+</div>
+</section>
+<section id="which-loss-should-i-choose" class="level3">
+<h3 class="anchored" data-anchor-id="which-loss-should-i-choose">5.4 Which loss should I choose?</h3>
+<ul>
+<li><strong>For outcome models in TMLE/AIPW:</strong>
+<ul>
+<li>If binary → log-likelihood (binomial deviance)<br>
+</li>
+<li>If continuous → MSE or other appropriate distribution-based loss<br>
+</li>
+</ul></li>
+<li><strong>For treatment / censoring models in causal inference:</strong>
+<ul>
+<li>Typically log-likelihood (because we want accurate estimates of <code>P(A | W)</code>)</li>
+</ul></li>
+<li><strong>For pure classification (no causal estimation):</strong>
+<ul>
+<li>Consider AUC loss (<code>method.AUC</code>) if ranking is the priority</li>
+</ul></li>
+</ul>
+<hr>
+</section>
+</section>
+<section id="interpreting-cv-risk-and-coefficient-weights" class="level2">
+<h2 class="anchored" data-anchor-id="interpreting-cv-risk-and-coefficient-weights">6. Interpreting CV-Risk and Coefficient Weights</h2>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb24"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a>sl_fit<span class="sc">$</span>cvRisk</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>   SL.glm_All   SL.mean_All  SL.earth_All SL.ranger_All 
+   0.15038334    4.52716718    0.04408952    0.05735981 </code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb26"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a>sl_fit<span class="sc">$</span>coef</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>   SL.glm_All   SL.mean_All  SL.earth_All SL.ranger_All 
+    0.0000000     0.0000000     0.8593302     0.1406698 </code></pre>
+</div>
+</div>
+<ul>
+<li><code>cvRisk</code> shows cross-validated risk for each algorithm</li>
+<li><code>coef</code> gives the ensemble weights (metalearner solution)</li>
+</ul>
+<p>An algorithm might have:</p>
+<ul>
+<li>Low risk → high weight<br>
+</li>
+<li>High risk → weight near zero (effectively excluded)</li>
+</ul>
+<p>This matches the demonstration in the Benkeser notes where GLM dominates mean-only models when predicting MI.</p>
+<hr>
+</section>
+<section id="customizing-the-library-and-tuning-learners" class="level2">
+<h2 class="anchored" data-anchor-id="customizing-the-library-and-tuning-learners">7. Customizing the Library and Tuning Learners</h2>
+<section id="adding-tuned-versions-of-a-learner-e.g.-random-forest" class="level3">
+<h3 class="anchored" data-anchor-id="adding-tuned-versions-of-a-learner-e.g.-random-forest">7.1 Adding tuned versions of a learner (e.g., Random Forest)</h3>
+<p>We can define bounded random forest variants with different hyperparameters.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a>SL.ranger_mtry3 <span class="ot">&lt;-</span> <span class="cf">function</span>(..., <span class="at">mtry =</span> <span class="dv">3</span>) {</span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">SL.ranger</span>(..., <span class="at">mtry =</span> mtry)</span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb28-4"><a href="#cb28-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb28-5"><a href="#cb28-5" aria-hidden="true" tabindex="-1"></a>SL.ranger_mtry5 <span class="ot">&lt;-</span> <span class="cf">function</span>(..., <span class="at">mtry =</span> <span class="dv">5</span>) {</span>
+<span id="cb28-6"><a href="#cb28-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">SL.ranger</span>(..., <span class="at">mtry =</span> mtry)</span>
+<span id="cb28-7"><a href="#cb28-7" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb28-8"><a href="#cb28-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb28-9"><a href="#cb28-9" aria-hidden="true" tabindex="-1"></a>SL.lib_tuned <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>,</span>
+<span id="cb28-10"><a href="#cb28-10" aria-hidden="true" tabindex="-1"></a>                  <span class="st">"SL.earth"</span>,</span>
+<span id="cb28-11"><a href="#cb28-11" aria-hidden="true" tabindex="-1"></a>                  <span class="st">"SL.ranger_mtry3"</span>,</span>
+<span id="cb28-12"><a href="#cb28-12" aria-hidden="true" tabindex="-1"></a>                  <span class="st">"SL.ranger_mtry5"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Then run:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb29"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">123</span>)</span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a>sl_tuned <span class="ot">&lt;-</span> <span class="fu">SuperLearner</span>(</span>
+<span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> Y,</span>
+<span id="cb29-4"><a href="#cb29-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">X =</span> X,</span>
+<span id="cb29-5"><a href="#cb29-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="fu">gaussian</span>(),</span>
+<span id="cb29-6"><a href="#cb29-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">SL.library =</span> SL.lib_tuned,</span>
+<span id="cb29-7"><a href="#cb29-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">method =</span> <span class="st">"method.NNLS"</span></span>
+<span id="cb29-8"><a href="#cb29-8" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Error in ranger::ranger(`_Y` ~ ., data = cbind(`_Y` = Y, X), num.trees = num.trees,  : 
+  User interrupt or internal error.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in FUN(X[[i]], ...): Error in algorithm SL.ranger_mtry5 
+  The Algorithm will be removed from the Super Learner (i.e. given weight 0) </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Error in ranger::ranger(`_Y` ~ ., data = cbind(`_Y` = Y, X), num.trees = num.trees,  : 
+  User interrupt or internal error.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in FUN(X[[i]], ...): Error in algorithm SL.ranger_mtry5 
+  The Algorithm will be removed from the Super Learner (i.e. given weight 0) </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Error in ranger::ranger(`_Y` ~ ., data = cbind(`_Y` = Y, X), num.trees = num.trees,  : 
+  User interrupt or internal error.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in FUN(X[[i]], ...): Error in algorithm SL.ranger_mtry5 
+  The Algorithm will be removed from the Super Learner (i.e. given weight 0) </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Error in ranger::ranger(`_Y` ~ ., data = cbind(`_Y` = Y, X), num.trees = num.trees,  : 
+  User interrupt or internal error.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in FUN(X[[i]], ...): Error in algorithm SL.ranger_mtry5 
+  The Algorithm will be removed from the Super Learner (i.e. given weight 0) </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Error in ranger::ranger(`_Y` ~ ., data = cbind(`_Y` = Y, X), num.trees = num.trees,  : 
+  User interrupt or internal error.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in FUN(X[[i]], ...): Error in algorithm SL.ranger_mtry5 
+  The Algorithm will be removed from the Super Learner (i.e. given weight 0) </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Error in ranger::ranger(`_Y` ~ ., data = cbind(`_Y` = Y, X), num.trees = num.trees,  : 
+  User interrupt or internal error.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in FUN(X[[i]], ...): Error in algorithm SL.ranger_mtry5 
+  The Algorithm will be removed from the Super Learner (i.e. given weight 0) </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Error in ranger::ranger(`_Y` ~ ., data = cbind(`_Y` = Y, X), num.trees = num.trees,  : 
+  User interrupt or internal error.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in FUN(X[[i]], ...): Error in algorithm SL.ranger_mtry5 
+  The Algorithm will be removed from the Super Learner (i.e. given weight 0) </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Error in ranger::ranger(`_Y` ~ ., data = cbind(`_Y` = Y, X), num.trees = num.trees,  : 
+  User interrupt or internal error.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in FUN(X[[i]], ...): Error in algorithm SL.ranger_mtry5 
+  The Algorithm will be removed from the Super Learner (i.e. given weight 0) </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Error in ranger::ranger(`_Y` ~ ., data = cbind(`_Y` = Y, X), num.trees = num.trees,  : 
+  User interrupt or internal error.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in FUN(X[[i]], ...): Error in algorithm SL.ranger_mtry5 
+  The Algorithm will be removed from the Super Learner (i.e. given weight 0) </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Error in ranger::ranger(`_Y` ~ ., data = cbind(`_Y` = Y, X), num.trees = num.trees,  : 
+  User interrupt or internal error.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in FUN(X[[i]], ...): Error in algorithm SL.ranger_mtry5 
+  The Algorithm will be removed from the Super Learner (i.e. given weight 0) </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Error in ranger::ranger(`_Y` ~ ., data = cbind(`_Y` = Y, X), num.trees = num.trees,  : 
+  User interrupt or internal error.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in FUN(X[[i]], ...): Error in algorithm SL.ranger_mtry5  on full data 
+  The Algorithm will be removed from the Super Learner (i.e. given weight 0) </code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning in SuperLearner(Y = Y, X = X, family = gaussian(), SL.library =
+SL.lib_tuned, : Coefficients already 0 for all failed algorithm(s)</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb53"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a>sl_tuned<span class="sc">$</span>cvRisk</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>         SL.glm_All        SL.earth_All SL.ranger_mtry3_All SL.ranger_mtry5_All 
+          0.1506218           0.0440174           0.0505784                  NA </code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb55"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a>sl_tuned<span class="sc">$</span>coef</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>         SL.glm_All        SL.earth_All SL.ranger_mtry3_All SL.ranger_mtry5_All 
+            0.00000             0.73464             0.26536             0.00000 </code></pre>
+</div>
+</div>
+<p>SuperLearner automatically picks which tuned version (or combination) works best.</p>
+<hr>
+</section>
+</section>
+<section id="cross-validated-superlearner-cv.superlearner" class="level2">
+<h2 class="anchored" data-anchor-id="cross-validated-superlearner-cv.superlearner">8. Cross-Validated SuperLearner (<code>CV.SuperLearner</code>)</h2>
+<p><code>CV.SuperLearner</code> adds an <strong>outer layer</strong> of cross-validation to evaluate SL versus its components objectively.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb57"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">123</span>)</span>
+<span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a>cv_sl <span class="ot">&lt;-</span> <span class="fu">CV.SuperLearner</span>(</span>
+<span id="cb57-3"><a href="#cb57-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> Y,</span>
+<span id="cb57-4"><a href="#cb57-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">X =</span> X,</span>
+<span id="cb57-5"><a href="#cb57-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">V =</span> <span class="dv">5</span>,</span>
+<span id="cb57-6"><a href="#cb57-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="fu">gaussian</span>(),</span>
+<span id="cb57-7"><a href="#cb57-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">SL.library =</span> SL.lib</span>
+<span id="cb57-8"><a href="#cb57-8" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb57-9"><a href="#cb57-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb57-10"><a href="#cb57-10" aria-hidden="true" tabindex="-1"></a>cv_sl</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Call:  
+CV.SuperLearner(Y = Y, X = X, V = 5, family = gaussian(), SL.library = SL.lib) 
+
+
+
+Cross-validated predictions from the SuperLearner:  SL.predict 
+
+Cross-validated predictions from the discrete super learner (cross-validation selector):  discreteSL.predict 
+
+Which library algorithm was the discrete super learner:  whichDiscreteSL 
+
+Cross-validated prediction for all algorithms in the library:  library.predict</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb59"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(cv_sl)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="superlearner_files/figure-html/unnamed-chunk-10-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>The plot shows:</p>
+<ul>
+<li>Cross-validated risks and confidence intervals for each learner</li>
+<li>Performance of the discrete and continuous SuperLearner</li>
+</ul>
+<p>This step is particularly helpful when you want to justify using SL rather than a single, simpler algorithm.</p>
+<hr>
+</section>
+<section id="integrating-superlearner-into-causal-inference" class="level2">
+<h2 class="anchored" data-anchor-id="integrating-superlearner-into-causal-inference">9. Integrating SuperLearner into Causal Inference</h2>
+<p>So far we focused on prediction. How does this relate to causal inference?</p>
+<p>For a point-treatment ATE, a TMLE analysis might look like:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb60"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb60-1"><a href="#cb60-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Example skeleton (you will flesh this out later with your own data)</span></span>
+<span id="cb60-2"><a href="#cb60-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tmle)</span>
+<span id="cb60-3"><a href="#cb60-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb60-4"><a href="#cb60-4" aria-hidden="true" tabindex="-1"></a>tmle_fit <span class="ot">&lt;-</span> <span class="fu">tmle</span>(</span>
+<span id="cb60-5"><a href="#cb60-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> Y_bin,          <span class="co"># binary outcome</span></span>
+<span id="cb60-6"><a href="#cb60-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">A =</span> A,              <span class="co"># treatment</span></span>
+<span id="cb60-7"><a href="#cb60-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">W =</span> X,              <span class="co"># covariates</span></span>
+<span id="cb60-8"><a href="#cb60-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="st">"binomial"</span>,</span>
+<span id="cb60-9"><a href="#cb60-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.ranger"</span>, <span class="st">"SL.earth"</span>),</span>
+<span id="cb60-10"><a href="#cb60-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">g.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.ranger"</span>, <span class="st">"SL.mean"</span>)</span>
+<span id="cb60-11"><a href="#cb60-11" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb60-12"><a href="#cb60-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb60-13"><a href="#cb60-13" aria-hidden="true" tabindex="-1"></a>tmle_fit<span class="sc">$</span>estimates<span class="sc">$</span>ATE</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Here:</p>
+<ul>
+<li><code>Q.SL.library</code> is used to estimate outcome regression <code>E[Y|A,W]</code></li>
+<li><code>g.SL.library</code> is used to estimate propensity scores <code>P(A|W)</code></li>
+<li>TMLE combines these with targeting to produce an efficient, doubly robust estimate</li>
+</ul>
+<p>Key advantages:</p>
+<ul>
+<li>You no longer need to guess the “right” model for Y or A<br>
+</li>
+<li>You can include many flexible learners without overfitting (thanks to SL + CV)<br>
+</li>
+<li>Your causal inference relies less on arbitrary parametric modeling choices</li>
+</ul>
+<hr>
+</section>
+<section id="practical-tips-for-using-superlearner" class="level2">
+<h2 class="anchored" data-anchor-id="practical-tips-for-using-superlearner">10. Practical Tips for Using SuperLearner</h2>
+<ol type="1">
+<li><strong>Start with a modest but diverse library</strong>
+<ul>
+<li>GLM (<code>SL.glm</code>)<br>
+</li>
+<li>Random forest (<code>SL.ranger</code> or <code>SL.randomForest</code>)<br>
+</li>
+<li>MARS (<code>SL.earth</code>)<br>
+</li>
+<li>Penalized regression (<code>SL.glmnet</code>)</li>
+</ul></li>
+<li><strong>Pick loss functions that match your problem</strong>
+<ul>
+<li>Binary → log-likelihood (for calibration) or AUC (for ranking)<br>
+</li>
+<li>Continuous → MSE</li>
+</ul></li>
+<li><strong>Watch computation time</strong>
+<ul>
+<li>SL is more expensive than a single GLM, especially with many learners and CV folds.</li>
+</ul></li>
+<li><strong>Use SL primarily on nuisance functions</strong>
+<ul>
+<li>Don’t use SL to directly estimate the causal effect; instead, use SL to estimate <code>Q</code> and <code>g</code> and feed these into TMLE, AIPW, etc.</li>
+</ul></li>
+<li><strong>Inspect SL outputs</strong>
+<ul>
+<li>Which learners are getting weight?<br>
+</li>
+<li>Are any learners consistently poor performers?<br>
+</li>
+<li>Do you need to adjust your library?</li>
+</ul></li>
+</ol>
+<hr>
+</section>
+<section id="summary" class="level2">
+<h2 class="anchored" data-anchor-id="summary">11. Summary</h2>
+<p>In this chapter you learned</p>
+<ul>
+<li>How SuperLearner combines multiple algorithms using cross-validation and a metalearner<br>
+</li>
+<li>The role of loss functions (MSE, log-likelihood, AUC) and when to choose each<br>
+</li>
+<li>How to implement SuperLearner in R, inspect CV-risk and weights, and customize the library<br>
+</li>
+<li>How SuperLearner supports reliable causal inference by improving nuisance function estimation and integrating seamlessly with TMLE and other estimators</li>
+</ul>
+<p>Next, we move to <strong>Module 3</strong>, where we tackle longitudinal data, dynamic treatment regimes, and modified treatment policies, often using SuperLearner as a core building block.</p>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
