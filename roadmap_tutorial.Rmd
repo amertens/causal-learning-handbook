@@ -63,6 +63,15 @@ We shall now delve into each of these steps in details!
   
 * We note that there is massive flexibility in how we can define our desired hypothetical experiments. 
  
+### Target Trial Emulation
+
+The hypothetical experiment defined in Step 0 can be viewed as a target trial.
+
+Observational studies aim to emulate this trial by aligning eligibility criteria, treatment assignment, follow-up, outcome definitions, and estimands.
+
+The Causal Roadmap provides the formal structure for conducting such emulations transparently.
+
+ 
  
 ## Step 1: Define the causal model 
 * Causal modeling formalizes our knowledge however limited. We are able to explore which variables affect each other, examine the role of unmeasured factors and the functional form of the relationships between variables. 
@@ -112,6 +121,51 @@ knitr::include_graphics("cm5.png")
   * For a binary outcome, we define the causal risk difference (CRD) as $\mathbb{P}(Y_1=1)-\mathbb{P}(Y_0=1)$.
 * Many other causal parameters are possible!!
   
+### Estimand Specification (ICH E9[R1] Framework)
+
+An estimand precisely defines the treatment effect of interest by specifying all attributes of the causal question.
+
+| Attribute | Specification |
+|----------|---------------|
+| Population | Eligible individuals meeting study inclusion criteria |
+| Treatment Strategies | Intervention A versus comparator B |
+| Endpoint | Binary or time-to-event outcome within a fixed horizon |
+| Intercurrent Events | Addressed via treatment-policy or hypothetical strategy |
+| Summary Measure | Risk difference, risk ratio, or mean difference |
+
+Explicit estimand specification ensures alignment between the scientific question, identification assumptions, and estimation strategy.
+
+### Treatment-Policy versus Hypothetical Estimands
+
+A treatment-policy estimand contrasts outcomes under initial treatment assignment regardless of subsequent treatment changes (i.e., intention-to-treat estimates as presented in this workshop).
+
+A hypothetical estimand contrasts outcomes under a counterfactual world in which intercurrent events (e.g., switching or discontinuation) do not occur.
+
+The choice between these estimands reflects different scientific questions and determines how intercurrent events are handled during analysis.
+
+### Intercurrent Events
+
+Intercurrent events are post-treatment events that affect the interpretation or existence of the outcome, such as treatment switching, discontinuation, or death.
+
+Handling of intercurrent events must be specified at the estimand stage, not deferred to estimation. Common strategies include:
+
+- Treatment-policy: ignore the intercurrent event
+- Hypothetical: censor or reweight to eliminate its occurrence
+- Composite: redefine the outcome to include the event
+
+This choice determines the causal question being answered.
+
+### Time-to-Event Outcomes and Risk-Based Estimands
+
+In many applications, outcomes occur over time and are subject to censoring.
+
+Rather than targeting hazard ratios, the Causal Roadmap naturally accommodates risk-based estimands, such as cumulative incidence at a fixed time horizon.
+
+For example, the causal risk difference at 90 days compares the probability of experiencing the event by day 90 under each treatment strategy.
+
+
+
+
 
 ## Step 3: Link to observed data
 
@@ -120,7 +174,17 @@ knitr::include_graphics("cm5.png")
 * This provides a link between the causal world and the real (observed) world and therefore our causal model implies our statistical model which is the set of possible distributions of observed data.
 * The causal model may but often does not place any restrictions on the statistical model in which case the statistical model is ***non parametric***.
  * For example our model says that A is a function of W and $U_A$ but does not specify the form of that function: A= $f_A(W,U_A)$. However, if we know the form, that should be specified in the causal model. 
- 
+
+### Observed-Data Censoring Rules
+
+The observed data structure must specify which events terminate follow-up and how they relate to the estimand.
+
+Censoring may occur due to administrative end of follow-up, loss to follow-up, or treatment switching.
+
+Whether censoring is causal or administrative depends on the estimand and must be addressed through design or analysis.
+
+
+
 ## Step 4: Assess Identifiablity
 * This process involves linking the causal effect to the parameter estimable from observed data. This requires some assumptions as follows:
   * Temporality: exposure precedes the outcome. This is indicated by an arrow on the causal graph from A to Y
@@ -140,13 +204,20 @@ $$
 
 * Again wishing for something does not make it true.
 * Under the above assumptions we can have the G-computation identifiability result (Robins 1986) as
-  * $\mathbb{E}[Y_1-Y_0] = \mathbb{E}\big[\mathbb{E}(Y\mid A=1,W)-\mathbb{E}(Y\mid A=0,W)]$ where the right handside is our parameter of interest a.k.a our statistical estimand.
+  * $\mathbb{E}[Y_1-Y_0] = \mathbb{E}\big[\mathbb{E}(Y\mid A=1,W)-\mathbb{E}(Y\mid A=0,W)]$ where the right handside is our parameter of interest a.k.a our statistical estimand. **Connection to estimation:** The g-computation (simple substitution) estimator in Step 5 directly implements this identified functional by estimating \(E[Y \mid A, W]\), predicting under \(A=1\) and \(A=0\), and averaging over \(W\). In other words, Step 5 begins by turning the Step 4 identification formula into an explicit computational procedure.
   * For a binary outcome, we have the marginal risk difference as \mathbb{E}\big[\mathbb{P}(Y=1\mid A=1,W)-\mathbb{P}(Y=1\mid A=0,W)]$. This is marginal because the outer expectation averages over the confounder distribution. 
 
 * What if the assumptions are not all met? For example one might be worried about unmeasured confounders or that the data structure does not assure temporality.Possible options include;
   * Giving up!!
   * Changing the research question, the exposure, the outcome or the target population
   * Proceeding to do the best job possible estimating the target parameter provided the question is still well-defined and interpretable and that we  can still get as close as possible to the wished for causal parameter given the limitations in the data. 
+  
+  
+*Assessing Assumptions in Real-World Data* The plausibility of identification assumptions depends on the data source. For example, claims data may offer rich information on diagnoses and procedures but limited clinical detail.Explicitly discussing data limitations strengthens interpretation and guides sensitivity analyses.
+
+Having established the causal estimand, the observed-data structure, and the assumptions under which the estimand is identified, we now turn to estimation. At this stage of the Causal Roadmap, the scientific question has been translated into a well-defined statistical target, and the remaining tasks concern how best to estimate this target from finite data, assess precision, and diagnose potential threats such as model misspecification or practical violations of assumptions. The choice of estimator should therefore be guided by the estimand and identification results, rather than driving them.
+
+
   
 ## Step 5: Choose and apply the estimator
 
@@ -183,11 +254,24 @@ $$
   * Inverse probability of treatment weighting (IPTW)
   * Targeted maximum likelihood estimation (TMLE) with Super Learner
 
-### Simple substitution estimator
+### Simple substitution estimator (g-computation)
+
+*Why start with g-computation?* G-computation (outcome modeling and standardization) is often the most intuitive entry point for causal estimation because it does not interpret a regression coefficient as a causal effect. Instead, it implements the identification formula by estimating the conditional mean outcome \(E[Y \mid A, W]\), predicting counterfactual outcomes under \(A=1\) and \(A=0\) for each individual, and then standardizing (averaging) those predictions over the empirical distribution of \(W\). The resulting contrast is a marginal (population-level) estimand, such as a risk difference.
+
 
 * To get some intuition behind this estimator, let us think of causal inference as a problem of missing information where we know the outcome under the observed exposure but are missing the outcome under the other exposure condition. 
 * We therefore use parametric regression to estimate outcomes for all under both exposed and unexposed conditions after controlling for the measured confounders. 
 * We then average and compare predicted outcomes. The algorithm is as follows. First we shall load in our simulated dataset "CausalWorkshop.csv" and set the random seed.
+
+**Algorithm (standardization / g-computation):**
+
+1. Fit an outcome model \(Q(A,W) = E[Y \mid A, W]\).  
+2. Create two counterfactual datasets by setting \(A=1\) for everyone and \(A=0\) for everyone.  
+3. Predict outcomes under each intervention and average predictions over the observed \(W\) distribution:
+\[
+E[Y^a] = E_W\{E[Y \mid A=a, W]\}.
+\]
+
 
 ```{r}
 library(readr)
@@ -204,6 +288,9 @@ set.seed(1)
 ```{r}
 outcome.regression <- glm(Y ~ A + W1+W2+W3+W4, family='binomial', data=data)
 ```
+
+**Key point:** Regression coefficients (for example, an odds ratio from a logistic model) are typically **conditional** measures given \(W\). The Roadmap target in this workshop is a **marginal** contrast (for example, a risk difference). Standardization (g-computation) converts an outcome regression into a marginal estimand by averaging predicted outcomes over the covariate distribution.
+
 
 2. We use estimates from 1 above to predict outcomes for each unit while "setting" the exposure to different values e.g. A=1 and A=0
 ```{r}
@@ -225,6 +312,8 @@ mean(predict.outcome.A0)
 Simple.Subs <- mean(predict.outcome.A1 - predict.outcome.A0)
 Simple.Subs
 ```
+
+
 
 ### IPTW- Inverse Probability of Treatment Weighting estimator
 
@@ -256,6 +345,9 @@ IPW <- mean(wt1*data$Y) - mean(wt0*data$Y)
 IPW
 mean( (wt1-wt0)*data$Y)
 ```
+
+
+
 ### TMLE- targeted maximum likelihood estimation
 
 * For intuition here,  we again think of causal inference as a problem of missing information. 
