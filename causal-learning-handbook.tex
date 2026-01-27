@@ -111,11 +111,11 @@
 \IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
 \urlstyle{same}
 \hypersetup{
-  pdftitle={Resources},
+  pdftitle={Causal Learning Handbook},
   hidelinks,
   pdfcreator={LaTeX via pandoc}}
 
-\title{Resources}
+\title{Causal Learning Handbook}
 \author{}
 \date{\vspace{-2.5em}}
 
@@ -787,7 +787,25 @@ Having established the causal estimand, the observed-data structure, and the ass
 ## [1] -0.03380285
 \end{verbatim}
 
+\subsubsection{When can g-computation fail?}\label{when-can-g-computation-fail}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Outcome model misspecification:} If \(E[Y \mid A, W]\) is misspecified (wrong functional form, missing interactions), the standardized estimate can be biased.
+\item
+  \textbf{Practical positivity violations:} If some covariate strata rarely receive one treatment, g-computation must extrapolate to regions with little or no support.
+\item
+  \textbf{Unmeasured confounding:} No outcome-modeling approach can correct for confounders that are not measured.
+\end{itemize}
+
+These failure modes motivate (i) overlap diagnostics, (ii) flexible nuisance estimation (for example, SuperLearner), and (iii) doubly robust estimators such as TMLE.
+
+\textbf{Preview:} One way to reduce reliance on parametric assumptions is to estimate \(Q(A,W)\) with flexible learners (for example, generalized additive models, random forests, boosting) or an ensemble via SuperLearner. In the next sections, we use SuperLearner first for nuisance estimation and then integrate it with TMLE, which targets the causal estimand while retaining a basis for statistical inference.
+
 \subsection{IPTW- Inverse Probability of Treatment Weighting estimator}\label{iptw--inverse-probability-of-treatment-weighting-estimator}
+
+\textbf{Intuition (pseudo-population):} IPTW treats confounding as a form of biased sampling. Units who received a treatment that was unlikely given their covariates receive larger weights, and units who received an expected treatment receive smaller weights. In the resulting weighted pseudo-population, treatment is approximately independent of measured covariates (if the propensity score model is correct), mimicking a randomized experiment.
 
 \begin{itemize}
 \tightlist
@@ -837,6 +855,13 @@ Having established the causal estimand, the observed-data structure, and the ass
 ## 
 ## Number of Fisher Scoring iterations: 4
 \end{verbatim}
+
+\textbf{Identification link:} Under consistency, exchangeability given \(W\), and positivity, we can write
+\[
+E\{Y(1)\} = E\left[\frac{\mathbb{I}(A=1)Y}{e(W)}\right], \qquad
+E\{Y(0)\} = E\left[\frac{\mathbb{I}(A=0)Y}{1-e(W)}\right],
+\]
+where \(e(W)=P(A=1\mid W)\). IPTW replaces the expectation with a sample average and replaces \(e(W)\) with an estimate.
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
@@ -926,7 +951,67 @@ Having established the causal estimand, the observed-data structure, and the ass
 ## [1] -0.03260694
 \end{verbatim}
 
+\subsubsection{Stabilized weights (optional but common in practice)}\label{stabilized-weights-optional-but-common-in-practice}
+
+Unstabilized weights can be variable in finite samples. A common alternative is to use stabilized weights, which multiply by the marginal probability of observed treatment:
+\[
+SW_i =
+\begin{cases}
+\frac{P(A=1)}{e(W_i)}, & A_i=1 \\
+\frac{P(A=0)}{1-e(W_i)}, & A_i=0.
+\end{cases}
+\]
+Stabilized weights often reduce variance and improve numerical stability without changing the large-sample target under correct specification.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{pA }\OtherTok{\textless{}{-}} \FunctionTok{mean}\NormalTok{(data}\SpecialCharTok{$}\NormalTok{A)}
+\NormalTok{sw1 }\OtherTok{\textless{}{-}} \FunctionTok{as.numeric}\NormalTok{(data}\SpecialCharTok{$}\NormalTok{A}\SpecialCharTok{==}\DecValTok{1}\NormalTok{) }\SpecialCharTok{*}\NormalTok{ pA }\SpecialCharTok{/}\NormalTok{ predict.prob.A1}
+\NormalTok{sw0 }\OtherTok{\textless{}{-}} \FunctionTok{as.numeric}\NormalTok{(data}\SpecialCharTok{$}\NormalTok{A}\SpecialCharTok{==}\DecValTok{0}\NormalTok{) }\SpecialCharTok{*}\NormalTok{ (}\DecValTok{1}\SpecialCharTok{{-}}\NormalTok{pA) }\SpecialCharTok{/}\NormalTok{ (}\DecValTok{1} \SpecialCharTok{{-}}\NormalTok{ predict.prob.A1)}
+\NormalTok{sw  }\OtherTok{\textless{}{-}}\NormalTok{ sw1 }\SpecialCharTok{+}\NormalTok{ sw0}
+\FunctionTok{summary}\NormalTok{(sw)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{verbatim}
+##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+##  0.6025  0.8991  0.9700  1.0013  1.0937  1.9930
+\end{verbatim}
+
+\textbf{Implementation note:} IPTW can be implemented either by directly computing weighted means of \(Y\) within treatment groups (as shown here) or by fitting a weighted regression of \(Y\) on \(A\) using robust standard errors. These approaches target the same marginal contrast when implemented consistently.
+
+\subsubsection{Diagnostics and practical tips (IPTW)}\label{diagnostics-and-practical-tips-iptw}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Overlap:} Inspect the distribution of \(e(W)\) by treatment group. Limited overlap indicates practical positivity problems and increases variance.
+\item
+  \textbf{Weight tails:} Summarize weights (mean, sd, extreme quantiles). A heavy right tail indicates instability and sensitivity to a small number of observations.
+\item
+  \textbf{Truncation:} Truncating weights (for example, at the 1st and 99th percentiles) can reduce variance at the cost of potential bias. In finite samples, truncation can improve mean squared error, but it should be reported transparently as a sensitivity analysis.
+\end{itemize}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{w }\OtherTok{\textless{}{-}}\NormalTok{ wt1 }\SpecialCharTok{+}\NormalTok{ wt0}
+\NormalTok{lo }\OtherTok{\textless{}{-}} \FunctionTok{quantile}\NormalTok{(w, }\FloatTok{0.01}\NormalTok{)}
+\NormalTok{hi }\OtherTok{\textless{}{-}} \FunctionTok{quantile}\NormalTok{(w, }\FloatTok{0.99}\NormalTok{)}
+\NormalTok{w\_trunc }\OtherTok{\textless{}{-}} \FunctionTok{pmin}\NormalTok{(}\FunctionTok{pmax}\NormalTok{(w, lo), hi)}
+\FunctionTok{summary}\NormalTok{(w\_trunc)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{verbatim}
+##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+##   1.212   1.359   1.525   1.993   2.455   4.885
+\end{verbatim}
+
 \subsection{TMLE- targeted maximum likelihood estimation}\label{tmle--targeted-maximum-likelihood-estimation}
+
+\#\#\#\$ Why doubly robust estimators?
+
+Both g-computation and IPTW rely on strong modeling assumptions: g-computation requires a correct outcome model, while IPTW requires a correct treatment model. Doubly robust estimators combine both approaches and are consistent if \textbf{either} the outcome model or the treatment model is correctly specified. This property is particularly valuable in real-world data settings, where all models are approximations.
 
 \begin{itemize}
 \tightlist
@@ -1419,1131 +1504,6 @@ Here's code to evaluate the ``clever covariate''
 \item
   If you are interested in learning about more advanced settings, here are some links to other resources.
 \end{itemize}
-
-\chapter{Chapter 2.4: SuperLearner and Machine Learning for Causal Inference}\label{chapter-2.4-superlearner-and-machine-learning-for-causal-inference}
-
-\emph{Flexible prediction to strengthen causal effect estimation}
-
-Modern causal inference relies on estimating \textbf{nuisance functions} (outcome regressions and treatment / censoring mechanisms) that are as accurate as possible. If these models are mis-specified, even sophisticated causal estimators can be biased.
-
-Rather than gambling on a single model (e.g., logistic regression), we can \textbf{stack} many candidate learners and let the data decide how to combine them. This is what \textbf{SuperLearner} does.
-
-In this chapter you will learn:
-
-\begin{itemize}
-\tightlist
-\item
-  The intuition behind SuperLearner (SL) and stacking\\
-\item
-  How cross-validation is used to avoid overfitting\\
-\item
-  How to build and interpret SuperLearner models in R\\
-\item
-  When and why to choose different \textbf{loss functions} (MSE, log-likelihood, AUC)\\
-\item
-  How to customize SL libraries and tune algorithms\\
-\item
-  How SL integrates with TMLE and other causal estimators
-\end{itemize}
-
-This chapter leans heavily on the excellent visual tutorial by Katherine Hoffman and the SuperLearner demo by David Benkeser (both provided as PDFs), and recasts them in a causal-inference focused Quarto format.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{1. Why Use SuperLearner in Causal Inference?}\label{why-use-superlearner-in-causal-inference}
-
-Causal estimators such as g-computation, IPTW, AIPW, and TMLE rely on estimating:
-
-\begin{itemize}
-\item
-  The \textbf{outcome regression}:\\
-  \(Q(W, A) = E[Y \mid W, A]\)
-\item
-  The \textbf{treatment (or censoring) mechanism}:\\
-  \(g(W) = P(A = 1 \mid W)\)
-\end{itemize}
-
-In traditional practice, both are often modeled with simple GLMs. This is dangerous when:
-
-\begin{itemize}
-\tightlist
-\item
-  Relationships are nonlinear
-\item
-  Interactions are present
-\item
-  There are many covariates
-\item
-  We are unsure about which variables to include or in what functional form
-\end{itemize}
-
-SuperLearner helps by:
-
-\begin{itemize}
-\tightlist
-\item
-  Combining multiple algorithms (GLM, random forests, LASSO, boosted trees, etc.)
-\item
-  Using \textbf{K-fold cross-validation} to evaluate and weight each algorithm
-\item
-  Producing an ensemble predictor with theoretical guarantees (an ``oracle inequality''): asymptotically, SL performs nearly as well as the best algorithm in the library
-\end{itemize}
-
-In causal inference, we rarely care about prediction for its own sake, but good prediction of nuisance functions leads to \textbf{better causal effect estimation}.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{2. Conceptual Overview of SuperLearner}\label{conceptual-overview-of-superlearner}
-
-At a high level, SuperLearner does the following:
-
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\tightlist
-\item
-  Pick a \textbf{set of candidate learners} (the library).
-\item
-  Split the data into \textbf{K folds}.
-\item
-  For each learner:
-
-  \begin{itemize}
-  \tightlist
-  \item
-    Fit on K-1 folds (training data),
-  \item
-    Predict on the held-out fold (validation data).
-  \end{itemize}
-\item
-  Collect \textbf{cross-validated predictions} for every observation and every learner.
-\item
-  Fit a \textbf{metalearner} (often a linear regression) that finds the optimal weighted combination of the learners' predictions to minimize a chosen \textbf{loss function} (e.g., mean squared error, negative log-likelihood).
-\item
-  Refit each base learner on the full dataset.
-\item
-  Use the metalearner and the refit base learners to form the final ensemble and obtain predictions for new data.
-\end{enumerate}
-
-This is exactly the workflow illustrated in the ``VISUAL GUIDE TO SUPERLEARNING'' figure in the KHstats tutorial.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{3. A Minimal Working Example}\label{a-minimal-working-example}
-
-We'll start with a simple prediction problem, then connect it back to causal inference later.
-
-\subsection{3.1 Simulated data}\label{simulated-data}
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\FunctionTok{library}\NormalTok{(tidyverse)}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-## Warning: package 'ggplot2' was built under R version 4.4.3
-\end{verbatim}
-
-\begin{verbatim}
-## Warning: package 'stringr' was built under R version 4.4.3
-\end{verbatim}
-
-\begin{verbatim}
-## -- Attaching core tidyverse packages ------------------------ tidyverse 2.0.0 --
-## v dplyr     1.1.4     v purrr     1.0.2
-## v forcats   1.0.0     v stringr   1.6.0
-## v ggplot2   3.5.2     v tibble    3.2.1
-## v lubridate 1.9.3     v tidyr     1.3.1
-## -- Conflicts ------------------------------------------ tidyverse_conflicts() --
-## x purrr::accumulate() masks foreach::accumulate()
-## x dplyr::filter()     masks stats::filter()
-## x dplyr::lag()        masks stats::lag()
-## x purrr::when()       masks foreach::when()
-## i Use the conflicted package (<http://conflicted.r-lib.org/>) to force all conflicts to become errors
-\end{verbatim}
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\FunctionTok{library}\NormalTok{(SuperLearner)}
-
-\FunctionTok{set.seed}\NormalTok{(}\DecValTok{7}\NormalTok{)}
-\NormalTok{n }\OtherTok{\textless{}{-}} \DecValTok{2000}
-
-\NormalTok{obs }\OtherTok{\textless{}{-}} \FunctionTok{tibble}\NormalTok{(}
-  \AttributeTok{id =} \DecValTok{1}\SpecialCharTok{:}\NormalTok{n,}
-  \AttributeTok{x1 =} \FunctionTok{rnorm}\NormalTok{(n),}
-  \AttributeTok{x2 =} \FunctionTok{rbinom}\NormalTok{(n, }\DecValTok{1}\NormalTok{, }\FunctionTok{plogis}\NormalTok{(}\DecValTok{10} \SpecialCharTok{*}\NormalTok{ x1)),}
-  \AttributeTok{x3 =} \FunctionTok{rbinom}\NormalTok{(n, }\DecValTok{1}\NormalTok{, }\FunctionTok{plogis}\NormalTok{(x1 }\SpecialCharTok{*}\NormalTok{ x2 }\SpecialCharTok{+} \FloatTok{0.5} \SpecialCharTok{*}\NormalTok{ x2)),}
-  \AttributeTok{x4 =} \FunctionTok{rnorm}\NormalTok{(n, }\AttributeTok{mean =}\NormalTok{ x1 }\SpecialCharTok{*}\NormalTok{ x2, }\AttributeTok{sd =} \FloatTok{0.5} \SpecialCharTok{*}\NormalTok{ x3),}
-  \AttributeTok{y  =}\NormalTok{ x1 }\SpecialCharTok{+}\NormalTok{ x2 }\SpecialCharTok{+}\NormalTok{ x2 }\SpecialCharTok{*}\NormalTok{ x3 }\SpecialCharTok{+} \FunctionTok{sin}\NormalTok{(x4) }\SpecialCharTok{+} \FunctionTok{rnorm}\NormalTok{(n, }\AttributeTok{sd =} \FloatTok{0.2}\NormalTok{)}
-\NormalTok{)}
-
-\FunctionTok{glimpse}\NormalTok{(obs)}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-## Rows: 2,000
-## Columns: 6
-## $ id <int> 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, ~
-## $ x1 <dbl> 2.287247161, -1.196771682, -0.694292510, -0.412292951, -0.970673341~
-## $ x2 <int> 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1~
-## $ x3 <int> 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1~
-## $ x4 <dbl> 1.50283924, 0.04260947, 0.00000000, 0.00000000, 0.00000000, 1.07555~
-## $ y  <dbl> 5.03669124, -1.13306036, -0.38284042, -0.28671230, -0.87539307, -0.~
-\end{verbatim}
-
-The outcome \texttt{y} is a nonlinear function of the covariates, with interactions and a sine term. GLMs will struggle here.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{\texorpdfstring{4. Using the \texttt{SuperLearner} Package}{4. Using the SuperLearner Package}}\label{using-the-superlearner-package}
-
-\subsection{4.1 Basic call}\label{basic-call}
-
-We'll start with a small library for illustration.
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\FunctionTok{set.seed}\NormalTok{(}\DecValTok{1234}\NormalTok{)}
-
-\NormalTok{X }\OtherTok{\textless{}{-}}\NormalTok{ obs }\SpecialCharTok{\%\textgreater{}\%} \FunctionTok{select}\NormalTok{(x1}\SpecialCharTok{:}\NormalTok{x4) }\SpecialCharTok{\%\textgreater{}\%} \FunctionTok{as.data.frame}\NormalTok{()}
-\NormalTok{Y }\OtherTok{\textless{}{-}}\NormalTok{ obs}\SpecialCharTok{$}\NormalTok{y}
-
-\NormalTok{SL.lib }\OtherTok{\textless{}{-}} \FunctionTok{c}\NormalTok{(}\StringTok{"SL.glm"}\NormalTok{,      }\CommentTok{\# simple GLM}
-            \StringTok{"SL.mean"}\NormalTok{,     }\CommentTok{\# intercept{-}only}
-            \StringTok{"SL.earth"}\NormalTok{,    }\CommentTok{\# multivariate adaptive regression splines (MARS)}
-            \StringTok{"SL.ranger"}\NormalTok{)   }\CommentTok{\# random forest}
-
-\NormalTok{sl\_fit }\OtherTok{\textless{}{-}} \FunctionTok{SuperLearner}\NormalTok{(}
-  \AttributeTok{Y =}\NormalTok{ Y,}
-  \AttributeTok{X =}\NormalTok{ X,}
-  \AttributeTok{newX =} \ConstantTok{NULL}\NormalTok{,}
-  \AttributeTok{family =} \FunctionTok{gaussian}\NormalTok{(),}
-  \AttributeTok{SL.library =}\NormalTok{ SL.lib,}
-  \AttributeTok{method =} \StringTok{"method.NNLS"}\NormalTok{,  }\CommentTok{\# non{-}negative least squares metalearner}
-  \AttributeTok{cvControl =} \FunctionTok{list}\NormalTok{(}\AttributeTok{V =} \DecValTok{10}\DataTypeTok{L}\NormalTok{)}
-\NormalTok{)}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-## Loading required namespace: earth
-\end{verbatim}
-
-\begin{verbatim}
-## Loading required namespace: ranger
-\end{verbatim}
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\NormalTok{sl\_fit}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-## 
-## Call:  
-## SuperLearner(Y = Y, X = X, newX = NULL, family = gaussian(), SL.library = SL.lib,  
-##     method = "method.NNLS", cvControl = list(V = 10L)) 
-## 
-## 
-##                     Risk      Coef
-## SL.glm_All    0.15038334 0.0000000
-## SL.mean_All   4.52716718 0.0000000
-## SL.earth_All  0.04408952 0.8593302
-## SL.ranger_All 0.05735981 0.1406698
-\end{verbatim}
-
-Key outputs:
-
-\begin{itemize}
-\tightlist
-\item
-  \texttt{Risk}: cross-validated risk (e.g., MSE) for each learner
-\item
-  \texttt{Coef}: weight given to each learner in the ensemble
-\end{itemize}
-
-The learner with the smallest CV-risk often gets the largest weight, but SL can combine learners.
-
-We can access the \textbf{ensemble predictions}:
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\FunctionTok{head}\NormalTok{(sl\_fit}\SpecialCharTok{$}\NormalTok{SL.predict)}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-##          [,1]
-## 1  5.36960217
-## 2 -1.15651994
-## 3 -0.66557910
-## 4 -0.39653932
-## 5 -0.94879355
-## 6 -0.04451723
-\end{verbatim}
-
-and predictions from individual learners:
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\FunctionTok{head}\NormalTok{(sl\_fit}\SpecialCharTok{$}\NormalTok{library.predict)}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-##   SL.glm_All SL.mean_All SL.earth_All SL.ranger_All
-## 1  4.9119003    1.145784   5.44169210     4.9292158
-## 2 -0.9619611    1.145784  -1.14585410    -1.2216759
-## 3 -0.8907976    1.145784  -0.67326080    -0.6186528
-## 4 -0.6300543    1.145784  -0.40211488    -0.3624791
-## 5 -1.1463457    1.145784  -0.94947428    -0.9446351
-## 6 -0.1673960    1.145784  -0.01723667    -0.2111701
-\end{verbatim}
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{5. Choosing a Loss Function: MSE vs Log-Likelihood vs AUC}\label{choosing-a-loss-function-mse-vs-log-likelihood-vs-auc}
-
-SuperLearner allows different \textbf{loss functions}, which define what we mean by ``best'' prediction.
-
-\subsection{5.1 Mean Squared Error (MSE)}\label{mean-squared-error-mse}
-
-\begin{itemize}
-\tightlist
-\item
-  Default for \texttt{family\ =\ gaussian()}
-\item
-  Appropriate for \textbf{continuous outcomes} when we care about squared error:
-  \[ L(y, \hat{y}) = (y - \hat{y})^2 \]
-\item
-  Good when we want well-calibrated mean predictions
-\end{itemize}
-
-Example (already used above): \texttt{method\ =\ "method.NNLS"} with \texttt{family\ =\ gaussian()}
-
-\subsection{5.2 Negative Log-Likelihood (Binomial deviance)}\label{negative-log-likelihood-binomial-deviance}
-
-\begin{itemize}
-\tightlist
-\item
-  Natural choice for \textbf{binary outcomes} when we care about probability calibration:
-  \[ L(y, \hat{p}) = -[y \log(\hat{p}) + (1-y) \log(1-\hat{p})] \]
-\item
-  Strongly penalizes confident but wrong predictions
-\item
-  Recommended for:
-
-  \begin{itemize}
-  \tightlist
-  \item
-    Outcome models (\texttt{Y} binary)
-  \item
-    Treatment models (\texttt{A} binary) in causal inference
-  \end{itemize}
-\end{itemize}
-
-Use \texttt{method\ =\ "method.NNloglik"} with \texttt{family\ =\ binomial()}.
-
-Example:
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\CommentTok{\# suppose Y is binary}
-\NormalTok{Y\_bin }\OtherTok{\textless{}{-}} \FunctionTok{rbinom}\NormalTok{(n, }\DecValTok{1}\NormalTok{, }\FunctionTok{plogis}\NormalTok{(X}\SpecialCharTok{$}\NormalTok{x1 }\SpecialCharTok{+}\NormalTok{ X}\SpecialCharTok{$}\NormalTok{x2))}
-
-\NormalTok{sl\_loglik }\OtherTok{\textless{}{-}} \FunctionTok{SuperLearner}\NormalTok{(}
-  \AttributeTok{Y =}\NormalTok{ Y\_bin,}
-  \AttributeTok{X =}\NormalTok{ X,}
-  \AttributeTok{family =} \FunctionTok{binomial}\NormalTok{(),}
-  \AttributeTok{SL.library =} \FunctionTok{c}\NormalTok{(}\StringTok{"SL.glm"}\NormalTok{, }\StringTok{"SL.mean"}\NormalTok{, }\StringTok{"SL.ranger"}\NormalTok{),}
-  \AttributeTok{method =} \StringTok{"method.NNloglik"}
-\NormalTok{)}
-
-\NormalTok{sl\_loglik}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-## 
-## Call:  
-## SuperLearner(Y = Y_bin, X = X, family = binomial(), SL.library = c("SL.glm",  
-##     "SL.mean", "SL.ranger"), method = "method.NNloglik") 
-## 
-## 
-##                    Risk      Coef
-## SL.glm_All    0.5286216 0.8914129
-## SL.mean_All   0.6818619 0.0000000
-## SL.ranger_All 0.5537130 0.1085871
-\end{verbatim}
-
-\subsection{5.3 AUC / Rank Loss}\label{auc-rank-loss}
-
-\begin{itemize}
-\tightlist
-\item
-  For classification problems where the \textbf{ranking} of probabilities matters more than calibration
-\item
-  Common when choosing a threshold later (e.g., risk stratification)
-\item
-  SuperLearner implementation: \texttt{method\ =\ "method.AUC"}
-\item
-  Particularly useful when interested in discriminatory ability (e.g., disease risk scores)
-\end{itemize}
-
-Example:
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\FunctionTok{library}\NormalTok{(cvAUC)   }\CommentTok{\# required by method.AUC}
-
-\NormalTok{sl\_auc }\OtherTok{\textless{}{-}} \FunctionTok{SuperLearner}\NormalTok{(}
-  \AttributeTok{Y =}\NormalTok{ Y\_bin,}
-  \AttributeTok{X =}\NormalTok{ X,}
-  \AttributeTok{family =} \FunctionTok{binomial}\NormalTok{(),}
-  \AttributeTok{SL.library =} \FunctionTok{c}\NormalTok{(}\StringTok{"SL.glm"}\NormalTok{, }\StringTok{"SL.mean"}\NormalTok{, }\StringTok{"SL.ranger"}\NormalTok{),}
-  \AttributeTok{method =} \StringTok{"method.AUC"}
-\NormalTok{)}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-## Warning in method$computeCoef(Z = Z, Y = Y, libraryNames = libraryNames, :
-## optim didn't converge when estimating the super learner coefficients, reason
-## (see ?optim): 52 optim message: ERROR: ABNORMAL_TERMINATION_IN_LNSRCH
-\end{verbatim}
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\NormalTok{sl\_auc}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-## 
-## Call:  
-## SuperLearner(Y = Y_bin, X = X, family = binomial(), SL.library = c("SL.glm",  
-##     "SL.mean", "SL.ranger"), method = "method.AUC") 
-## 
-## 
-##                    Risk         Coef
-## SL.glm_All    0.1938743 0.9988292700
-## SL.mean_All   0.5268196 0.0006672332
-## SL.ranger_All 0.2104779 0.0005034968
-\end{verbatim}
-
-\subsection{5.4 Which loss should I choose?}\label{which-loss-should-i-choose}
-
-\begin{itemize}
-\tightlist
-\item
-  \textbf{For outcome models in TMLE/AIPW:}
-
-  \begin{itemize}
-  \tightlist
-  \item
-    If binary → log-likelihood (binomial deviance)\\
-  \item
-    If continuous → MSE or other appropriate distribution-based loss\\
-  \end{itemize}
-\item
-  \textbf{For treatment / censoring models in causal inference:}
-
-  \begin{itemize}
-  \tightlist
-  \item
-    Typically log-likelihood (because we want accurate estimates of \texttt{P(A\ \textbar{}\ W)})
-  \end{itemize}
-\item
-  \textbf{For pure classification (no causal estimation):}
-
-  \begin{itemize}
-  \tightlist
-  \item
-    Consider AUC loss (\texttt{method.AUC}) if ranking is the priority
-  \end{itemize}
-\end{itemize}
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{6. Interpreting CV-Risk and Coefficient Weights}\label{interpreting-cv-risk-and-coefficient-weights}
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\NormalTok{sl\_fit}\SpecialCharTok{$}\NormalTok{cvRisk}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-##    SL.glm_All   SL.mean_All  SL.earth_All SL.ranger_All 
-##    0.15038334    4.52716718    0.04408952    0.05735981
-\end{verbatim}
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\NormalTok{sl\_fit}\SpecialCharTok{$}\NormalTok{coef}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-##    SL.glm_All   SL.mean_All  SL.earth_All SL.ranger_All 
-##     0.0000000     0.0000000     0.8593302     0.1406698
-\end{verbatim}
-
-\begin{itemize}
-\tightlist
-\item
-  \texttt{cvRisk} shows cross-validated risk for each algorithm
-\item
-  \texttt{coef} gives the ensemble weights (metalearner solution)
-\end{itemize}
-
-An algorithm might have:
-
-\begin{itemize}
-\tightlist
-\item
-  Low risk → high weight\\
-\item
-  High risk → weight near zero (effectively excluded)
-\end{itemize}
-
-This matches the demonstration in the Benkeser notes where GLM dominates mean-only models when predicting MI.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{7. Customizing the Library and Tuning Learners}\label{customizing-the-library-and-tuning-learners}
-
-\subsection{7.1 Adding tuned versions of a learner (e.g., Random Forest)}\label{adding-tuned-versions-of-a-learner-e.g.-random-forest}
-
-We can define bounded random forest variants with different hyperparameters.
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\NormalTok{SL.ranger\_mtry3 }\OtherTok{\textless{}{-}} \ControlFlowTok{function}\NormalTok{(..., }\AttributeTok{mtry =} \DecValTok{3}\NormalTok{)\{}
-  \FunctionTok{SL.ranger}\NormalTok{(..., }\AttributeTok{mtry =}\NormalTok{ mtry)}
-\NormalTok{\}}
-
-\NormalTok{SL.ranger\_mtry4 }\OtherTok{\textless{}{-}} \ControlFlowTok{function}\NormalTok{(..., }\AttributeTok{mtry =} \DecValTok{4}\NormalTok{)\{}
-  \FunctionTok{SL.ranger}\NormalTok{(..., }\AttributeTok{mtry =}\NormalTok{ mtry)}
-\NormalTok{\}}
-
-\NormalTok{SL.lib\_tuned }\OtherTok{\textless{}{-}} \FunctionTok{c}\NormalTok{(}\StringTok{"SL.glm"}\NormalTok{,}
-                  \StringTok{"SL.earth"}\NormalTok{,}
-                  \StringTok{"SL.ranger\_mtry3"}\NormalTok{,}
-                  \StringTok{"SL.ranger\_mtry4"}\NormalTok{)}
-\end{Highlighting}
-\end{Shaded}
-
-Then run:
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\FunctionTok{set.seed}\NormalTok{(}\DecValTok{123}\NormalTok{)}
-\NormalTok{sl\_tuned }\OtherTok{\textless{}{-}} \FunctionTok{SuperLearner}\NormalTok{(}
-  \AttributeTok{Y =}\NormalTok{ Y,}
-  \AttributeTok{X =}\NormalTok{ X,}
-  \AttributeTok{family =} \FunctionTok{gaussian}\NormalTok{(),}
-  \AttributeTok{SL.library =}\NormalTok{ SL.lib\_tuned,}
-  \AttributeTok{method =} \StringTok{"method.NNLS"}
-\NormalTok{)}
-
-\NormalTok{sl\_tuned}\SpecialCharTok{$}\NormalTok{cvRisk}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-##          SL.glm_All        SL.earth_All SL.ranger_mtry3_All SL.ranger_mtry4_All 
-##          0.15062184          0.04401740          0.05044671          0.05242569
-\end{verbatim}
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\NormalTok{sl\_tuned}\SpecialCharTok{$}\NormalTok{coef}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-##          SL.glm_All        SL.earth_All SL.ranger_mtry3_All SL.ranger_mtry4_All 
-##           0.0000000           0.7318382           0.2681618           0.0000000
-\end{verbatim}
-
-SuperLearner automatically picks which tuned version (or combination) works best.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{\texorpdfstring{8. Cross-Validated SuperLearner (\texttt{CV.SuperLearner})}{8. Cross-Validated SuperLearner (CV.SuperLearner)}}\label{cross-validated-superlearner-cv.superlearner}
-
-\texttt{CV.SuperLearner} adds an \textbf{outer layer} of cross-validation to evaluate SL versus its components objectively.
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\FunctionTok{set.seed}\NormalTok{(}\DecValTok{123}\NormalTok{)}
-\NormalTok{cv\_sl }\OtherTok{\textless{}{-}} \FunctionTok{CV.SuperLearner}\NormalTok{(}
-  \AttributeTok{Y =}\NormalTok{ Y,}
-  \AttributeTok{X =}\NormalTok{ X,}
-  \AttributeTok{V =} \DecValTok{5}\NormalTok{,}
-  \AttributeTok{family =} \FunctionTok{gaussian}\NormalTok{(),}
-  \AttributeTok{SL.library =}\NormalTok{ SL.lib}
-\NormalTok{)}
-
-\NormalTok{cv\_sl}
-\end{Highlighting}
-\end{Shaded}
-
-\begin{verbatim}
-## 
-## Call:  
-## CV.SuperLearner(Y = Y, X = X, V = 5, family = gaussian(), SL.library = SL.lib) 
-## 
-## 
-## 
-## Cross-validated predictions from the SuperLearner:  SL.predict 
-## 
-## Cross-validated predictions from the discrete super learner (cross-validation selector):  discreteSL.predict 
-## 
-## Which library algorithm was the discrete super learner:  whichDiscreteSL 
-## 
-## Cross-validated prediction for all algorithms in the library:  library.predict
-\end{verbatim}
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\FunctionTok{plot}\NormalTok{(cv\_sl)}
-\end{Highlighting}
-\end{Shaded}
-
-\pandocbounded{\includegraphics[keepaspectratio]{causal-learning-handbook_files/figure-latex/unnamed-chunk-29-1.pdf}}
-
-The plot shows:
-
-\begin{itemize}
-\tightlist
-\item
-  Cross-validated risks and confidence intervals for each learner
-\item
-  Performance of the discrete and continuous SuperLearner
-\end{itemize}
-
-This step is particularly helpful when you want to justify using SL rather than a single, simpler algorithm.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{9. Integrating SuperLearner into Causal Inference}\label{integrating-superlearner-into-causal-inference}
-
-So far we focused on prediction. How does this relate to causal inference?
-
-For a point-treatment ATE, a TMLE analysis might look like:
-
-\begin{Shaded}
-\begin{Highlighting}[]
-\CommentTok{\# Example skeleton (you will flesh this out later with your own data)}
-\FunctionTok{library}\NormalTok{(tmle)}
-
-\NormalTok{tmle\_fit }\OtherTok{\textless{}{-}} \FunctionTok{tmle}\NormalTok{(}
-  \AttributeTok{Y =}\NormalTok{ Y\_bin,          }\CommentTok{\# binary outcome}
-  \AttributeTok{A =}\NormalTok{ A,              }\CommentTok{\# treatment}
-  \AttributeTok{W =}\NormalTok{ X,              }\CommentTok{\# covariates}
-  \AttributeTok{family =} \StringTok{"binomial"}\NormalTok{,}
-  \AttributeTok{Q.SL.library =} \FunctionTok{c}\NormalTok{(}\StringTok{"SL.glm"}\NormalTok{, }\StringTok{"SL.ranger"}\NormalTok{, }\StringTok{"SL.earth"}\NormalTok{),}
-  \AttributeTok{g.SL.library =} \FunctionTok{c}\NormalTok{(}\StringTok{"SL.glm"}\NormalTok{, }\StringTok{"SL.ranger"}\NormalTok{, }\StringTok{"SL.mean"}\NormalTok{)}
-\NormalTok{)}
-
-\NormalTok{tmle\_fit}\SpecialCharTok{$}\NormalTok{estimates}\SpecialCharTok{$}\NormalTok{ATE}
-\end{Highlighting}
-\end{Shaded}
-
-Here:
-
-\begin{itemize}
-\tightlist
-\item
-  \texttt{Q.SL.library} is used to estimate outcome regression \texttt{E{[}Y\textbar{}A,W{]}}
-\item
-  \texttt{g.SL.library} is used to estimate propensity scores \texttt{P(A\textbar{}W)}
-\item
-  TMLE combines these with targeting to produce an efficient, doubly robust estimate
-\end{itemize}
-
-Key advantages:
-
-\begin{itemize}
-\tightlist
-\item
-  You no longer need to guess the ``right'' model for Y or A\\
-\item
-  You can include many flexible learners without overfitting (thanks to SL + CV)\\
-\item
-  Your causal inference relies less on arbitrary parametric modeling choices
-\end{itemize}
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{10. Practical Tips for Using SuperLearner}\label{practical-tips-for-using-superlearner}
-
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\tightlist
-\item
-  \textbf{Start with a modest but diverse library}
-
-  \begin{itemize}
-  \tightlist
-  \item
-    GLM (\texttt{SL.glm})\\
-  \item
-    Random forest (\texttt{SL.ranger} or \texttt{SL.randomForest})\\
-  \item
-    MARS (\texttt{SL.earth})\\
-  \item
-    Penalized regression (\texttt{SL.glmnet})
-  \end{itemize}
-\item
-  \textbf{Pick loss functions that match your problem}
-
-  \begin{itemize}
-  \tightlist
-  \item
-    Binary → log-likelihood (for calibration) or AUC (for ranking)\\
-  \item
-    Continuous → MSE
-  \end{itemize}
-\item
-  \textbf{Watch computation time}
-
-  \begin{itemize}
-  \tightlist
-  \item
-    SL is more expensive than a single GLM, especially with many learners and CV folds.
-  \end{itemize}
-\item
-  \textbf{Use SL primarily on nuisance functions}
-
-  \begin{itemize}
-  \tightlist
-  \item
-    Don't use SL to directly estimate the causal effect; instead, use SL to estimate \texttt{Q} and \texttt{g} and feed these into TMLE, AIPW, etc.
-  \end{itemize}
-\item
-  \textbf{Inspect SL outputs}
-
-  \begin{itemize}
-  \tightlist
-  \item
-    Which learners are getting weight?\\
-  \item
-    Are any learners consistently poor performers?\\
-  \item
-    Do you need to adjust your library?
-  \end{itemize}
-\end{enumerate}
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{11. Summary}\label{summary}
-
-In this chapter you learned
-
-\begin{itemize}
-\tightlist
-\item
-  How SuperLearner combines multiple algorithms using cross-validation and a metalearner\\
-\item
-  The role of loss functions (MSE, log-likelihood, AUC) and when to choose each\\
-\item
-  How to implement SuperLearner in R, inspect CV-risk and weights, and customize the library\\
-\item
-  How SuperLearner supports reliable causal inference by improving nuisance function estimation and integrating seamlessly with TMLE and other estimators
-\end{itemize}
-
-Next, we move to \textbf{Module 3}, where we tackle longitudinal data, dynamic treatment regimes, and modified treatment policies, often using SuperLearner as a core building block.
-
-\chapter{Chapter X: Common Pitfalls and How to Avoid Them}\label{chapter-x-common-pitfalls-and-how-to-avoid-them}
-
-\emph{A practical guide for avoiding frequent mistakes in causal inference and targeted learning}
-
-Even with a solid understanding of the Causal Roadmap and modern estimators, it is easy to make analytic choices that lead to biased, unstable, or misleading results. In real-world evidence (RWE), the stakes are higher: data are messy, treatment pathways are irregular, and credibility depends on careful alignment between the scientific question, identification conditions, and the estimator.
-
-This chapter catalogs common pitfalls encountered in causal inference, especially in pharmacoepidemiologic and longitudinal RWE settings, and provides practical strategies to avoid them.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{1. Pitfall: Confusing Association With Causation}\label{pitfall-confusing-association-with-causation}
-
-\subsection{The regression coefficient problem}\label{the-regression-coefficient-problem}
-
-\textbf{Mistake:}\\
-Fitting a multivariable regression and interpreting the treatment coefficient as a causal effect.
-
-\textbf{Why it matters:}\\
-Regression coefficients are typically \textbf{conditional associations}, not causal contrasts. Unless the model corresponds to the identified statistical functional and is correctly specified, the result may not estimate the causal estimand.
-
-\textbf{Avoid by:}\\
-- Defining a precise \textbf{causal question} and \textbf{estimand}\\
-- Estimating the corresponding statistical functional using \textbf{g-computation}, \textbf{IPTW}, \textbf{AIPW}, or \textbf{TMLE}\\
-- Using flexible nuisance estimation (for example, \textbf{SuperLearner}) where appropriate
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{2. Pitfall: Adjusting for Post-Treatment Variables}\label{pitfall-adjusting-for-post-treatment-variables}
-
-\subsection{The mediator/collider trap}\label{the-mediatorcollider-trap}
-
-\textbf{Mistake:}\\
-Including variables measured after treatment initiation in outcome regression or propensity score models.
-
-\textbf{Why it matters:}\\
-- Post-treatment variables may lie on the \textbf{causal pathway} (mediators), so adjustment can block part of the effect\\
-- They may be \textbf{colliders}, inducing spurious associations\\
-- Adjustment can invalidate the intervention being emulated
-
-\textbf{Avoid by:}\\
-- Restricting adjustment to \textbf{baseline} confounders for baseline treatment effects\\
-- Using longitudinal methods (for example, \textbf{LTMLE} or \textbf{LMTP}) when time-varying confounding affected by prior treatment is present\\
-- Drawing DAGs to clarify temporal ordering and avoid collider bias
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{3. Pitfall: Violated Positivity or Limited Overlap}\label{pitfall-violated-positivity-or-limited-overlap}
-
-\subsection{Treatment not comparable across covariate strata}\label{treatment-not-comparable-across-covariate-strata}
-
-\textbf{Symptoms:}\\
-- Propensity scores close to 0 or 1\\
-- Large or highly variable IPTW weights\\
-- Extreme clever covariate values in TMLE
-
-\textbf{Why it matters:}\\
-Positivity violations can lead to instability, high variance, and in finite samples, estimand drift toward extrapolation.
-
-\textbf{Avoid by:}\\
-- Inspecting propensity score overlap and weight distributions\\
-- Truncating or stabilizing weights when justified\\
-- Restricting to \textbf{regions of common support}\\
-- Considering \textbf{stochastic interventions} when static interventions are not feasible in the observed data
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{4. Pitfall: Misspecified Outcome or Propensity Models}\label{pitfall-misspecified-outcome-or-propensity-models}
-
-\subsection{Relying on simple models in complex settings}\label{relying-on-simple-models-in-complex-settings}
-
-\textbf{Mistake:}\\
-Assuming linearity, additivity, or simple parametric relationships without support.
-
-\textbf{Why it matters:}\\
-Misspecification of nuisance functions can create bias, especially for non-collapsible estimands or when overlap is limited.
-
-\textbf{Avoid by:}\\
-- Using \textbf{SuperLearner} or other data-adaptive estimation with cross-validation\\
-- Inspecting calibration and predictive performance (for example, cross-validated risk)\\
-- Including domain-informed learners when strong structure is known
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{5. Pitfall: Blindly Trusting Machine Learning}\label{pitfall-blindly-trusting-machine-learning}
-
-\subsection{Flexible models do not guarantee valid inference}\label{flexible-models-do-not-guarantee-valid-inference}
-
-\textbf{Mistake:}\\
-Assuming that a strong predictive model implies a correct causal estimate.
-
-\textbf{Why it matters:}\\
-Machine learning can overfit, extrapolate, or yield poorly calibrated probabilities. Prediction quality alone does not ensure correct estimation of a causal functional.
-
-\textbf{Avoid by:}\\
-- Using strict \textbf{cross-validation} and avoiding leakage\\
-- Checking calibration (especially for propensity scores)\\
-- Using TMLE or other doubly robust approaches to reduce sensitivity to nuisance estimation errors, subject to regularity conditions
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{6. Pitfall: Ignoring Censoring and Informative Dropout}\label{pitfall-ignoring-censoring-and-informative-dropout}
-
-\textbf{Mistake:}\\
-Treating censoring as non-informative without justification, or ignoring treatment discontinuation and switching when they affect the estimand.
-
-\textbf{Why it matters:}\\
-Informative censoring can bias estimates of risk and survival functionals.
-
-\textbf{Avoid by:}\\
-- Defining censoring relative to the estimand (administrative versus intercurrent event handling)\\
-- Modeling censoring mechanisms (for example, with SuperLearner) and applying \textbf{IPCW} when appropriate\\
-- Using TMLE/LTMLE with censoring nodes in longitudinal settings\\
-- Conducting sensitivity analyses for violations of independent censoring
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{7. Pitfall: Over-interpreting Heterogeneous Treatment Effects}\label{pitfall-over-interpreting-heterogeneous-treatment-effects}
-
-\subsection{Subgroup and HTE analyses are fragile}\label{subgroup-and-hte-analyses-are-fragile}
-
-\textbf{Mistake:}\\
-Treating exploratory subgroup findings as confirmatory evidence.
-
-\textbf{Why it matters:}\\
-HTE estimates are often high variance, subject to multiple testing, and sensitive to modeling choices.
-
-\textbf{Avoid by:}\\
-- Pre-specifying subgroups and hypotheses\\
-- Reporting uncertainty and accounting for multiplicity where relevant\\
-- Treating causal forest or related approaches as exploratory unless paired with confirmatory design\\
-- Using targeted-learning-based approaches (for example, TMLE-based variable importance) when aligned with the scientific objective
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{8. Pitfall: Using the Wrong Estimand}\label{pitfall-using-the-wrong-estimand}
-
-\subsection{Odds ratios and hazard ratios are commonly misinterpreted}\label{odds-ratios-and-hazard-ratios-are-commonly-misinterpreted}
-
-\textbf{Mistake:}\\
-Defaulting to odds ratios or hazard ratios and interpreting them as causal effects without careful justification.
-
-\textbf{Why it matters:}\\
-- Odds ratios are non-collapsible and may not correspond to the causal contrast of interest\\
-- Hazard ratios are often difficult to interpret causally in the presence of time-varying hazards and selection into the risk set
-
-\textbf{Avoid by:}\\
-- Targeting risk differences, risk ratios, survival curves, cumulative incidence, or RMST when scientifically appropriate\\
-- Using methods designed for causal survival analysis (including targeted learning approaches) when time-to-event outcomes are primary
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{9. Pitfall: Not Performing Diagnostics}\label{pitfall-not-performing-diagnostics}
-
-\subsection{``The model ran'' does not imply validity}\label{the-model-ran-does-not-imply-validity}
-
-\textbf{Mistake:}\\
-Reporting results without checking whether key assumptions are approximately supported in the observed data.
-
-\textbf{Why it matters:}\\
-Many failures in applied causal inference arise from detectable issues such as overlap problems, extreme weights, or unstable influence curves.
-
-\textbf{Avoid by:}\\
-- Inspecting weight distributions and effective sample sizes\\
-- Checking clever covariate ranges and outliers in targeted learning\\
-- Examining influence curve stability and identifying influential observations\\
-- Evaluating nuisance model calibration and cross-validated risk
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{10. Pitfall: Neglecting Sensitivity Analyses}\label{pitfall-neglecting-sensitivity-analyses}
-
-\subsection{Unmeasured confounding is not solved by optimism}\label{unmeasured-confounding-is-not-solved-by-optimism}
-
-\textbf{Mistake:}\\
-Assuming exchangeability holds without probing robustness.
-
-\textbf{Why it matters:}\\
-In observational settings, residual confounding is frequently plausible and may change qualitative conclusions.
-
-\textbf{Avoid by:}\\
-- Quantitative bias analysis and sensitivity parameters\\
-- Negative control outcomes or exposures when feasible\\
-- E-values (where appropriate) as a screening tool\\
-- Stochastic or simulation-based sensitivity analyses aligned with the causal model
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{11. Pitfall: Poor Alignment Between Randomized and Real-World Data in Hybrid Designs}\label{pitfall-poor-alignment-between-randomized-and-real-world-data-in-hybrid-designs}
-
-\textbf{Mistake:}\\
-Pooling or comparing RCT and RWD without harmonizing definitions and populations.
-
-\textbf{Why it matters:}\\
-Differences in eligibility, measurement, follow-up, and outcome definitions can dominate causal conclusions.
-
-\textbf{Avoid by:}\\
-- Harmonizing inclusion criteria, covariates, endpoints, and follow-up windows\\
-- Checking covariate balance and comparability across data sources\\
-- Using principled external control / transportability approaches where applicable\\
-- Conducting negative control checks in RWD components
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{12. Pitfall: Reporting Without Context or Interpretation}\label{pitfall-reporting-without-context-or-interpretation}
-
-\textbf{Mistake:}\\
-Reporting only a point estimate (or a single relative measure) without absolute risks, assumptions, or limitations.
-
-\textbf{Why it matters:}\\
-Causal results are only meaningful relative to the estimand, assumptions, and the population.
-
-\textbf{Avoid by:}\\
-- Reporting absolute risk estimates alongside contrasts\\
-- Transparently stating identification assumptions and their plausibility\\
-- Discussing limitations, diagnostics, and sensitivity analyses\\
-- Framing results in terms of the hypothetical intervention and estimand
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{13. Summary}\label{summary-1}
-
-Common pitfalls arise from misalignment between analytic choices and scientific questions, misspecification, unchecked assumptions, and overinterpretation. Avoiding them requires:
-
-\begin{itemize}
-\tightlist
-\item
-  Explicit use of the Causal Roadmap\\
-\item
-  Diagnostics aligned with identification risks (for example, overlap and censoring)\\
-\item
-  Sensitivity analyses for plausible violations\\
-\item
-  Careful communication of estimands and assumptions
-\end{itemize}
-
-These practices improve credibility, reproducibility, and decision relevance.
-
-\chapter{Annotated Bibliography: Modern Causal Inference and Targeted Learning}\label{annotated-bibliography-modern-causal-inference-and-targeted-learning}
-
-This bibliography introduces key readings in modern causal inference, targeted learning, and real-world evidence generation. Each annotation summarizes why the paper is important and what it contributes to causal reasoning and applied biostatistics.
-
-\subsection{to add:}\label{to-add}
-
-Targeted learning in real-world comparative effectiveness research with time-varying interventions
-\url{https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.6099}
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{1. Causal Inference Roadmap and Target Trial Emulation}\label{causal-inference-roadmap-and-target-trial-emulation}
-
-\textbf{Dang et al.~(2023)} -- \emph{A causal roadmap for generating high-quality real-world evidence.}\\
-Introduces the Causal Roadmap framework for structuring causal analyses in observational data. Emphasizes transparency, assumptions, and reproducibility in real-world evidence.
-
-\textbf{Gruber et al.~(2023)} -- \emph{Evaluating and improving real-world evidence with Targeted Learning.}\\
-Applies the roadmap to re-analyze published results using TMLE, highlighting the link between causal identification and robust estimation.
-
-\textbf{Williamson et al.~(2023)} -- \emph{An application of the Causal Roadmap in two safety monitoring case studies.}\\
-Demonstrates roadmap principles in practice for safety monitoring and outcome prediction using electronic health records.
-
-\textbf{Hernán \& Robins (2016)} -- \emph{Using big data to emulate a target trial when a randomized trial is not available.}\\
-Defines \emph{target trial emulation}, a cornerstone idea for translating causal inference principles to observational study design.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{2. Estimand Specification in Clinical Studies}\label{estimand-specification-in-clinical-studies}
-
-\textbf{ICH E9 (R1) Addendum (2019)} -- \emph{Addendum on Estimands and Sensitivity Analyses in Clinical Trials.}\\
-Establishes the estimand framework to align clinical trial objectives, analyses, and interpretations.
-
-\textbf{Rufibach (2019)} -- \emph{Treatment effect quantification for time-to-event endpoints -- Estimands, analysis strategies, and beyond.}\\
-Applies the estimand framework to survival outcomes, clarifying how censoring and non-proportional hazards affect effect interpretation.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{3. Super Learner Ensemble Learning}\label{super-learner-ensemble-learning}
-
-\textbf{van der Laan, Polley \& Hubbard (2007)} -- \emph{Super Learner.}\\
-A foundational paper introducing ensemble learning via cross-validation for optimal prediction and causal estimation.
-
-\textbf{Phillips et al.~(2023)} -- \emph{Practical considerations for specifying a Super Learner.}\\
-A practical tutorial on constructing and validating Super Learners, including library specification, cross-validation, and reproducibility.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{4. Targeted Maximum Likelihood Estimation (TMLE)}\label{targeted-maximum-likelihood-estimation-tmle}
-
-\textbf{Gruber \& van der Laan (2010)} -- \emph{Targeted Maximum Likelihood Estimation: A Gentle Introduction.}\\
-Provides a clear step-by-step introduction to TMLE, integrating machine learning and influence function theory for efficient, doubly robust estimation.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{5. Time-Dependent Confounding and Intercurrent Events}\label{time-dependent-confounding-and-intercurrent-events}
-
-\textbf{Petersen (2014)} -- \emph{Applying a Causal Road Map in Settings with Time-dependent Confounding.}\\
-Discusses longitudinal causal inference and how to handle time-dependent confounding through g-methods and TMLE.
-
-\textbf{Stensrud et al.~(2019)} -- \emph{Limitations of hazard ratios in clinical trials.}\\
-Explains why hazard ratios can be misleading as causal measures and encourages absolute or survival-based contrasts.
-
-\textbf{Martinussen (2022)} -- \emph{Causality and the Cox Regression Model.}\\
-Clarifies the mathematical and conceptual limitations of hazard ratios, advocating more interpretable causal estimands.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{6. Dynamic Treatment Regimes and Stochastic Interventions}\label{dynamic-treatment-regimes-and-stochastic-interventions}
-
-\textbf{Chakraborty \& Murphy (2014)} -- \emph{Dynamic Treatment Regimes.}\\
-A comprehensive overview of adaptive treatment strategies and their estimation through sequential designs and reinforcement learning methods.
-
-\textbf{Kennedy (2019)} -- \emph{Nonparametric causal effects based on incremental propensity score interventions.}\\
-Introduces stochastic interventions that shift treatment probabilities incrementally, addressing positivity violations and improving policy relevance.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\section{7. Longitudinal TMLE and Related Methods}\label{longitudinal-tmle-and-related-methods}
-
-\textbf{Lendle et al.~(2017)} -- \emph{ltmle: An R package implementing targeted ML for longitudinal data.}\\
-Presents practical TMLE tools for longitudinal data in R, connecting theory to applied estimation in complex settings with time-varying confounders.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\subsection{Suggested Reading Order}\label{suggested-reading-order}
-
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\tightlist
-\item
-  \emph{Dang et al.~(2023)} and \emph{Hernán \& Robins (2016)} -- conceptual grounding\\
-\item
-  \emph{van der Laan et al.~(2007)} and \emph{Gruber \& van der Laan (2010)} -- estimation and implementation\\
-\item
-  \emph{Lendle et al.~(2017)} and \emph{Kennedy (2019)} -- advanced longitudinal and stochastic methods
-\end{enumerate}
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-\subsection{Reference Files (link pdfs)}\label{reference-files-link-pdfs}
-
-\begin{itemize}
-\tightlist
-\item
-  01 Causal Intro -- Dang et al.~(2023)\\
-\item
-  03 TL Intro -- Gruber et al.~(2023)\\
-\item
-  Williamson et al.~(2023)\\
-\item
-  Rufibach (2019)\\
-\item
-  PracticalSL (Phillips et al., 2023)\\
-\item
-  Gruber \& van der Laan (2010)\\
-\item
-  Petersen (2014)\\
-\item
-  Stensrud (2019)\\
-\item
-  Martinussen (2022)\\
-\item
-  Kennedy (2019)\\
-\item
-  Lendle et al.~(2017)
-\end{itemize}
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-(to do: add descriptions of each)
-
-\begin{itemize}
-\tightlist
-\item
-  \href{https://beyondtheate.com}{BeyondTheATE.com}
-\item
-  \href{https://tlverse.org}{TLverse handbook}
-\item
-  \href{https://alejandroschuler.github.io/mci/introduction-to-modern-causal-inference.html}{Introduction to modern causal inference}
-\item
-  \href{https://www.khstats.com/}{Visual guides to causal inference}
-\end{itemize}
-
--\url{https://vanderlaan-lab.org/}
--\url{https://ehsanx.github.io/TMLEworkshop/}
-
--2 workshops from Laura
 
   \bibliography{book.bib,packages.bib}
 
