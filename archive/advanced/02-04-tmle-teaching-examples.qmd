@@ -1,0 +1,967 @@
+---
+title: "Chapter 2.4: From Question to Estimate — TMLE in Practice"
+format: html
+---
+
+# Chapter 2.4: From Question to Estimate — TMLE in Practice
+*A progressive tutorial for pharmacoepidemiologists*
+
+This chapter walks through a complete causal analysis from start to finish, building each estimator step-by-step so you can see exactly where bias enters, how each method addresses it, and why TMLE provides a principled solution.
+
+We use a realistic post-marketing safety scenario: **evaluating the cardiovascular safety of a new diabetes drug**.
+
+By the end of this chapter, you will have implemented:
+
+1. A naive (unadjusted) model
+2. G-computation (outcome modeling)
+3. IPTW (treatment modeling)
+4. AIPW (combining both)
+5. TMLE (targeting the estimate)
+
+Each method builds on what came before. Every step includes code, diagnostics, and interpretation.
+
+---
+
+# 1. Clinical Motivation
+
+## The Regulatory Question
+
+A new sodium-glucose co-transporter 2 (SGLT2) inhibitor, **dapagliflozin**, has been approved for type 2 diabetes. Post-marketing surveillance data from insurance claims suggest a potential cardiovascular safety signal. The FDA's Office of Surveillance and Epidemiology asks:
+
+> **Does initiation of dapagliflozin (vs. a sulfonylurea comparator) increase the 1-year risk of major adverse cardiovascular events (MACE) in adults with type 2 diabetes?**
+
+This is a classic **active comparator, new user** design question.
+
+### Key elements
+
+- **Target population:** Adults aged 40-85 with type 2 diabetes initiating a new oral glucose-lowering agent
+- **Treatment strategies:** Initiate dapagliflozin (A = 1) vs. initiate sulfonylurea (A = 0)
+- **Outcome:** 1-year MACE (composite of MI, stroke, CV death), binary
+- **Intercurrent events:** Treatment discontinuation, switching, death from non-CV causes
+- **Decision:** Should the label carry a cardiovascular warning? Is a formal safety trial needed?
+
+### Why standard regression falls short
+
+A logistic regression of MACE on treatment will confound the effect with differences in baseline health. Patients prescribed newer, more expensive agents may differ systematically from those prescribed sulfonylureas — in age, comorbidity burden, prior cardiovascular history, renal function, and concomitant medications.
+
+We need methods that explicitly separate confounding from causal effects.
+
+---
+
+# 2. The Causal Roadmap
+
+We follow a five-step workflow that structures every causal analysis.
+
+## Step 1: Define the Causal Question
+
+**In plain language:**
+What would happen to 1-year MACE risk if every eligible patient started dapagliflozin, compared to if every eligible patient started a sulfonylurea?
+
+**As a counterfactual estimand:**
+
+The Average Treatment Effect (ATE) on the risk difference scale:
+
+$$
+\psi = E[Y(1)] - E[Y(0)]
+$$
+
+where $Y(a)$ is the potential outcome under treatment strategy $a$.
+
+- $E[Y(1)]$ = population risk of MACE if everyone took dapagliflozin
+- $E[Y(0)]$ = population risk of MACE if everyone took sulfonylurea
+- A negative $\psi$ means dapagliflozin is protective; a positive $\psi$ means increased risk
+
+## Step 2: Define the Causal Model
+
+We posit the following causal structure. Confounders $W$ affect both treatment choice $A$ and the outcome $Y$. Treatment $A$ also affects $Y$ directly.
+
+The confounders include:
+
+- **Age** — older patients have higher CV risk and may receive different prescriptions
+- **BMI** — obesity correlates with both drug choice and CV risk
+- **HbA1c** — glycemic control at baseline affects prescribing and outcomes
+- **Prior CVD** — history of cardiovascular disease is a strong confounder
+- **eGFR** — renal function influences both drug eligibility and CV risk
+- **Statin use** — a marker of CV risk management
+
+The DAG (directed acyclic graph):
+
+```
+       W (age, BMI, HbA1c, prior CVD, eGFR, statin)
+      / \
+     v   v
+     A --> Y
+```
+
+All arrows from $W$ point to both $A$ and $Y$. There is a direct arrow from $A$ to $Y$. There are no arrows from $A$ back to $W$ (this is a point-treatment analysis at baseline).
+
+Structural equations:
+
+- $W$ is drawn from the population distribution
+- $A = f_A(W, U_A)$ — treatment depends on confounders and unmeasured factors
+- $Y = f_Y(A, W, U_Y)$ — outcome depends on treatment, confounders, and unmeasured factors
+
+## Step 3: Identify Assumptions
+
+For the causal estimand $\psi = E[Y(1)] - E[Y(0)]$ to be identified from observational data, we need:
+
+**Consistency:**
+The observed outcome for a patient who received treatment $a$ equals their potential outcome $Y(a)$. This requires a well-defined intervention — "initiate dapagliflozin" must mean the same thing across patients. In practice, we define treatment as filling a new prescription.
+
+**Exchangeability (no unmeasured confounding):**
+$Y(a) \perp\!\!\!\perp A \mid W$ for all $a$. Conditional on measured baseline covariates, treatment assignment is as-good-as-random. This is the most vulnerable assumption. We cannot test it, but we can make it more plausible by adjusting for a rich set of confounders.
+
+**Positivity:**
+$0 < P(A = 1 \mid W = w) < 1$ for all $w$ with $P(W = w) > 0$. Every patient type has some chance of receiving either drug. Violations occur when, for example, patients with severe renal impairment are never prescribed dapagliflozin.
+
+Each assumption is untestable but can be made more or less plausible by study design.
+
+## Step 4: Map to a Statistical Estimand
+
+Under the three assumptions above, the causal estimand equals a statistical quantity we can estimate from data:
+
+$$
+\psi = E_W\big[E[Y \mid A=1, W]\big] - E_W\big[E[Y \mid A=0, W]\big]
+$$
+
+This is the **G-computation identification formula**. It says: fit a model for $E[Y \mid A, W]$, predict under $A = 1$ and $A = 0$ for every patient, and average over the population distribution of $W$.
+
+Equivalently, using the propensity score $g(W) = P(A=1 \mid W)$:
+
+$$
+E[Y(a)] = E\left[\frac{I(A=a) Y}{P(A=a \mid W)}\right]
+$$
+
+This is the **IPTW identification formula**.
+
+Both representations target the same quantity. They differ in which nuisance function they rely on.
+
+## Step 5: Choose an Estimation Strategy
+
+| Method | Relies on | Robust to | Weakness |
+|--------|-----------|-----------|----------|
+| G-computation | Outcome model $E[Y \mid A, W]$ | Treatment model misspecification | Sensitive to outcome model misspecification |
+| IPTW | Treatment model $P(A \mid W)$ | Outcome model misspecification | Sensitive to positivity violations and weight instability |
+| AIPW | Both models | Misspecification of either one model | Not targeted; can produce out-of-bounds estimates |
+| TMLE | Both models | Misspecification of either one model | More complex to implement; requires understanding the targeting step |
+
+TMLE additionally:
+
+- Respects the natural bounds of the parameter space (probabilities stay between 0 and 1)
+- Achieves the semiparametric efficiency bound when both models are well-specified
+- Provides valid inference through the efficient influence curve
+- Integrates naturally with machine learning via Super Learner
+
+We now implement each estimator progressively.
+
+---
+
+# 3. Data Simulation
+
+We simulate a realistic claims-like dataset with multiple confounders, nonlinear effects, and treatment-confounder interactions.
+
+```{r}
+library(tidyverse)
+
+set.seed(2026)
+n <- 5000
+
+# --- Baseline confounders ---
+age    <- rnorm(n, mean = 62, sd = 10)
+bmi    <- rnorm(n, mean = 31, sd = 5)
+hba1c  <- rnorm(n, mean = 8.2, sd = 1.3)
+# Prior CVD: more likely with age and high BMI
+cvd    <- rbinom(n, 1, plogis(-3.5 + 0.04 * age + 0.03 * bmi))
+# eGFR: lower with age, higher with lower BMI
+egfr   <- pmax(15, rnorm(n, mean = 95 - 0.5 * (age - 60) - 0.3 * bmi, sd = 15))
+# Statin use: more likely with CVD and age
+statin <- rbinom(n, 1, plogis(-1.5 + 1.8 * cvd + 0.02 * age))
+
+# --- Treatment model (propensity score) ---
+# Dapagliflozin is preferentially prescribed to:
+# - younger patients, higher eGFR (renal eligibility), higher BMI, lower HbA1c
+# Includes nonlinear terms and interactions
+lp_trt <- -0.8 +
+  -0.03 * (age - 62) +
+  0.04 * (bmi - 31) +
+  -0.15 * (hba1c - 8.2) +
+  -0.6 * cvd +
+  0.02 * (egfr - 80) +
+  -0.3 * statin +
+  0.01 * (age - 62) * cvd +         # interaction
+  -0.002 * (age - 62)^2             # nonlinear age effect
+
+A <- rbinom(n, 1, plogis(lp_trt))
+
+# --- Outcome model ---
+# MACE risk depends on treatment, confounders, with nonlinearities
+# True treatment effect: dapagliflozin REDUCES MACE risk (protective)
+lp_out <- -3.2 +
+  -0.40 * A +                       # true causal effect (protective)
+  0.04 * (age - 62) +
+  0.02 * (bmi - 31) +
+  0.10 * (hba1c - 8.2) +
+  1.00 * cvd +
+  -0.01 * (egfr - 80) +
+  0.30 * statin +
+  0.015 * (age - 62) * cvd +        # interaction
+  0.0008 * (age - 62)^2 +           # nonlinear age effect
+  -0.10 * A * cvd                   # treatment-confounder interaction
+
+Y <- rbinom(n, 1, plogis(lp_out))
+
+dat <- tibble(age, bmi, hba1c, cvd, egfr, statin, A, Y)
+```
+
+### True causal effect
+
+We compute the true ATE from the data-generating process:
+
+```{r}
+# True potential outcomes from the structural model
+p1_true <- plogis(-3.2 + -0.40 * 1 + 0.04 * (age - 62) + 0.02 * (bmi - 31) +
+                    0.10 * (hba1c - 8.2) + 1.00 * cvd + -0.01 * (egfr - 80) +
+                    0.30 * statin + 0.015 * (age - 62) * cvd +
+                    0.0008 * (age - 62)^2 + -0.10 * 1 * cvd)
+
+p0_true <- plogis(-3.2 + -0.40 * 0 + 0.04 * (age - 62) + 0.02 * (bmi - 31) +
+                    0.10 * (hba1c - 8.2) + 1.00 * cvd + -0.01 * (egfr - 80) +
+                    0.30 * statin + 0.015 * (age - 62) * cvd +
+                    0.0008 * (age - 62)^2 + -0.10 * 0 * cvd)
+
+true_ate <- mean(p1_true - p0_true)
+cat("True ATE (risk difference):", round(true_ate, 4), "\n")
+cat("True risk under dapagliflozin:", round(mean(p1_true), 4), "\n")
+cat("True risk under sulfonylurea: ", round(mean(p0_true), 4), "\n")
+```
+
+### Inspect the data
+
+```{r}
+dat %>%
+  group_by(A) %>%
+  summarise(
+    n          = n(),
+    mean_age   = mean(age),
+    mean_bmi   = mean(bmi),
+    mean_hba1c = mean(hba1c),
+    pct_cvd    = mean(cvd),
+    mean_egfr  = mean(egfr),
+    pct_statin = mean(statin),
+    mace_rate  = mean(Y),
+    .groups = "drop"
+  )
+```
+
+Notice the imbalances: dapagliflozin patients are younger, have higher eGFR, and less prior CVD. These differences will bias a naive comparison.
+
+---
+
+# 4. Progressive Estimation
+
+## 4A. Naive (Unadjusted) Model
+
+We start with what many analysts would try first: a simple comparison of MACE rates by treatment group.
+
+```{r}
+# Unadjusted risk difference
+risk_A1 <- mean(dat$Y[dat$A == 1])
+risk_A0 <- mean(dat$Y[dat$A == 0])
+naive_rd <- risk_A1 - risk_A0
+
+cat("Naive risk (dapagliflozin):", round(risk_A1, 4), "\n")
+cat("Naive risk (sulfonylurea): ", round(risk_A0, 4), "\n")
+cat("Naive risk difference:     ", round(naive_rd, 4), "\n")
+cat("True ATE:                  ", round(true_ate, 4), "\n")
+```
+
+```{r}
+# Unadjusted logistic regression
+naive_mod <- glm(Y ~ A, family = binomial, data = dat)
+summary(naive_mod)
+```
+
+**What went wrong?** The naive estimate is biased because dapagliflozin patients differ systematically from sulfonylurea patients. The treatment groups are not exchangeable. The naive estimate conflates the drug effect with the confounding by indication.
+
+---
+
+## 4B. G-Computation (Outcome Modeling)
+
+G-computation directly implements the identification formula by modeling $E[Y \mid A, W]$, then standardizing.
+
+### Step 1: Fit the outcome model
+
+```{r}
+# Parametric outcome model (logistic regression)
+# We include main effects and key interactions
+q_mod <- glm(Y ~ A + age + bmi + hba1c + cvd + egfr + statin +
+               A:cvd + I(age^2),
+             family = binomial, data = dat)
+```
+
+### Step 2: Predict counterfactual outcomes
+
+```{r}
+# Create counterfactual datasets
+dat1 <- dat %>% mutate(A = 1)
+dat0 <- dat %>% mutate(A = 0)
+
+# Predict potential outcomes for each individual
+Q1 <- predict(q_mod, newdata = dat1, type = "response")
+Q0 <- predict(q_mod, newdata = dat0, type = "response")
+```
+
+### Step 3: Standardize (average over the population)
+
+```{r}
+gcomp_risk1 <- mean(Q1)
+gcomp_risk0 <- mean(Q0)
+gcomp_ate   <- gcomp_risk1 - gcomp_risk0
+
+cat("G-comp risk (dapagliflozin):", round(gcomp_risk1, 4), "\n")
+cat("G-comp risk (sulfonylurea): ", round(gcomp_risk0, 4), "\n")
+cat("G-comp ATE:                 ", round(gcomp_ate, 4), "\n")
+cat("True ATE:                   ", round(true_ate, 4), "\n")
+```
+
+### Bootstrap confidence interval for G-computation
+
+```{r}
+set.seed(42)
+n_boot <- 500
+boot_ate <- numeric(n_boot)
+
+for (b in 1:n_boot) {
+  idx <- sample(1:n, n, replace = TRUE)
+  dat_b <- dat[idx, ]
+  mod_b <- glm(Y ~ A + age + bmi + hba1c + cvd + egfr + statin +
+                  A:cvd + I(age^2),
+                family = binomial, data = dat_b)
+  Q1_b <- predict(mod_b, newdata = dat_b %>% mutate(A = 1), type = "response")
+  Q0_b <- predict(mod_b, newdata = dat_b %>% mutate(A = 0), type = "response")
+  boot_ate[b] <- mean(Q1_b - Q0_b)
+}
+
+gcomp_se <- sd(boot_ate)
+gcomp_ci <- quantile(boot_ate, c(0.025, 0.975))
+
+cat("G-comp ATE:", round(gcomp_ate, 4),
+    " SE:", round(gcomp_se, 4),
+    " 95% CI: [", round(gcomp_ci[1], 4), ",", round(gcomp_ci[2], 4), "]\n")
+```
+
+**Key insight:** G-computation gave a much better estimate than the naive approach by adjusting for confounders. But it depends entirely on the outcome model being correct. If we misspecified the functional form (missed interactions, nonlinearities), the estimate would be biased.
+
+---
+
+## 4C. IPTW (Treatment Modeling)
+
+IPTW takes a different approach: instead of modeling the outcome, it models treatment assignment and reweights the data to create a pseudo-population where confounders are balanced.
+
+### Step 1: Estimate the propensity score
+
+```{r}
+# Propensity score model
+g_mod <- glm(A ~ age + bmi + hba1c + cvd + egfr + statin +
+               I(age^2) + age:cvd,
+             family = binomial, data = dat)
+
+dat <- dat %>%
+  mutate(ps = predict(g_mod, type = "response"))
+
+# Summary of propensity scores
+summary(dat$ps)
+```
+
+### Step 2: Assess propensity score overlap
+
+```{r}
+ggplot(dat, aes(x = ps, fill = factor(A, labels = c("Sulfonylurea", "Dapagliflozin")))) +
+  geom_density(alpha = 0.45) +
+  labs(
+    x = "Estimated propensity score P(A=1 | W)",
+    y = "Density",
+    fill = "Treatment",
+    title = "Propensity Score Overlap"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("#4477AA", "#EE6677"))
+```
+
+Good overlap means every type of patient has some chance of getting either drug. If the distributions barely overlap, IPTW will produce extreme weights and unstable estimates.
+
+### Step 3: Construct stabilized weights
+
+```{r}
+# Marginal treatment probability
+p_A <- mean(dat$A)
+
+dat <- dat %>%
+  mutate(
+    # Unstabilized weights
+    w_unstab = ifelse(A == 1, 1 / ps, 1 / (1 - ps)),
+    # Stabilized weights
+    sw = ifelse(A == 1, p_A / ps, (1 - p_A) / (1 - ps))
+  )
+```
+
+### Step 4: Diagnose weights
+
+```{r}
+# Weight diagnostics
+dat %>%
+  group_by(A) %>%
+  summarise(
+    min_w  = min(sw),
+    p01_w  = quantile(sw, 0.01),
+    median = median(sw),
+    p99_w  = quantile(sw, 0.99),
+    max_w  = max(sw),
+    mean_w = mean(sw),
+    sd_w   = sd(sw),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# Weight distribution plot
+ggplot(dat, aes(x = sw, fill = factor(A, labels = c("Sulfonylurea", "Dapagliflozin")))) +
+  geom_histogram(bins = 50, alpha = 0.6, position = "identity") +
+  labs(
+    x = "Stabilized IPTW weight",
+    y = "Count",
+    fill = "Treatment",
+    title = "Distribution of Stabilized IPTW Weights"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("#4477AA", "#EE6677")) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40")
+```
+
+**What to look for:**
+
+- Weights should be centered around 1 (for stabilized weights)
+- Very large weights (> 10) indicate positivity problems
+- The mean of stabilized weights should be approximately 1
+
+### Step 5: Check covariate balance after weighting
+
+```{r}
+# Standardized mean differences: unweighted vs weighted
+compute_smd <- function(data, var, trt, weights = NULL) {
+  if (is.null(weights)) weights <- rep(1, nrow(data))
+  d1 <- data[[var]][data[[trt]] == 1]
+  d0 <- data[[var]][data[[trt]] == 0]
+  w1 <- weights[data[[trt]] == 1]
+  w0 <- weights[data[[trt]] == 0]
+  m1 <- weighted.mean(d1, w1)
+  m0 <- weighted.mean(d0, w0)
+  s1 <- sqrt(sum(w1 * (d1 - m1)^2) / sum(w1))
+  s0 <- sqrt(sum(w0 * (d0 - m0)^2) / sum(w0))
+  pooled_sd <- sqrt((s1^2 + s0^2) / 2)
+  (m1 - m0) / pooled_sd
+}
+
+covariates <- c("age", "bmi", "hba1c", "cvd", "egfr", "statin")
+
+smd_raw <- sapply(covariates, function(v) compute_smd(dat, v, "A"))
+smd_wt  <- sapply(covariates, function(v) compute_smd(dat, v, "A", dat$sw))
+
+smd_df <- tibble(
+  variable = covariates,
+  Unadjusted = abs(smd_raw),
+  Weighted   = abs(smd_wt)
+) %>%
+  pivot_longer(-variable, names_to = "Method", values_to = "SMD")
+
+ggplot(smd_df, aes(x = SMD, y = reorder(variable, SMD), color = Method, shape = Method)) +
+  geom_point(size = 3) +
+  geom_vline(xintercept = 0.1, linetype = "dashed", color = "grey50") +
+  labs(
+    x = "Absolute Standardized Mean Difference",
+    y = "",
+    title = "Covariate Balance: Before and After IPTW"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c("#EE6677", "#228833"))
+```
+
+The dashed line at 0.1 is a common threshold. After weighting, all covariates should be below this line.
+
+### Step 6: Estimate the ATE
+
+```{r}
+# Hajek (ratio) estimator with stabilized weights
+risk1_iptw <- with(dat, sum(sw * Y * (A == 1)) / sum(sw * (A == 1)))
+risk0_iptw <- with(dat, sum(sw * Y * (A == 0)) / sum(sw * (A == 0)))
+iptw_ate   <- risk1_iptw - risk0_iptw
+
+cat("IPTW risk (dapagliflozin):", round(risk1_iptw, 4), "\n")
+cat("IPTW risk (sulfonylurea): ", round(risk0_iptw, 4), "\n")
+cat("IPTW ATE:                 ", round(iptw_ate, 4), "\n")
+cat("True ATE:                 ", round(true_ate, 4), "\n")
+```
+
+### Weight truncation
+
+If weights are extreme, truncation can improve stability at the cost of a small amount of bias:
+
+```{r}
+# Truncate at 1st and 99th percentiles
+trunc_lower <- quantile(dat$sw, 0.01)
+trunc_upper <- quantile(dat$sw, 0.99)
+
+dat <- dat %>%
+  mutate(sw_trunc = pmin(pmax(sw, trunc_lower), trunc_upper))
+
+risk1_trunc <- with(dat, sum(sw_trunc * Y * (A == 1)) / sum(sw_trunc * (A == 1)))
+risk0_trunc <- with(dat, sum(sw_trunc * Y * (A == 0)) / sum(sw_trunc * (A == 0)))
+iptw_ate_trunc <- risk1_trunc - risk0_trunc
+
+cat("IPTW ATE (truncated weights):", round(iptw_ate_trunc, 4), "\n")
+```
+
+**Key insight:** IPTW adjusts for confounding through the treatment model alone. It does not use information about the outcome-confounder relationship. If the propensity score model is wrong, IPTW is biased. If positivity is limited, weights become extreme and the estimate becomes unstable.
+
+---
+
+## 4D. AIPW (Augmented Inverse Probability Weighting)
+
+AIPW combines the outcome model and the treatment model. It is **doubly robust**: consistent if either model is correct.
+
+```{r}
+# Using models from previous steps:
+# Q1, Q0 = predicted outcomes from g-computation
+# ps     = propensity scores from IPTW
+
+# AIPW components
+mu1_aipw <- with(dat, mean(
+  Q1 + A * (Y - Q1) / ps
+))
+mu0_aipw <- with(dat, mean(
+  Q0 + (1 - A) * (Y - Q0) / (1 - ps)
+))
+aipw_ate <- mu1_aipw - mu0_aipw
+
+cat("AIPW risk (dapagliflozin):", round(mu1_aipw, 4), "\n")
+cat("AIPW risk (sulfonylurea): ", round(mu0_aipw, 4), "\n")
+cat("AIPW ATE:                 ", round(aipw_ate, 4), "\n")
+cat("True ATE:                 ", round(true_ate, 4), "\n")
+```
+
+### Influence curve and inference
+
+The efficient influence curve (EIC) for the ATE gives us individual-level "scores" that measure each observation's contribution to the estimate. The variance of these scores provides valid standard errors.
+
+```{r}
+# Efficient influence curve for ATE
+eic <- with(dat,
+  (A / ps) * (Y - Q1) + Q1 - mu1_aipw -
+  ((1 - A) / (1 - ps)) * (Y - Q0) - Q0 + mu0_aipw
+)
+
+aipw_se <- sqrt(var(eic) / n)
+aipw_ci <- aipw_ate + c(-1.96, 1.96) * aipw_se
+
+cat("AIPW ATE:", round(aipw_ate, 4),
+    " SE:", round(aipw_se, 4),
+    " 95% CI: [", round(aipw_ci[1], 4), ",", round(aipw_ci[2], 4), "]\n")
+```
+
+**Key insight:** AIPW improves on both g-computation and IPTW by using both models. However, AIPW does not "target" its initial estimates — it can produce predicted probabilities outside [0, 1], and it does not solve the efficient influence curve equation exactly when machine learning is used. TMLE addresses both issues.
+
+---
+
+## 4E. TMLE (Targeted Maximum Likelihood Estimation)
+
+TMLE is the centerpiece of this chapter. It combines the best properties of all previous methods:
+
+- Uses both outcome and treatment models (doubly robust)
+- Targets the specific estimand of interest (not just fitting a good outcome model)
+- Respects natural parameter bounds
+- Solves the efficient influence curve equation, ensuring valid inference
+- Integrates naturally with machine learning (Super Learner)
+
+### Conceptual overview
+
+TMLE works in three stages:
+
+1. **Initial estimate:** Fit an outcome model $\hat{Q}^0(A, W) = \hat{E}[Y \mid A, W]$ (like g-computation)
+2. **Targeting step:** Update $\hat{Q}^0$ using information from the propensity score to reduce bias for the specific estimand
+3. **Substitution estimate:** Plug the updated $\hat{Q}^*$ into the G-computation formula
+
+The targeting step is what makes TMLE special. It uses the **clever covariate** — a function of the propensity score — to fluctuate the initial outcome model in the direction that solves the efficient influence curve equation.
+
+### Step-by-step implementation
+
+#### Step 1: Initial outcome model
+
+```{r}
+# Same as g-computation — fit E[Y | A, W]
+q_init <- glm(Y ~ A + age + bmi + hba1c + cvd + egfr + statin +
+                A:cvd + I(age^2),
+              family = binomial, data = dat)
+
+# Initial predictions
+Q1_init <- predict(q_init, newdata = dat %>% mutate(A = 1), type = "response")
+Q0_init <- predict(q_init, newdata = dat %>% mutate(A = 0), type = "response")
+QA_init <- predict(q_init, type = "response")  # predictions at observed A
+```
+
+#### Step 2: Estimate the propensity score
+
+```{r}
+# Same model as IPTW
+g_fit <- glm(A ~ age + bmi + hba1c + cvd + egfr + statin +
+               I(age^2) + age:cvd,
+             family = binomial, data = dat)
+
+ps_tmle <- predict(g_fit, type = "response")
+
+# Bound propensity scores away from 0 and 1 for stability
+ps_tmle <- pmax(0.01, pmin(0.99, ps_tmle))
+```
+
+#### Step 3: Compute the clever covariate
+
+The clever covariate $H(A, W)$ is the bridge between the treatment model and the outcome model:
+
+```{r}
+# Clever covariate for each observation at their OBSERVED treatment
+H_A <- dat$A / ps_tmle - (1 - dat$A) / (1 - ps_tmle)
+
+# Clever covariate under A=1 and A=0 (for prediction)
+H_1 <- 1 / ps_tmle
+H_0 <- -1 / (1 - ps_tmle)
+```
+
+The clever covariate is large when a patient's treatment was unlikely given their covariates — exactly the patients who are most informative about the causal effect.
+
+#### Step 4: Fluctuation (targeting) model
+
+This is the key step. We fit a logistic regression of $Y$ on $H(A, W)$ with the initial $\hat{Q}^0$ as an offset. The coefficient $\epsilon$ tells us how much to update the initial estimate.
+
+```{r}
+logit <- function(p) log(p / (1 - p))
+
+# Fluctuation model: logit(Y) ~ offset(logit(Q_init)) + H
+fluc <- glm(Y ~ -1 + offset(logit(QA_init)) + H_A,
+            family = binomial, data = dat)
+
+epsilon <- coef(fluc)
+cat("Epsilon (fluctuation parameter):", round(epsilon, 5), "\n")
+```
+
+A small $\epsilon$ means the initial model was already close to solving the EIC equation. A large $\epsilon$ means the targeting step made a substantial correction.
+
+#### Step 5: Update predictions
+
+```{r}
+# Apply the fluctuation to counterfactual predictions
+Q1_star <- plogis(logit(Q1_init) + epsilon * H_1)
+Q0_star <- plogis(logit(Q0_init) + epsilon * H_0)
+```
+
+Note that we apply `plogis()` (the inverse-logit function), which guarantees predictions stay in [0, 1]. This is the "substitution estimator" property of TMLE.
+
+#### Step 6: Compute the TMLE estimate
+
+```{r}
+tmle_risk1 <- mean(Q1_star)
+tmle_risk0 <- mean(Q0_star)
+tmle_ate   <- tmle_risk1 - tmle_risk0
+
+cat("TMLE risk (dapagliflozin):", round(tmle_risk1, 4), "\n")
+cat("TMLE risk (sulfonylurea): ", round(tmle_risk0, 4), "\n")
+cat("TMLE ATE:                 ", round(tmle_ate, 4), "\n")
+cat("True ATE:                 ", round(true_ate, 4), "\n")
+```
+
+#### Step 7: Inference via the efficient influence curve
+
+```{r}
+# EIC evaluated at the TMLE estimates
+eic_tmle <- with(dat,
+  (A / ps_tmle) * (Y - Q1_star) + Q1_star - tmle_risk1 -
+  ((1 - A) / (1 - ps_tmle)) * (Y - Q0_star) - Q0_star + tmle_risk0
+)
+
+tmle_se <- sqrt(var(eic_tmle) / n)
+tmle_ci <- tmle_ate + c(-1.96, 1.96) * tmle_se
+
+cat("TMLE ATE:", round(tmle_ate, 4),
+    " SE:", round(tmle_se, 4),
+    " 95% CI: [", round(tmle_ci[1], 4), ",", round(tmle_ci[2], 4), "]\n")
+```
+
+### Verify: the EIC mean is approximately zero
+
+A correctly implemented TMLE solves the efficient influence curve equation, meaning the sample mean of the EIC should be approximately zero:
+
+```{r}
+cat("Mean of EIC:", round(mean(eic_tmle), 8), "\n")
+cat("(Should be very close to zero)\n")
+```
+
+---
+
+# 5. Comparing All Estimators
+
+```{r}
+results <- tibble(
+  Method  = c("Naive", "G-computation", "IPTW", "IPTW (truncated)", "AIPW", "TMLE"),
+  ATE     = c(naive_rd, gcomp_ate, iptw_ate, iptw_ate_trunc, aipw_ate, tmle_ate),
+  SE      = c(NA, gcomp_se, NA, NA, aipw_se, tmle_se),
+  CI_low  = c(NA, gcomp_ci[1], NA, NA, aipw_ci[1], tmle_ci[1]),
+  CI_high = c(NA, gcomp_ci[2], NA, NA, aipw_ci[2], tmle_ci[2])
+)
+
+results %>%
+  mutate(across(where(is.numeric), ~round(., 4)))
+```
+
+```{r}
+# Visualize the comparison
+plot_df <- results %>%
+  filter(!is.na(SE)) %>%
+  mutate(Method = factor(Method, levels = c("G-computation", "AIPW", "TMLE")))
+
+ggplot(plot_df, aes(x = ATE, y = Method)) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = CI_low, xmax = CI_high), height = 0.2) +
+  geom_vline(xintercept = true_ate, linetype = "dashed", color = "red") +
+  annotate("text", x = true_ate, y = 0.5, label = "True ATE",
+           hjust = -0.1, color = "red", size = 3.5) +
+  labs(
+    x = "Estimated ATE (Risk Difference)",
+    y = "",
+    title = "Comparison of Causal Estimators",
+    subtitle = "Red dashed line = true causal effect"
+  ) +
+  theme_minimal()
+```
+
+---
+
+# 6. Diagnostics
+
+Good estimation is nothing without good diagnostics. This section covers the checks every analyst should perform.
+
+## 6.1 Propensity Score Overlap
+
+```{r}
+ggplot(dat, aes(x = ps_tmle, fill = factor(A, labels = c("Sulfonylurea", "Dapagliflozin")))) +
+  geom_histogram(bins = 40, alpha = 0.55, position = "identity") +
+  labs(
+    x = "Propensity score",
+    y = "Count",
+    fill = "Treatment",
+    title = "Propensity Score Distribution by Treatment Group"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("#4477AA", "#EE6677"))
+```
+
+**Interpretation:** If the histograms have substantial overlap, the positivity assumption is plausible. Gaps indicate regions where one treatment is rarely or never prescribed — IPTW will struggle there.
+
+## 6.2 Weight Distribution
+
+```{r}
+cat("--- Unstabilized weight summary ---\n")
+summary(dat$w_unstab)
+cat("\n--- Stabilized weight summary ---\n")
+summary(dat$sw)
+cat("\nProportion of stabilized weights > 5:", mean(dat$sw > 5), "\n")
+cat("Proportion of stabilized weights > 10:", mean(dat$sw > 10), "\n")
+```
+
+## 6.3 Clever Covariate Diagnostics
+
+The clever covariate drives the TMLE targeting step. Extreme values indicate potential instability:
+
+```{r}
+clever_cov_df <- tibble(
+  H = H_A,
+  treatment = factor(dat$A, labels = c("Sulfonylurea", "Dapagliflozin"))
+)
+
+ggplot(clever_cov_df, aes(x = H, fill = treatment)) +
+  geom_histogram(bins = 50, alpha = 0.5, position = "identity") +
+  labs(
+    x = "Clever covariate H(A, W)",
+    y = "Count",
+    fill = "Treatment",
+    title = "Distribution of the Clever Covariate"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("#4477AA", "#EE6677"))
+```
+
+## 6.4 Influence Curve Diagnostics
+
+The EIC values reveal influential observations. A well-behaved estimator has EIC values centered near zero with no extreme outliers:
+
+```{r}
+eic_df <- tibble(eic = eic_tmle)
+
+ggplot(eic_df, aes(x = eic)) +
+  geom_histogram(bins = 50, fill = "#228833", alpha = 0.7) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    x = "Efficient influence curve value",
+    y = "Count",
+    title = "Distribution of TMLE Influence Curve Values"
+  ) +
+  theme_minimal()
+
+cat("EIC summary:\n")
+summary(eic_tmle)
+cat("EIC mean:", round(mean(eic_tmle), 6), "\n")
+```
+
+## 6.5 Extreme Prediction Check
+
+```{r}
+cat("--- Predicted outcome range (initial model) ---\n")
+cat("Q1 range:", round(range(Q1_init), 4), "\n")
+cat("Q0 range:", round(range(Q0_init), 4), "\n")
+cat("\n--- Predicted outcome range (after targeting) ---\n")
+cat("Q1* range:", round(range(Q1_star), 4), "\n")
+cat("Q0* range:", round(range(Q0_star), 4), "\n")
+```
+
+Notice that TMLE keeps all predictions between 0 and 1 by construction — the logistic fluctuation guarantees this.
+
+---
+
+# 7. Interpretation
+
+## Translating to regulatory language
+
+Based on the TMLE analysis:
+
+- **Point estimate:** Dapagliflozin is estimated to reduce 1-year MACE risk by approximately `r round(abs(tmle_ate)*100, 1)` percentage points compared to sulfonylurea
+- **Confidence interval:** The 95% CI is [`r round(tmle_ci[1]*100, 1)`, `r round(tmle_ci[2]*100, 1)`] percentage points
+- **Risk difference vs. odds ratio:** We report on the risk difference scale because it is directly interpretable. An odds ratio would obscure the magnitude of absolute risk change, which is what matters for labeling and clinical decisions.
+
+## Regulatory decision
+
+If the confidence interval excludes zero and the point estimate is negative (protective), the data do not support adding a cardiovascular warning. If the CI includes zero, the evidence is inconclusive and further monitoring or a dedicated outcomes trial may be warranted.
+
+## Sensitivity to assumptions
+
+**Which assumptions are most fragile?**
+
+1. **No unmeasured confounding (exchangeability):** This is always the weakest link in observational data. Lifestyle factors (diet, exercise, smoking) may confound and are poorly captured in claims data.
+
+2. **Positivity:** If some patient types never receive one drug (e.g., patients with very low eGFR are ineligible for SGLT2 inhibitors), the ATE is not identifiable for the full population. Consider restricting to a subpopulation where positivity holds.
+
+3. **Consistency:** If treatment initiation is not well-defined (e.g., varying doses), the potential outcomes are ambiguous.
+
+**What if unmeasured confounding exists?** A sensitivity analysis (E-value or bias analysis) can quantify how strong unmeasured confounding would need to be to explain away the observed effect.
+
+---
+
+# 8. Why Super Learner Improves Nuisance Estimation
+
+In the examples above, we used parametric logistic regression for both the outcome and treatment models. In practice, these models may be misspecified — missing interactions, wrong functional forms, or overly rigid assumptions.
+
+**Super Learner** is an ensemble machine learning method that:
+
+1. Takes a library of candidate learners (logistic regression, LASSO, random forest, etc.)
+2. Uses cross-validation to evaluate each learner's performance
+3. Combines them using optimally weighted stacking
+4. Guarantees performance at least as good as the best individual learner (asymptotically)
+
+### Why this matters for TMLE
+
+- TMLE is doubly robust: consistent if either the outcome or treatment model is correct
+- But TMLE is **efficient** when both models are consistent at reasonable rates
+- Super Learner reduces the risk of misspecifying either model
+- Cross-validation within Super Learner protects against overfitting
+
+### Conceptual demonstration
+
+The following shows how Super Learner would be integrated (this requires the SuperLearner package, which may not run in all webR environments):
+
+```{r, eval=FALSE}
+library(SuperLearner)
+
+# Define learner library
+SL_lib <- c("SL.glm", "SL.glmnet", "SL.gam", "SL.mean")
+
+# Outcome model via Super Learner
+Q_SL <- SuperLearner(
+  Y = dat$Y,
+  X = dat %>% select(A, age, bmi, hba1c, cvd, egfr, statin),
+  family = binomial(),
+  SL.library = SL_lib
+)
+
+# Treatment model via Super Learner
+g_SL <- SuperLearner(
+  Y = dat$A,
+  X = dat %>% select(age, bmi, hba1c, cvd, egfr, statin),
+  family = binomial(),
+  SL.library = SL_lib
+)
+
+# View the cross-validated weights
+Q_SL$coef  # how much each learner contributes to the outcome model
+g_SL$coef  # how much each learner contributes to the treatment model
+```
+
+The Super Learner automatically determines which learners are most useful and how to combine them — no manual model selection required.
+
+---
+
+# 9. Summary of Estimator Trade-offs
+
+| Property | G-comp | IPTW | AIPW | TMLE |
+|----------|--------|------|------|------|
+| Uses outcome model | Yes | No | Yes | Yes |
+| Uses treatment model | No | Yes | Yes | Yes |
+| Doubly robust | No | No | Yes | Yes |
+| Respects bounds | Depends | N/A | No | Yes |
+| Efficient (solves EIC) | No | No | Asymptotically | Yes |
+| Works with ML | Partially | Partially | Needs cross-fitting | Naturally |
+| Inference method | Bootstrap | Sandwich | Influence curve | Influence curve |
+
+---
+
+# Key Takeaways
+
+1. **The naive estimate is biased** because treatment groups differ in baseline characteristics. Never interpret unadjusted comparisons as causal effects.
+
+2. **G-computation is intuitive** but depends on correctly modeling the outcome. It implements the identification formula directly.
+
+3. **IPTW tackles confounding through reweighting** but is sensitive to positivity violations and propensity score misspecification. Always check weight distributions.
+
+4. **AIPW is doubly robust** — consistent if either the outcome or treatment model is correct. But it does not target the parameter of interest and can produce out-of-bounds predictions.
+
+5. **TMLE combines the strengths of all methods.** It starts with an outcome model, targets it using the propensity score, respects parameter bounds, and provides efficient inference through the influence curve.
+
+6. **Super Learner** reduces the risk of model misspecification by ensembling multiple learners with cross-validated weights. It pairs naturally with TMLE.
+
+7. **Diagnostics are non-negotiable.** Always inspect propensity score overlap, weight distributions, covariate balance, and influence curve behavior before trusting any estimate.
+
+8. **Every step of the causal roadmap matters.** The estimate is only as valid as the assumptions that identify the causal effect from observational data.
+
+---
+
+# 10. Advanced Extensions
+
+The framework in this chapter extends to several important settings:
+
+- **Dynamic treatment regimes:** Treatment rules that depend on patient characteristics (e.g., "prescribe dapagliflozin if eGFR > 45, else sulfonylurea")
+- **Stochastic interventions:** Shift the probability of treatment rather than forcing a deterministic assignment — useful when positivity is limited
+- **Mediation analysis:** Decompose the total effect into direct and indirect pathways (e.g., does dapagliflozin reduce MACE partly through weight loss?)
+- **Conditional average treatment effects (CATE):** Estimate how the treatment effect varies across subgroups
+- **Variable importance:** Identify which confounders matter most for the treatment effect
+- **Longitudinal TMLE (LTMLE) and LMTP:** Handle time-varying treatments, confounders, and censoring — covered in subsequent chapters
+
+Each extension follows the same causal roadmap: define the question, specify the causal model, verify assumptions, identify the statistical estimand, and choose an appropriate estimator.
+
+```{r}
+sessionInfo()
+```
