@@ -886,3 +886,62 @@ shift_mediator <- function(data, trt) {
 ```{r}
 sessionInfo()
 ```
+
+---
+
+## Software Implementation (R)
+
+This example uses the `crumble` package (if available) to estimate the **natural direct effect (NDE)** and **natural indirect effect (NIE)** via TMLE-based mediation analysis. The `crumble` package implements targeted learning for mediation with flexible nuisance estimation.
+
+- Simulate data with a binary treatment $A$, continuous mediator $M$, and binary outcome $Y$
+- Estimate NDE and NIE using `crumble::crumble()` with cross-fitting
+- Falls back to a manual decomposition using `tmle` if `crumble` is unavailable
+
+```{r}
+#| eval: false
+set.seed(1)
+n <- 600
+W <- rnorm(n)
+A <- rbinom(n, 1, plogis(0.3 * W))
+M <- 0.5 * A + 0.4 * W + rnorm(n, sd = 0.8)
+Y <- rbinom(n, 1, plogis(-1 + 0.4 * A + 0.6 * M + 0.3 * W))
+
+dat <- data.frame(W = W, A = A, M = M, Y = Y)
+
+if (requireNamespace("crumble", quietly = TRUE)) {
+  library(crumble)
+
+  ## crumble estimates interventional (in)direct effects
+  ## using TMLE with cross-fitting
+  result <- crumble(
+    data = dat,
+    trt = "A",
+    outcome = "Y",
+    mediators = "M",
+    baseline = "W",
+    outcome_type = "binomial",
+    learners = c("SL.glm", "SL.mean"),
+    nn_module = NULL  # use standard SL, not neural net
+  )
+
+  cat("── Mediation TMLE via crumble ──\n")
+  print(result)
+} else {
+  message("'crumble' package not found.")
+  message("Install from GitHub:  remotes::install_github('nt-williams/crumble')")
+  message("\nFalling back to a manual total-effect decomposition...\n")
+
+  if (requireNamespace("tmle", quietly = TRUE)) {
+    library(tmle)
+    ## Total effect only (not a true mediation decomposition)
+    fit <- tmle(Y = Y, A = A, W = data.frame(W = W),
+                Q.SL.library = "SL.glm", g.SL.library = "SL.glm")
+    cat("Total effect (ATE):", round(fit$estimates$ATE$psi, 4), "\n")
+    cat("95% CI:", round(fit$estimates$ATE$CI, 4), "\n")
+    cat("\nNote: This is the total effect only.\n")
+    cat("For NDE/NIE decomposition, install the crumble package.\n")
+  } else {
+    message("Install 'tmle':  install.packages('tmle')")
+  }
+}
+```

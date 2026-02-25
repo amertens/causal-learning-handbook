@@ -485,3 +485,65 @@ The overarching principle for MPH-trained epidemiologists: hybrid designs do not
 ```{r}
 sessionInfo()
 ```
+
+---
+
+## Software Implementation (R)
+
+This example demonstrates an **external control arm** analysis skeleton where a randomized trial is augmented with real-world data (RWD). We simulate an RCT treatment arm and an external RWD control arm, then estimate the ATE using TMLE with study-membership adjustment.
+
+- Simulates a small RCT (treatment arm only) and a larger RWD cohort (controls)
+- Includes a study-membership indicator $S$ to adjust for systematic differences
+- Uses `tmle` to estimate the treatment effect while adjusting for $W$ and $S$
+- Notes where specialized packages like `EScvtmle` would extend this approach
+
+```{r}
+#| eval: false
+set.seed(1)
+
+## ── Simulate RCT treatment arm ──
+n_rct <- 150
+W1_rct <- rnorm(n_rct, mean = 0.2)
+W2_rct <- rbinom(n_rct, 1, 0.4)
+A_rct  <- rep(1, n_rct)  # all treated
+Y_rct  <- rbinom(n_rct, 1, plogis(-1 + 0.6 * 1 + 0.5 * W1_rct + 0.3 * W2_rct))
+
+## ── Simulate RWD external controls ──
+n_rwd <- 400
+W1_rwd <- rnorm(n_rwd, mean = -0.1)   # slight covariate shift
+W2_rwd <- rbinom(n_rwd, 1, 0.5)
+A_rwd  <- rep(0, n_rwd)  # all control
+Y_rwd  <- rbinom(n_rwd, 1, plogis(-1 + 0.6 * 0 + 0.5 * W1_rwd + 0.3 * W2_rwd))
+
+## ── Combined analysis dataset ──
+dat <- data.frame(
+  W1 = c(W1_rct, W1_rwd),
+  W2 = c(W2_rct, W2_rwd),
+  S  = c(rep(1, n_rct), rep(0, n_rwd)),   # study membership
+  A  = c(A_rct, A_rwd),
+  Y  = c(Y_rct, Y_rwd)
+)
+
+if (requireNamespace("tmle", quietly = TRUE)) {
+  library(tmle)
+  ## Include study indicator S as a covariate to adjust for
+  ## population differences between RCT and RWD
+  W <- dat[, c("W1", "W2", "S")]
+
+  fit <- tmle(
+    Y = dat$Y, A = dat$A, W = W,
+    family = "binomial",
+    Q.SL.library = c("SL.glm", "SL.mean"),
+    g.SL.library  = c("SL.glm", "SL.mean")
+  )
+
+  cat("── Hybrid RCT + RWD external control analysis ──\n")
+  cat("ATE (risk difference):", round(fit$estimates$ATE$psi, 4), "\n")
+  cat("95% CI:", round(fit$estimates$ATE$CI, 4), "\n")
+  cat("\nNote: For more sophisticated approaches, see:\n")
+  cat("  - EScvtmle: external-source cross-validated TMLE\n")
+  cat("  - A-TMLE: adaptive TMLE for data-adaptive borrowing\n")
+} else {
+  message("Install the 'tmle' package:  install.packages('tmle')")
+}
+```

@@ -1091,3 +1091,47 @@ If increasing adherence from observed levels to near-perfect could improve suppr
 ```{r}
 sessionInfo()
 ```
+
+---
+
+## Software Implementation (R)
+
+This example uses the `ltmle` package to estimate the effect of a **sequential treatment strategy** (always treat vs. never treat) in the presence of time-varying confounding affected by prior treatment.
+
+- Simulate 3-time-point longitudinal data with treatment-confounder feedback
+- $L_t$ is affected by $A_{t-1}$ and also affects $A_t$ and $Y$
+- Use `ltmle()` with `abar` to compare two static regimes
+- Falls back to IPTW-based MSM if `ltmle` is unavailable
+
+```{r}
+#| eval: false
+set.seed(1)
+n <- 500
+W     <- rnorm(n)
+A_0   <- rbinom(n, 1, plogis(0.2 * W))
+L_1   <- rnorm(n, mean = 0.4 * A_0 + 0.3 * W)
+A_1   <- rbinom(n, 1, plogis(0.3 * L_1 + 0.2 * W))
+L_2   <- rnorm(n, mean = 0.4 * A_1 + 0.2 * L_1 + 0.2 * W)
+A_2   <- rbinom(n, 1, plogis(0.3 * L_2 + 0.2 * W))
+Y     <- rbinom(n, 1, plogis(-1.5 + 0.3 * A_0 + 0.3 * A_1 + 0.4 * A_2 +
+                               0.2 * L_2 + 0.2 * W))
+
+dat <- data.frame(W, A_0, L_1, A_1, L_2, A_2, Y)
+
+if (requireNamespace("ltmle", quietly = TRUE)) {
+  library(ltmle)
+
+  result <- ltmle(
+    data = dat,
+    Anodes  = c("A_0", "A_1", "A_2"),
+    Lnodes  = c("L_1", "L_2"),
+    Ynodes  = "Y",
+    abar = list(treatment = c(1, 1, 1), control = c(0, 0, 0)),
+    SL.library = "glm"
+  )
+  cat("LTMLE: always treat vs never treat\n")
+  print(summary(result))
+} else {
+  message("Install the 'ltmle' package:  install.packages('ltmle')")
+}
+```

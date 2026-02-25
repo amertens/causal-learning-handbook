@@ -193,3 +193,42 @@ The Causal Roadmap gives a rigorous framework for designing and evaluating real-
 
 In the next chapter, we’ll explore different estimation strategies in detail.
 :::
+
+---
+
+## Software Implementation (R)
+
+This example maps the six-step Causal Roadmap to a single `tmle` call. Each comment below labels the roadmap step that the corresponding code addresses.
+
+- **Step 1 (Question):** Average treatment effect of a binary exposure on a continuous outcome
+- **Step 2 (Causal model):** Observed data $(W, A, Y)$; $W$ confounds $A \to Y$
+- **Step 3 (Assumptions):** Consistency, exchangeability given $W$, positivity
+- **Step 4 (Estimand):** $\psi = E[E(Y \mid A=1, W)] - E[E(Y \mid A=0, W)]$
+- **Steps 5–6 (Estimation + Inference):** TMLE with Super Learner for $Q$ and $g$
+
+```{r}
+#| eval: false
+set.seed(1)
+n <- 500
+
+## ── Step 2: Simulate from a causal model ──
+W1 <- rnorm(n)
+W2 <- rbinom(n, 1, 0.4)
+A  <- rbinom(n, 1, plogis(-0.5 + 0.6 * W1 + 0.3 * W2))
+Y  <- A + 0.8 * W1 - 0.5 * W2 + rnorm(n)  # true ATE = 1.0
+
+## ── Steps 5–6: Estimation and inference via TMLE ──
+if (requireNamespace("tmle", quietly = TRUE)) {
+  library(tmle)
+  tmle_fit <- tmle(
+    Y = Y, A = A,
+    W = data.frame(W1 = W1, W2 = W2),
+    Q.SL.library = c("SL.glm", "SL.mean"),
+    g.SL.library  = c("SL.glm", "SL.mean")
+  )
+  cat("Roadmap Step 5 – TMLE ATE:", round(tmle_fit$estimates$ATE$psi, 3), "\n")
+  cat("Roadmap Step 6 – 95% CI: ", round(tmle_fit$estimates$ATE$CI, 3), "\n")
+} else {
+  message("Install the ‘tmle’ package:  install.packages(‘tmle’)")
+}
+```

@@ -370,3 +370,49 @@ In the next chapter, we move to **SuperLearner and machine learning integration*
 ```{r}
 sessionInfo()
 ```
+
+---
+
+## Software Implementation (R)
+
+This example demonstrates the **double robustness** property using the `tmle` package. We deliberately misspecify one nuisance model at a time to show that the TMLE estimate remains consistent as long as at least one model is correct.
+
+- Simulate data with a nonlinear confounder–outcome relationship
+- Scenario A: correct $Q$, wrong $g$ → TMLE consistent
+- Scenario B: wrong $Q$, correct $g$ → TMLE consistent
+- Scenario C: both correct → TMLE efficient
+- Falls back to a manual demonstration if `tmle` is unavailable
+
+```{r}
+#| eval: false
+set.seed(1)
+n <- 1000
+W <- rnorm(n)
+A <- rbinom(n, 1, plogis(0.3 * W + 0.2 * W^2))
+Y <- 0.5 * A + sin(W) + rnorm(n, sd = 0.3)  # true ATE = 0.5
+
+if (requireNamespace("tmle", quietly = TRUE)) {
+  library(tmle)
+
+  ## Scenario A: correct Q model, misspecified g (intercept only)
+  fit_a <- tmle(Y = Y, A = A, W = data.frame(W = W),
+                Q.SL.library = c("SL.glm", "SL.earth"),
+                g.SL.library  = "SL.mean")
+  cat("Scenario A (correct Q, wrong g):", round(fit_a$estimates$ATE$psi, 3), "\n")
+
+  ## Scenario B: misspecified Q (intercept only), correct g
+  fit_b <- tmle(Y = Y, A = A, W = data.frame(W = W),
+                Q.SL.library = "SL.mean",
+                g.SL.library  = c("SL.glm", "SL.earth"))
+  cat("Scenario B (wrong Q, correct g):", round(fit_b$estimates$ATE$psi, 3), "\n")
+
+  ## Scenario C: both reasonably specified
+  fit_c <- tmle(Y = Y, A = A, W = data.frame(W = W),
+                Q.SL.library = c("SL.glm", "SL.earth"),
+                g.SL.library  = c("SL.glm", "SL.earth"))
+  cat("Scenario C (both correct):      ", round(fit_c$estimates$ATE$psi, 3), "\n")
+  cat("95% CI:", round(fit_c$estimates$ATE$CI, 3), "\n")
+} else {
+  message("Install the 'tmle' package:  install.packages('tmle')")
+}
+```

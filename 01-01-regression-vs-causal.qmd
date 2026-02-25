@@ -159,3 +159,42 @@ The coefficient gives you a conditional odds ratio, but the g-comp version gives
 ## Next
 
 In the next chapter, we'll introduce the Causal Roadmap — a structured workflow for planning and executing causal analyses.
+
+---
+
+## Software Implementation (R)
+
+This example uses the `tmle` package to estimate the **average treatment effect (ATE)** for a point treatment, and contrasts the result with a naive regression coefficient.
+
+- Simulate a simple confounded dataset: $W$ causes both $A$ and $Y$
+- Naive regression of $Y$ on $A$ (ignoring confounding) yields a biased coefficient
+- The `tmle` package estimates the ATE using outcome modeling + targeting
+- Compare: the naive coefficient ≠ the causal ATE
+
+```{r}
+#| eval: false
+set.seed(1)
+n <- 500
+W <- rnorm(n)
+A <- rbinom(n, 1, plogis(0.5 * W))
+Y <- 0.8 * A + 1.2 * W + rnorm(n, sd = 0.5)  # true ATE = 0.8
+
+## ── Naive regression (biased) ──
+naive_fit <- lm(Y ~ A)
+cat("Naive regression coefficient on A:", round(coef(naive_fit)["A"], 3), "\n")
+
+## ── TMLE (targets the ATE) ──
+if (requireNamespace("tmle", quietly = TRUE)) {
+  library(tmle)
+  tmle_fit <- tmle(
+    Y = Y, A = A,
+    W = data.frame(W = W),
+    Q.SL.library = "SL.glm",
+    g.SL.library  = "SL.glm"
+  )
+  cat("TMLE ATE estimate:", round(tmle_fit$estimates$ATE$psi, 3), "\n")
+  cat("95% CI:", round(tmle_fit$estimates$ATE$CI, 3), "\n")
+} else {
+  message("Install the 'tmle' package:  install.packages('tmle')")
+}
+```
