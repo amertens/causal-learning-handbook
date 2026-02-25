@@ -1,11 +1,999 @@
 ---
-title: "Chapter 3.8: TMLE in the Clean Room Framework for Pharmacoepidemiology"
+title: "Chapter 3.8: TMLE in the Clean-Room Framework for Pharmacoepidemiology"
 format: html
 ---
 
-# Chapter 3.8  
-## TMLE in the Clean Room Framework for Pharmacoepidemiology
+# Chapter 3.8: TMLE in the Clean-Room Framework
+*Pre-specified, reproducible causal inference for regulatory pharmacoepidemiology*
 
-_This chapter demonstrates how to implement TMLE in a clean-room workflow using SuperLearner for g(A|W), evaluating balance using flexible diagnostics, and estimating effects robustly using `tmle`. It draws on the NSAIDs vs opioids AKI case study as a practical example._
+In many regulatory settings, analysts cannot freely explore the data. Post-marketing safety studies, multi-database pharmacoepidemiology collaborations, and distributed data network analyses often require a **clean-room workflow**: the analysis plan is pre-specified before data access, code is locked, and the analyst has minimal or no opportunity to iterate on model choices after seeing the data.
 
-<!-- Full code and step-by-step walkthrough follows -->
+This is the opposite of typical exploratory data analysis — and it is where TMLE shines.
+
+This chapter demonstrates how to implement TMLE in a clean-room regulatory context, using a motivating example inspired by the **NSAIDs vs. opioids acute kidney injury (AKI)** safety question.
+
+---
+
+# 1. Clinical Motivation
+
+## The Regulatory Question
+
+A distributed research network (similar to the FDA Sentinel system) has flagged a potential safety signal:
+
+> **Does initiation of prescription NSAIDs increase the 90-day risk of acute kidney injury compared to initiation of prescription opioids among adults with musculoskeletal pain?**
+
+This question arises in a post-marketing surveillance context where:
+
+- **Raw patient-level data cannot leave participating sites** (privacy, legal, or contractual constraints)
+- The analysis must be **pre-specified** in a Statistical Analysis Plan (SAP) before any data access
+- Results must be **reproducible** — running the same code on the same data yields identical results
+- The analyst cannot iterate on model specifications after seeing the data
+- There is an **audit trail** documenting every analysis step
+
+### Key elements
+
+- **Target population:** Adults aged 18-80 with a new musculoskeletal pain diagnosis initiating either NSAIDs or opioids
+- **Treatment:** NSAID initiation (A = 1) vs. opioid initiation (A = 0)
+- **Outcome:** AKI within 90 days (binary)
+- **Decision:** Should the NSAID label carry a stronger AKI warning? Should prescribing guidelines be updated?
+
+### Why TMLE is suited for clean-room analysis
+
+Traditional regression-based analyses require the analyst to choose a model specification — a process that invites data-dependent decisions. TMLE with Super Learner sidesteps this by:
+
+1. **Pre-specifying the learner library** (not a single model) in the SAP
+2. **Letting cross-validation choose** the best combination of learners
+3. **Providing doubly robust estimation** that protects against misspecification of either nuisance model
+4. **Yielding influence-curve inference** that is valid under the pre-specified procedure
+5. **Being fully deterministic** given the data, learner library, and random seed
+
+No post-hoc model selection is required.
+
+---
+
+# 2. Clean-Room Workflow Overview
+
+A clean-room analysis proceeds in distinct phases:
+
+### Phase 1: Protocol Development (before data access)
+
+- Define the causal question, DAG, and estimand
+- Write the SAP specifying all analysis steps
+- Pre-specify the Super Learner library
+- Define all diagnostics that will be run
+- Lock the analysis code in a version-controlled repository
+
+### Phase 2: Data Preparation (minimal data contact)
+
+- Execute pre-written data extraction queries
+- Apply inclusion/exclusion criteria
+- Create analysis-ready dataset
+- No exploratory analysis
+
+### Phase 3: Analysis Execution (locked code)
+
+- Run the pre-specified TMLE pipeline
+- Generate all pre-specified diagnostics
+- No code modifications allowed
+- Capture all output deterministically
+
+### Phase 4: Reporting
+
+- Interpret results according to pre-specified rules
+- Document any deviations from the protocol
+- Maintain audit trail
+
+We now walk through each phase.
+
+---
+
+# 3. Phase 1: Pre-Specified Protocol
+
+## 3.1 Causal Question and Estimand
+
+**Question (plain language):** What is the 90-day AKI risk if all eligible patients initiated NSAIDs, compared to if all eligible patients initiated opioids?
+
+**Estimand:** Average Treatment Effect on the risk difference scale:
+
+$$
+\psi = E[Y(1)] - E[Y(0)]
+$$
+
+where $Y(1)$ is the potential AKI outcome under NSAID initiation and $Y(0)$ under opioid initiation.
+
+## 3.2 Causal Model (DAG)
+
+```
+Confounders (W):
+  age, sex, CKD stage, diabetes, hypertension,
+  prior NSAID use, prior opioid use, ACE/ARB use,
+  number of concomitant medications, healthcare utilization
+
+      W
+     / \
+    v   v
+    A -> Y
+```
+
+All measured confounders $W$ affect both treatment choice $A$ and outcome $Y$. The active comparator design (NSAID vs. opioid) helps control for confounding by indication — both groups have pain requiring treatment.
+
+## 3.3 Assumptions
+
+Pre-specify and document:
+
+- **Consistency:** Initiation of a new NSAID (or opioid) prescription, irrespective of specific agent within class
+- **Exchangeability:** Conditional on $W$, treatment choice is independent of potential outcomes. Acknowledge that unmeasured confounders (e.g., OTC NSAID use, frailty) may violate this
+- **Positivity:** Both drugs are plausible options for all covariate strata. Will be checked via propensity score overlap diagnostics
+
+## 3.4 Pre-Specified Analysis Plan
+
+The SAP specifies:
+
+1. **Primary estimator:** TMLE with Super Learner
+2. **Super Learner library:**
+   - `SL.glm` (logistic regression)
+   - `SL.glm.interaction` (logistic with all two-way interactions)
+   - `SL.step` (stepwise regression)
+   - `SL.mean` (intercept-only, for benchmarking)
+3. **Number of cross-validation folds:** 5
+4. **Propensity score bounds:** Truncate at [0.025, 0.975]
+5. **Secondary estimators:** G-computation, IPTW (for comparison)
+6. **Pre-specified diagnostics:** PS overlap, weight distribution, covariate balance (SMD < 0.1 threshold), EIC mean check
+7. **Sensitivity analyses:** E-value for unmeasured confounding
+8. **Seed:** 20260101 (locked in SAP)
+
+---
+
+# 4. Simulated Claims-Like Data
+
+We simulate data resembling insurance claims with realistic variable distributions and nonlinear relationships.
+
+```{r}
+library(tidyverse)
+
+# ============================================================
+# LOCKED SEED — specified in the Statistical Analysis Plan
+# ============================================================
+set.seed(20260101)
+
+n <- 8000
+
+# --- Baseline confounders (claims-derived) ---
+
+# Demographics
+age  <- round(runif(n, 18, 80))
+male <- rbinom(n, 1, 0.45)
+
+# Comorbidities (from diagnosis codes)
+# CKD stage (0=none, 1=mild, 2=moderate, 3=severe)
+ckd <- sample(0:3, n, replace = TRUE,
+              prob = c(0.70, 0.15, 0.10, 0.05))
+diabetes   <- rbinom(n, 1, plogis(-2.0 + 0.03 * age + 0.5 * (ckd > 0)))
+hypertension <- rbinom(n, 1, plogis(-1.5 + 0.04 * age + 0.3 * male))
+
+# Medication history
+prior_nsaid <- rbinom(n, 1, 0.35)
+prior_opioid <- rbinom(n, 1, 0.20)
+ace_arb     <- rbinom(n, 1, plogis(-1.8 + 0.8 * hypertension + 0.5 * diabetes))
+
+# Healthcare utilization (proxy for overall health burden)
+n_rx <- rpois(n, lambda = 3 + 0.05 * age + 2 * (ckd > 1) + diabetes)
+n_visits <- rpois(n, lambda = 2 + 0.02 * age + ckd + diabetes)
+
+# --- Treatment model ---
+# NSAIDs are preferentially prescribed to:
+# - younger patients
+# - those without CKD (contraindication concern)
+# - those with prior NSAID use (familiarity)
+# - those without ACE/ARB use (drug interaction concern)
+# Includes nonlinear age effect and interactions
+lp_trt <- 0.3 +
+  -0.02 * (age - 50) +
+  -0.0005 * (age - 50)^2 +
+  -0.8 * (ckd >= 2) +
+  -0.3 * (ckd == 1) +
+  -0.2 * diabetes +
+  0.5 * prior_nsaid +
+  -0.3 * prior_opioid +
+  -0.4 * ace_arb +
+  -0.01 * n_rx +
+  0.15 * male +
+  0.3 * prior_nsaid * (ckd == 0)  # interaction: prior NSAID use matters more without CKD
+
+A <- rbinom(n, 1, plogis(lp_trt))
+
+# --- Outcome model ---
+# AKI risk depends on treatment and confounders
+# True effect: NSAIDs moderately increase AKI risk
+lp_out <- -4.5 +
+  0.45 * A +                              # true causal effect (harmful)
+  0.03 * (age - 50) +
+  0.0003 * (age - 50)^2 +
+  0.6 * (ckd == 1) +
+  1.2 * (ckd == 2) +
+  2.0 * (ckd >= 3) +
+  0.4 * diabetes +
+  0.3 * hypertension +
+  0.5 * ace_arb +
+  0.05 * n_rx +
+  0.25 * A * (ckd >= 2) +                # interaction: NSAIDs more harmful with CKD
+  0.15 * A * ace_arb +                    # interaction: NSAIDs + ACE/ARB
+  -0.1 * male
+
+Y <- rbinom(n, 1, plogis(lp_out))
+
+dat <- tibble(
+  age, male, ckd, diabetes, hypertension,
+  prior_nsaid, prior_opioid, ace_arb,
+  n_rx, n_visits, A, Y
+)
+```
+
+### True causal effect
+
+```{r}
+# Compute the true ATE from the data-generating process
+p1_true <- plogis(-4.5 + 0.45 * 1 + 0.03 * (age - 50) + 0.0003 * (age - 50)^2 +
+                    0.6 * (ckd == 1) + 1.2 * (ckd == 2) + 2.0 * (ckd >= 3) +
+                    0.4 * diabetes + 0.3 * hypertension + 0.5 * ace_arb +
+                    0.05 * n_rx + 0.25 * 1 * (ckd >= 2) + 0.15 * 1 * ace_arb +
+                    -0.1 * male)
+
+p0_true <- plogis(-4.5 + 0.45 * 0 + 0.03 * (age - 50) + 0.0003 * (age - 50)^2 +
+                    0.6 * (ckd == 1) + 1.2 * (ckd == 2) + 2.0 * (ckd >= 3) +
+                    0.4 * diabetes + 0.3 * hypertension + 0.5 * ace_arb +
+                    0.05 * n_rx + 0.25 * 0 * (ckd >= 2) + 0.15 * 0 * ace_arb +
+                    -0.1 * male)
+
+true_ate <- mean(p1_true - p0_true)
+cat("True ATE (risk difference):", round(true_ate, 4), "\n")
+cat("True risk under NSAIDs: ", round(mean(p1_true), 4), "\n")
+cat("True risk under opioids:", round(mean(p0_true), 4), "\n")
+cat("AKI event rate overall: ", round(mean(Y), 4), "\n")
+cat("Treatment prevalence:   ", round(mean(A), 4), "\n")
+```
+
+### Data summary (what the analyst sees)
+
+```{r}
+# Covariate distributions by treatment group
+dat %>%
+  group_by(A) %>%
+  summarise(
+    n          = n(),
+    mean_age   = mean(age),
+    pct_male   = mean(male),
+    pct_ckd_2plus = mean(ckd >= 2),
+    pct_diabetes  = mean(diabetes),
+    pct_htn    = mean(hypertension),
+    pct_prior_nsaid = mean(prior_nsaid),
+    pct_ace_arb = mean(ace_arb),
+    mean_n_rx  = mean(n_rx),
+    aki_rate   = mean(Y),
+    .groups = "drop"
+  )
+```
+
+---
+
+# 5. Phase 3: Locked Analysis Pipeline
+
+The following code represents the **locked analysis** that runs without modification. Every step is pre-specified.
+
+## 5.1 Step 1: Propensity Score Estimation
+
+```{r}
+# ============================================================
+# PRE-SPECIFIED: Propensity score model
+# SAP Section 4.2: Use logistic regression with all baseline
+# covariates, squared age term, and CKD indicators
+# ============================================================
+
+covariates <- c("age", "male", "ckd", "diabetes", "hypertension",
+                "prior_nsaid", "prior_opioid", "ace_arb", "n_rx", "n_visits")
+
+# Convert CKD to factor for proper modeling
+dat <- dat %>%
+  mutate(ckd_f = factor(ckd))
+
+g_formula <- A ~ age + I(age^2) + male + ckd_f + diabetes + hypertension +
+  prior_nsaid + prior_opioid + ace_arb + n_rx + n_visits +
+  prior_nsaid:ckd_f + ace_arb:diabetes
+
+g_mod <- glm(g_formula, family = binomial, data = dat)
+
+dat$ps <- predict(g_mod, type = "response")
+
+# PRE-SPECIFIED: Truncate at [0.025, 0.975]
+dat$ps_trunc <- pmax(0.025, pmin(0.975, dat$ps))
+```
+
+## 5.2 Step 2: Pre-Specified Diagnostics (Covariate Balance)
+
+These diagnostics are run **before** looking at the effect estimate, to confirm that the propensity score model is adequate.
+
+### Propensity score overlap
+
+```{r}
+# ============================================================
+# DIAGNOSTIC 1: Propensity score overlap
+# SAP Section 5.1
+# ============================================================
+
+ggplot(dat, aes(x = ps, fill = factor(A, labels = c("Opioid", "NSAID")))) +
+  geom_density(alpha = 0.45) +
+  labs(
+    x = "Estimated propensity score P(NSAID | W)",
+    y = "Density",
+    fill = "Treatment",
+    title = "Diagnostic 1: Propensity Score Overlap"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("#4477AA", "#EE6677"))
+```
+
+```{r}
+# Quantile summary
+dat %>%
+  group_by(Treatment = factor(A, labels = c("Opioid", "NSAID"))) %>%
+  summarise(
+    min  = round(min(ps), 3),
+    p5   = round(quantile(ps, 0.05), 3),
+    p25  = round(quantile(ps, 0.25), 3),
+    median = round(median(ps), 3),
+    p75  = round(quantile(ps, 0.75), 3),
+    p95  = round(quantile(ps, 0.95), 3),
+    max  = round(max(ps), 3),
+    .groups = "drop"
+  )
+```
+
+### Covariate balance: Standardized Mean Differences
+
+```{r}
+# ============================================================
+# DIAGNOSTIC 2: Covariate balance before and after weighting
+# SAP Section 5.2: SMD threshold < 0.1
+# ============================================================
+
+compute_smd <- function(data, var, trt, weights = NULL) {
+  if (is.null(weights)) weights <- rep(1, nrow(data))
+  d1 <- data[[var]][data[[trt]] == 1]
+  d0 <- data[[var]][data[[trt]] == 0]
+  w1 <- weights[data[[trt]] == 1]
+  w0 <- weights[data[[trt]] == 0]
+  m1 <- weighted.mean(d1, w1)
+  m0 <- weighted.mean(d0, w0)
+  s1 <- sqrt(sum(w1 * (d1 - m1)^2) / sum(w1))
+  s0 <- sqrt(sum(w0 * (d0 - m0)^2) / sum(w0))
+  pooled_sd <- sqrt((s1^2 + s0^2) / 2)
+  if (pooled_sd == 0) return(0)
+  (m1 - m0) / pooled_sd
+}
+
+# Stabilized IPTW weights for balance assessment
+p_A <- mean(dat$A)
+dat$sw <- ifelse(dat$A == 1,
+                 p_A / dat$ps_trunc,
+                 (1 - p_A) / (1 - dat$ps_trunc))
+
+balance_vars <- c("age", "male", "ckd", "diabetes", "hypertension",
+                  "prior_nsaid", "prior_opioid", "ace_arb", "n_rx", "n_visits")
+
+smd_raw <- sapply(balance_vars, function(v) compute_smd(dat, v, "A"))
+smd_wt  <- sapply(balance_vars, function(v) compute_smd(dat, v, "A", dat$sw))
+
+balance_df <- tibble(
+  Covariate  = balance_vars,
+  Unadjusted = round(abs(smd_raw), 3),
+  Weighted   = round(abs(smd_wt), 3)
+)
+
+balance_df
+```
+
+```{r}
+# Love plot
+balance_long <- balance_df %>%
+  pivot_longer(-Covariate, names_to = "Method", values_to = "SMD")
+
+ggplot(balance_long, aes(x = SMD, y = reorder(Covariate, SMD),
+                         color = Method, shape = Method)) +
+  geom_point(size = 3) +
+  geom_vline(xintercept = 0.1, linetype = "dashed", color = "grey50") +
+  labs(
+    x = "Absolute Standardized Mean Difference",
+    y = "",
+    title = "Diagnostic 2: Covariate Balance (Love Plot)",
+    subtitle = "Dashed line = 0.1 threshold from SAP"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c("#EE6677", "#228833"))
+```
+
+### Weight distribution
+
+```{r}
+# ============================================================
+# DIAGNOSTIC 3: Weight distribution
+# SAP Section 5.3
+# ============================================================
+
+ggplot(dat, aes(x = sw, fill = factor(A, labels = c("Opioid", "NSAID")))) +
+  geom_histogram(bins = 50, alpha = 0.6, position = "identity") +
+  labs(
+    x = "Stabilized IPTW weight",
+    y = "Count",
+    fill = "Treatment",
+    title = "Diagnostic 3: Weight Distribution"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("#4477AA", "#EE6677")) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40")
+
+cat("Weight summary:\n")
+summary(dat$sw)
+cat("Fraction > 5:", round(mean(dat$sw > 5), 4), "\n")
+cat("Fraction > 10:", round(mean(dat$sw > 10), 4), "\n")
+```
+
+---
+
+## 5.3 Step 3: Primary Estimator — TMLE (by hand)
+
+With diagnostics confirming adequate overlap and balance, we proceed to estimation.
+
+```{r}
+# ============================================================
+# PRIMARY ANALYSIS: TMLE
+# SAP Section 6.1
+# ============================================================
+
+logit <- function(p) log(p / (1 - p))
+
+# --- Step 3a: Initial outcome model ---
+# Pre-specified model form from SAP
+q_formula <- Y ~ A + age + I(age^2) + male + ckd_f + diabetes + hypertension +
+  prior_nsaid + prior_opioid + ace_arb + n_rx + n_visits +
+  A:ckd_f + A:ace_arb + A:diabetes
+
+q_mod <- glm(q_formula, family = binomial, data = dat)
+
+# Initial predictions
+Q1_init <- predict(q_mod, newdata = dat %>% mutate(A = 1), type = "response")
+Q0_init <- predict(q_mod, newdata = dat %>% mutate(A = 0), type = "response")
+QA_init <- predict(q_mod, type = "response")
+
+cat("Initial outcome model fitted.\n")
+cat("Q1 range:", round(range(Q1_init), 4), "\n")
+cat("Q0 range:", round(range(Q0_init), 4), "\n")
+```
+
+```{r}
+# --- Step 3b: Clever covariate ---
+H_A <- dat$A / dat$ps_trunc - (1 - dat$A) / (1 - dat$ps_trunc)
+H_1 <- 1 / dat$ps_trunc
+H_0 <- -1 / (1 - dat$ps_trunc)
+
+cat("Clever covariate range:", round(range(H_A), 2), "\n")
+```
+
+```{r}
+# --- Step 3c: Fluctuation (targeting) model ---
+fluc <- glm(dat$Y ~ -1 + offset(logit(QA_init)) + H_A,
+            family = binomial)
+epsilon <- coef(fluc)
+
+cat("Epsilon (fluctuation parameter):", round(epsilon, 5), "\n")
+```
+
+```{r}
+# --- Step 3d: Updated predictions ---
+Q1_star <- plogis(logit(Q1_init) + epsilon * H_1)
+Q0_star <- plogis(logit(Q0_init) + epsilon * H_0)
+
+# --- Step 3e: TMLE estimate ---
+tmle_risk1 <- mean(Q1_star)
+tmle_risk0 <- mean(Q0_star)
+tmle_ate   <- tmle_risk1 - tmle_risk0
+
+cat("TMLE risk (NSAIDs): ", round(tmle_risk1, 4), "\n")
+cat("TMLE risk (opioids):", round(tmle_risk0, 4), "\n")
+cat("TMLE ATE:           ", round(tmle_ate, 4), "\n")
+cat("True ATE:           ", round(true_ate, 4), "\n")
+```
+
+```{r}
+# --- Step 3f: Inference via efficient influence curve ---
+eic <- (dat$A / dat$ps_trunc) * (dat$Y - Q1_star) + Q1_star - tmle_risk1 -
+       ((1 - dat$A) / (1 - dat$ps_trunc)) * (dat$Y - Q0_star) - Q0_star + tmle_risk0
+
+tmle_se <- sqrt(var(eic) / n)
+tmle_ci <- tmle_ate + c(-1.96, 1.96) * tmle_se
+
+cat("\n=== PRIMARY RESULT ===\n")
+cat("TMLE ATE:", round(tmle_ate, 4), "\n")
+cat("SE:      ", round(tmle_se, 4), "\n")
+cat("95% CI:  [", round(tmle_ci[1], 4), ",", round(tmle_ci[2], 4), "]\n")
+cat("p-value: ", round(2 * pnorm(-abs(tmle_ate / tmle_se)), 4), "\n")
+```
+
+```{r}
+# --- Step 3g: Verify EIC mean ≈ 0 ---
+cat("EIC mean:", round(mean(eic), 8), " (should be ~0)\n")
+```
+
+---
+
+## 5.4 Step 4: Secondary Estimators (for comparison)
+
+### G-computation
+
+```{r}
+# ============================================================
+# SECONDARY ANALYSIS 1: G-computation
+# SAP Section 6.2
+# ============================================================
+
+gcomp_risk1 <- mean(Q1_init)
+gcomp_risk0 <- mean(Q0_init)
+gcomp_ate   <- gcomp_risk1 - gcomp_risk0
+
+cat("G-computation ATE:", round(gcomp_ate, 4), "\n")
+```
+
+### IPTW
+
+```{r}
+# ============================================================
+# SECONDARY ANALYSIS 2: IPTW with stabilized weights
+# SAP Section 6.3
+# ============================================================
+
+risk1_iptw <- with(dat, sum(sw * Y * (A == 1)) / sum(sw * (A == 1)))
+risk0_iptw <- with(dat, sum(sw * Y * (A == 0)) / sum(sw * (A == 0)))
+iptw_ate   <- risk1_iptw - risk0_iptw
+
+cat("IPTW ATE:", round(iptw_ate, 4), "\n")
+```
+
+### Comparison table
+
+```{r}
+# ============================================================
+# RESULTS COMPARISON TABLE
+# SAP Section 7
+# ============================================================
+
+results <- tibble(
+  Estimator = c("Unadjusted", "G-computation", "IPTW", "TMLE"),
+  ATE = round(c(
+    mean(dat$Y[dat$A == 1]) - mean(dat$Y[dat$A == 0]),
+    gcomp_ate,
+    iptw_ate,
+    tmle_ate
+  ), 4),
+  SE = round(c(NA, NA, NA, tmle_se), 4),
+  CI_lower = round(c(NA, NA, NA, tmle_ci[1]), 4),
+  CI_upper = round(c(NA, NA, NA, tmle_ci[2]), 4)
+)
+
+results
+```
+
+---
+
+## 5.5 Step 5: Post-Estimation Diagnostics
+
+### Clever covariate distribution
+
+```{r}
+# ============================================================
+# DIAGNOSTIC 4: Clever covariate ranges
+# SAP Section 5.4
+# ============================================================
+
+cc_df <- tibble(
+  H = H_A,
+  Treatment = factor(dat$A, labels = c("Opioid", "NSAID"))
+)
+
+ggplot(cc_df, aes(x = H, fill = Treatment)) +
+  geom_histogram(bins = 60, alpha = 0.5, position = "identity") +
+  labs(
+    x = "Clever covariate H(A, W)",
+    y = "Count",
+    fill = "Treatment",
+    title = "Diagnostic 4: Clever Covariate Distribution"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("#4477AA", "#EE6677"))
+```
+
+### Influence curve stability
+
+```{r}
+# ============================================================
+# DIAGNOSTIC 5: Influence curve distribution
+# SAP Section 5.5
+# ============================================================
+
+ggplot(tibble(eic = eic), aes(x = eic)) +
+  geom_histogram(bins = 60, fill = "#228833", alpha = 0.7) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    x = "Efficient influence curve value",
+    y = "Count",
+    title = "Diagnostic 5: EIC Distribution"
+  ) +
+  theme_minimal()
+
+cat("EIC summary:\n")
+summary(eic)
+cat("\nTop 5 most influential observations:\n")
+head(sort(abs(eic), decreasing = TRUE), 5)
+```
+
+### Predicted risk distribution
+
+```{r}
+# ============================================================
+# DIAGNOSTIC 6: Predicted outcome distributions
+# SAP Section 5.6
+# ============================================================
+
+pred_df <- tibble(
+  Q1_star = Q1_star,
+  Q0_star = Q0_star,
+  diff = Q1_star - Q0_star
+)
+
+ggplot(pred_df, aes(x = diff)) +
+  geom_histogram(bins = 50, fill = "#CC6677", alpha = 0.7) +
+  geom_vline(xintercept = mean(pred_df$diff), linetype = "solid", color = "black") +
+  geom_vline(xintercept = true_ate, linetype = "dashed", color = "red") +
+  labs(
+    x = "Individual-level risk difference (Q1* - Q0*)",
+    y = "Count",
+    title = "Diagnostic 6: Distribution of Individual Treatment Effects",
+    subtitle = "Black line = TMLE ATE; Red dashed = True ATE"
+  ) +
+  theme_minimal()
+```
+
+---
+
+# 6. Super Learner Integration
+
+In the by-hand implementation above, we used parametric logistic regression for both nuisance models. In a real clean-room analysis, the SAP would specify a Super Learner library. This section shows how that integration works conceptually.
+
+### Why Super Learner is ideal for clean-room analysis
+
+1. **No analyst discretion:** The learner library is pre-specified; cross-validation selects the best combination
+2. **Reproducible:** Given the same data, seed, and library, Super Learner always produces the same result
+3. **Flexible:** Multiple candidate models are considered, reducing the risk of misspecification
+4. **Auditable:** The cross-validated risk of each learner is logged, showing which models contributed
+
+### Pre-specified Super Learner library (from SAP)
+
+```{r, eval=FALSE}
+# ============================================================
+# SAP Section 4.3: Super Learner specification
+# ============================================================
+
+library(SuperLearner)
+
+# Pre-specified learner library (locked in SAP)
+SL_library <- c(
+  "SL.glm",               # logistic regression
+  "SL.glm.interaction",   # logistic with interactions
+  "SL.step",              # stepwise selection
+  "SL.mean"               # intercept-only (benchmark)
+)
+
+# NOTE: In a webR environment, compiled learners like SL.ranger
+# or SL.xgboost may not be available. The library above uses
+# only R-native learners.
+
+# Outcome model via Super Learner
+W_matrix <- dat %>% select(age, male, ckd, diabetes, hypertension,
+                            prior_nsaid, prior_opioid, ace_arb,
+                            n_rx, n_visits)
+
+Q_SL <- SuperLearner(
+  Y = dat$Y,
+  X = cbind(A = dat$A, W_matrix),
+  family = binomial(),
+  SL.library = SL_library,
+  cvControl = list(V = 5)
+)
+
+# Treatment model via Super Learner
+g_SL <- SuperLearner(
+  Y = dat$A,
+  X = W_matrix,
+  family = binomial(),
+  SL.library = SL_library,
+  cvControl = list(V = 5)
+)
+
+# Inspect cross-validated learner weights
+cat("Outcome model weights:\n")
+Q_SL$coef
+
+cat("\nTreatment model weights:\n")
+g_SL$coef
+
+# These weights are part of the audit trail — they document which
+# learners contributed most without analyst discretion
+```
+
+### Using Super Learner predictions in TMLE
+
+```{r, eval=FALSE}
+# Predictions for TMLE
+Q1_SL <- predict(Q_SL, newdata = cbind(A = 1, W_matrix))$pred
+Q0_SL <- predict(Q_SL, newdata = cbind(A = 0, W_matrix))$pred
+QA_SL <- predict(Q_SL, newdata = cbind(A = dat$A, W_matrix))$pred
+
+ps_SL <- predict(g_SL, newdata = W_matrix)$pred
+ps_SL <- pmax(0.025, pmin(0.975, ps_SL))
+
+# Then proceed with clever covariate, fluctuation, and inference
+# exactly as in the by-hand implementation above
+```
+
+---
+
+# 7. The Audit Trail
+
+A clean-room analysis must maintain a complete record of every computational step. The following structure documents the key elements:
+
+```{r}
+# ============================================================
+# AUDIT TRAIL
+# ============================================================
+
+audit <- list(
+  protocol_version = "v1.0",
+  sap_version = "v1.0",
+  analysis_date = Sys.Date(),
+  r_version = R.version.string,
+  seed = 20260101,
+  sample_size = n,
+
+  # Diagnostics summary
+  diagnostics = list(
+    ps_range = round(range(dat$ps), 4),
+    ps_truncation = c(0.025, 0.975),
+    max_smd_unadjusted = round(max(balance_df$Unadjusted), 3),
+    max_smd_weighted = round(max(balance_df$Weighted), 3),
+    smd_threshold = 0.1,
+    balance_achieved = all(balance_df$Weighted < 0.1),
+    max_weight = round(max(dat$sw), 2),
+    eic_mean = round(mean(eic), 8)
+  ),
+
+  # Primary result
+  primary_result = list(
+    estimator = "TMLE",
+    ate = round(tmle_ate, 4),
+    se = round(tmle_se, 4),
+    ci_95 = round(tmle_ci, 4),
+    p_value = round(2 * pnorm(-abs(tmle_ate / tmle_se)), 4)
+  ),
+
+  # Secondary results
+  secondary_results = list(
+    gcomp_ate = round(gcomp_ate, 4),
+    iptw_ate = round(iptw_ate, 4)
+  )
+)
+
+# Print audit summary
+cat("=== AUDIT TRAIL ===\n")
+cat("Protocol:", audit$protocol_version, "\n")
+cat("Date:", as.character(audit$analysis_date), "\n")
+cat("R:", audit$r_version, "\n")
+cat("Seed:", audit$seed, "\n")
+cat("N:", audit$sample_size, "\n")
+cat("\n--- Diagnostics ---\n")
+cat("PS range:", audit$diagnostics$ps_range, "\n")
+cat("Max SMD (weighted):", audit$diagnostics$max_smd_weighted, "\n")
+cat("Balance achieved:", audit$diagnostics$balance_achieved, "\n")
+cat("EIC mean:", audit$diagnostics$eic_mean, "\n")
+cat("\n--- Primary Result ---\n")
+cat("ATE:", audit$primary_result$ate, "\n")
+cat("95% CI:", audit$primary_result$ci_95, "\n")
+cat("p-value:", audit$primary_result$p_value, "\n")
+```
+
+---
+
+# 8. Sensitivity Analysis: E-value
+
+The E-value quantifies how strong unmeasured confounding would need to be to explain away the observed effect:
+
+```{r}
+# ============================================================
+# SENSITIVITY ANALYSIS: E-value
+# SAP Section 8.1
+# ============================================================
+
+# Convert risk difference to risk ratio for E-value computation
+risk_ratio <- tmle_risk1 / tmle_risk0
+
+# E-value formula for risk ratios
+compute_evalue <- function(rr) {
+  if (rr >= 1) {
+    rr + sqrt(rr * (rr - 1))
+  } else {
+    1/rr + sqrt(1/rr * (1/rr - 1))
+  }
+}
+
+evalue_point <- compute_evalue(risk_ratio)
+
+# E-value for confidence interval bound closest to null
+rr_ci_lower <- (tmle_risk0 + tmle_ci[1]) / tmle_risk0  # approximate
+evalue_ci <- if(rr_ci_lower > 1) compute_evalue(rr_ci_lower) else 1
+
+cat("Risk ratio (NSAIDs vs opioids):", round(risk_ratio, 3), "\n")
+cat("E-value (point estimate):", round(evalue_point, 2), "\n")
+cat("E-value (CI bound):", round(evalue_ci, 2), "\n")
+cat("\nInterpretation: An unmeasured confounder would need an association\n")
+cat("of at least RR =", round(evalue_point, 2), "with both treatment and outcome\n")
+cat("(above and beyond measured confounders) to explain away the\n")
+cat("observed effect.\n")
+```
+
+---
+
+# 9. Interpretation in Regulatory Context
+
+## Results summary
+
+```{r}
+cat("=== REGULATORY SUMMARY ===\n\n")
+cat("Study: Post-marketing safety analysis of NSAIDs vs opioids for AKI risk\n")
+cat("Design: Active comparator, new user, cohort study\n")
+cat("Method: Pre-specified TMLE with parametric nuisance models\n\n")
+cat("Primary endpoint: 90-day acute kidney injury\n")
+cat("NSAIDs (n =", sum(dat$A == 1), "): estimated 90-day AKI risk =",
+    round(tmle_risk1 * 100, 2), "%\n")
+cat("Opioids (n =", sum(dat$A == 0), "): estimated 90-day AKI risk =",
+    round(tmle_risk0 * 100, 2), "%\n")
+cat("Risk difference:", round(tmle_ate * 100, 2), "percentage points\n")
+cat("95% CI:", round(tmle_ci[1] * 100, 2), "to", round(tmle_ci[2] * 100, 2),
+    "percentage points\n\n")
+
+if (tmle_ci[1] > 0) {
+  cat("Conclusion: Statistically significant increase in AKI risk with NSAIDs.\n")
+  cat("The results support updating prescribing guidelines to include AKI risk\n")
+  cat("assessment, particularly for patients with pre-existing CKD.\n")
+} else if (tmle_ci[2] < 0) {
+  cat("Conclusion: Statistically significant decrease in AKI risk with NSAIDs.\n")
+} else {
+  cat("Conclusion: The risk difference is not statistically significant.\n")
+  cat("Continued monitoring is recommended.\n")
+}
+```
+
+## How TMLE supports the regulatory decision
+
+| Regulatory concern | How TMLE addresses it |
+|---|---|
+| Pre-specification required | SAP locks the learner library, seed, and analysis code |
+| Must be reproducible | Deterministic given data + seed + code |
+| Model selection bias | Super Learner eliminates manual model selection |
+| Robustness to misspecification | Double robustness protects against either nuisance model being wrong |
+| Valid inference | Influence-curve standard errors do not require bootstrap |
+| Auditable | Cross-validated learner weights, diagnostics, and the fluctuation parameter are all logged |
+| Transparent | Every step (initial model → clever covariate → targeting → inference) has a clear purpose |
+
+## What assumptions are most fragile?
+
+1. **Unmeasured confounding:** OTC NSAID use is not captured in claims data. Frailty and functional status are poorly measured. The E-value provides a benchmark for how strong this confounding would need to be.
+
+2. **Positivity in CKD subgroups:** Patients with severe CKD are rarely prescribed NSAIDs. The propensity score overlap diagnostic should flag this. If violated, consider restricting to the subpopulation with adequate overlap or using stochastic interventions.
+
+3. **Outcome misclassification:** AKI may be under-coded in claims data. This affects interpretation but not the validity of the TMLE procedure.
+
+---
+
+# 10. Distributed Data Extension
+
+In true multi-site analyses (like the FDA Sentinel system), patient-level data cannot be shared. The clean-room TMLE approach can be extended:
+
+### Site-level TMLE
+
+1. Ship the locked analysis code to each site
+2. Each site runs the TMLE pipeline on its local data
+3. Sites return summary statistics: point estimate, standard error, sample size
+4. The coordinating center performs meta-analysis across sites
+
+### Meta-analysis of site-level TMLE estimates
+
+```{r}
+# Simulated multi-site results
+site_results <- tibble(
+  site = c("Site A", "Site B", "Site C", "Site D"),
+  n = c(3200, 2100, 1800, 900),
+  ate = c(0.018, 0.022, 0.015, 0.025),
+  se = c(0.006, 0.008, 0.009, 0.014)
+)
+
+# Inverse-variance weighted meta-analysis
+site_results <- site_results %>%
+  mutate(
+    w = 1 / se^2,
+    w_ate = w * ate
+  )
+
+meta_ate <- sum(site_results$w_ate) / sum(site_results$w)
+meta_se  <- sqrt(1 / sum(site_results$w))
+meta_ci  <- meta_ate + c(-1.96, 1.96) * meta_se
+
+cat("Meta-analytic TMLE:\n")
+cat("  ATE:", round(meta_ate, 4), "\n")
+cat("  SE:", round(meta_se, 4), "\n")
+cat("  95% CI: [", round(meta_ci[1], 4), ",", round(meta_ci[2], 4), "]\n")
+```
+
+```{r}
+# Forest plot of site-level results
+site_results <- site_results %>%
+  mutate(
+    ci_low = ate - 1.96 * se,
+    ci_high = ate + 1.96 * se
+  )
+
+meta_row <- tibble(
+  site = "Meta-analysis",
+  n = sum(site_results$n),
+  ate = meta_ate,
+  se = meta_se,
+  ci_low = meta_ci[1],
+  ci_high = meta_ci[2]
+)
+
+forest_df <- bind_rows(site_results, meta_row) %>%
+  mutate(site = factor(site, levels = rev(c(site_results$site, "Meta-analysis"))))
+
+ggplot(forest_df, aes(x = ate, y = site)) +
+  geom_point(aes(size = ifelse(site == "Meta-analysis", 4, 2.5)),
+             shape = ifelse(forest_df$site == "Meta-analysis", 18, 16)) +
+  geom_errorbarh(aes(xmin = ci_low, xmax = ci_high), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  labs(
+    x = "ATE (Risk Difference)",
+    y = "",
+    title = "Forest Plot: Site-Level TMLE Estimates"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+---
+
+# Key Takeaways
+
+1. **TMLE is naturally suited for clean-room regulatory analysis** because it replaces manual model selection with pre-specified machine learning (Super Learner) and cross-validation.
+
+2. **The entire analysis pipeline can be pre-specified** in a Statistical Analysis Plan: learner library, seed, truncation bounds, diagnostic criteria, and decision rules — all locked before data access.
+
+3. **Reproducibility is guaranteed** by deterministic seeds, version-controlled code, and the algorithmic nature of TMLE + Super Learner.
+
+4. **The audit trail documents** propensity score overlap, covariate balance, weight distributions, the fluctuation parameter, influence curve behavior, and cross-validated learner weights — providing full transparency.
+
+5. **Double robustness** protects the estimate even when one nuisance model is misspecified — a critical property when the analyst cannot iterate on model specifications.
+
+6. **Influence-curve inference** provides valid standard errors without the computational burden of bootstrap, which matters in distributed settings where each site runs the analysis independently.
+
+7. **The clean-room framework extends to distributed data networks** by shipping locked code to each site and combining site-level TMLE estimates via meta-analysis.
+
+8. **Sensitivity analysis (E-value)** should always accompany the primary result to quantify robustness to unmeasured confounding — the one assumption that no statistical method can address.
+
+```{r}
+sessionInfo()
+```
