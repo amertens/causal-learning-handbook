@@ -5,9 +5,10 @@ format: html
 
 In this chapter, we introduce the **Causal Roadmap**, a structured approach for asking and answering causal questions with observational data. The roadmap helps researchers define their scientific question, translate it into a formal causal model, assess whether the causal effect is identifiable from data, and choose appropriate estimators to answer that question.
 
+:::{.callout-important}
 ## Why Use a Causal Roadmap?
 
-Traditional analysis often starts with: "Let's run a regression and see what we find." But modern causal inference begins by asking: **What is the causal question we are trying to answer?** 
+In epidemiology, it is tempting to jump straight to fitting a model---"Let’s run a regression and see what we find." But this approach conflates the scientific question with the statistical procedure, making it difficult to evaluate whether the analysis actually answers the question you care about. Modern causal inference begins by asking: **What is the causal question we are trying to answer?**
 
 A causal roadmap ensures:
 - Transparency in how evidence is generated
@@ -15,10 +16,12 @@ A causal roadmap ensures:
 - Clear articulation of assumptions and their implications
 - Structured thinking in both trial and non-randomized settings
 
+Starting with a well-defined question---before touching data or code---is the single most important step in any causal analysis. Every choice downstream (confounders to adjust for, estimator to use, how to interpret results) flows from this starting point.
+
 We’ll walk step-by-step through each part of the roadmap, with illustrative examples.
+:::
 
----
-
+:::{.callout-note}
 ## Step 1: Define the Causal Question
 
 This includes:
@@ -32,9 +35,9 @@ Example:
 > What is the 3-year risk of cardiovascular events if all postmenopausal women with osteoporosis initiated **denosumab** compared to if all initiated **zoledronic acid**?
 
 This PICO-style framing is the foundation of causal inference.
+:::
 
----
-
+:::{.callout-note}
 ## Step 2: Specify the Causal Model
 
 We now draw out how we believe the data were generated. This includes:
@@ -45,13 +48,15 @@ We now draw out how we believe the data were generated. This includes:
 
 We are making an implicit **Structural Causal Model (SCM)**:
 
+**In plain language:** A Structural Causal Model is simply a formal way of writing down your story about how the world works. Think of it as a set of equations that say: "This variable is caused by these other variables, plus some factors we cannot measure." For MPH students, the SCM is the mathematical version of the causal DAG you draw on a whiteboard---each arrow in the DAG corresponds to one of these equations. The key advantage is that it forces you to be explicit about every assumption you are making about what causes what.
+
 $$
 W = f_W(U_W),\
 A = f_A(W, U_A),\
 Y = f_Y(W, A, U_Y)
 $$
 
-Where $U$ terms represent unmeasured variables. 
+Where $U$ terms represent unmeasured variables.
 
 A simple DAG:
 
@@ -65,9 +70,9 @@ This DAG implies:
 - W (confounders) affect both A and Y
 - A (treatment) affects Y
 - No unmeasured confounding (U nodes omitted for simplicity)
+:::
 
----
-
+:::{.callout-tip}
 ## Step 3: Define the Target Causal Estimand
 
 We often want the **Average Treatment Effect (ATE)**:
@@ -82,31 +87,36 @@ $$
 E[Y | do(A=1)] - E[Y | do(A=0)]
 $$
 
+**Why prefer risk differences over odds ratios?** In applied epidemiology, the risk difference (RD) is often the most interpretable effect measure. It directly tells you: "Treatment changes the probability of the outcome by X percentage points." Odds ratios, by contrast, are non-collapsible (they change when you marginalize over covariates even without confounding), do not have a straightforward causal interpretation on the population level, and are frequently misinterpreted as risk ratios by clinicians and policymakers. When your goal is to inform a public health decision---"How many cases would we prevent if everyone received treatment?"---the risk difference answers that question directly.
+
 We might also want:
 - Risk ratios
 - Hazard ratios (with caveats)
 - Median survival differences
 - Effects in subgroups (CATEs)
+:::
 
----
-
+:::{.callout-warning}
 ## Step 4: Link the Causal Estimand to the Observed Data
 
 This is the **identification step**. It answers the question: *Can we estimate the causal effect from the data we have?*
 
+**This is the most critical step in the entire roadmap.** The assumptions below cannot be tested with data alone---they are fundamentally untestable. No statistical diagnostic, no balance table, and no sensitivity analysis can prove they hold. They must be justified by subject-matter knowledge. If these assumptions fail, your estimate may be biased no matter how sophisticated your statistical method is.
+
 Requires three assumptions:
-- **Exchangeability (No unmeasured confounding)**: $Y(a) \perp A | W$
-- **Positivity**: Everyone has a nonzero probability of receiving each treatment, given W
-- **Consistency**: The observed outcome equals the potential outcome under the received treatment
+
+- **Exchangeability (No unmeasured confounding)**: $Y(a) \perp A | W$ --- This means that, within levels of the measured covariates W, the treated and untreated groups are comparable. In practice, this requires that you have measured and adjusted for *every* common cause of treatment and outcome. There is no way to verify this from the data.
+- **Positivity**: Everyone has a nonzero probability of receiving each treatment, given W --- If certain covariate strata always receive one treatment, you cannot estimate effects for those groups.
+- **Consistency**: The observed outcome equals the potential outcome under the received treatment --- This requires a well-defined intervention with no hidden variations in how treatment is delivered.
 
 If satisfied, we can identify:
 
 $$
 E[Y(1) - Y(0)] = E_W[ E[Y | A = 1, W] - E[Y | A = 0, W] ]
 $$
+:::
 
----
-
+:::{.callout-tip}
 ## Step 5: Choose a Statistical Estimator
 
 This step translates the identified quantity into an algorithm we can apply to data.
@@ -120,9 +130,9 @@ We’ll explore these in later chapters. The choice depends on:
 - Assumptions you’re willing to make
 - Sample size
 - Tolerance for model misspecification
+:::
 
----
-
+:::{.callout-caution}
 ## Step 6: Evaluate and Interpret
 
 Once you've estimated your parameter, interpretation is **not automatic**.
@@ -136,8 +146,7 @@ Tools for evaluation:
 - Negative control outcomes
 - Covariate balance checks
 - Expert consultation
-
----
+:::
 
 ## A Simple Simulated Example
 
@@ -165,8 +174,15 @@ p0 <- predict(model, newdata = newdata0, type = "response")
 mean(p1 - p0)
 ```
 
+:::{.callout-tip}
+## Interpreting the G-Computation Result
+
+The number produced by `mean(p1 - p0)` is the estimated **average causal risk difference**. In plain language: it tells you how much the probability of the outcome (e.g., a cardiovascular event) would change, on average, if everyone in the study population had received treatment (A = 1) compared to if everyone had received no treatment (A = 0). For example, a value of 0.07 means that treatment is estimated to increase the risk of the outcome by 7 percentage points on average across the population, after adjusting for age and CVD history. This is the core quantity that g-computation targets---a population-level "what if" comparison.
+:::
+
 ---
 
+:::{.callout-note}
 ## Summary
 
 The Causal Roadmap gives a rigorous framework for designing and evaluating real-world effect estimates. Before choosing a statistical method, start with the science:
@@ -176,3 +192,4 @@ The Causal Roadmap gives a rigorous framework for designing and evaluating real-
 - Choose a transparent, defensible method
 
 In the next chapter, we’ll explore different estimation strategies in detail.
+:::

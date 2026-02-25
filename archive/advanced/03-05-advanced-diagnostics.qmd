@@ -7,67 +7,78 @@ format: html
 ## Advanced Diagnostics and Sensitivity Analyses  
 *Ensuring credible causal conclusions in real-world longitudinal data*
 
-Causal inference is never just about estimating an effect — it is about **credibly defending** that effect.  
-Diagnostics and sensitivity analyses are essential components of the causal roadmap because:
+:::{.callout-important}
+## Why Diagnostics Are Non-Negotiable
 
-- Identifying assumptions are never fully testable  
-- Real-world data contain missingness, selection, unmeasured confounding, and misclassification  
-- Positivity and model misspecification can quietly undermine estimation  
-- Regulatory-grade RWE requires transparency and robustness checks  
+Causal inference is never just about estimating an effect — it is about **credibly defending** that effect. As an epidemiologist, you know that an estimate without diagnostics is like a clinical trial without a protocol: technically possible, but not credible. Diagnostics and sensitivity analyses are essential components of the causal roadmap because:
+
+- Identifying assumptions are never fully testable
+- Real-world data contain missingness, selection, unmeasured confounding, and misclassification
+- Positivity and model misspecification can quietly undermine estimation
+- Regulatory-grade RWE requires transparency and robustness checks
 
 This chapter walks through:
 
-1. Diagnostics for identification assumptions  
-2. Positivity and overlap assessment  
-3. Diagnostics for nuisance models (Q and g)  
-4. Weight diagnostics  
-5. Sensitivity analyses for unmeasured confounding  
-6. Negative controls  
-7. TMLE-specific diagnostics  
-8. Longitudinal diagnostics (LMTP / longitudinal TMLE)  
+1. Diagnostics for identification assumptions
+2. Positivity and overlap assessment
+3. Diagnostics for nuisance models (Q and g)
+4. Weight diagnostics
+5. Sensitivity analyses for unmeasured confounding
+6. Negative controls
+7. TMLE-specific diagnostics
+8. Longitudinal diagnostics (LMTP / longitudinal TMLE)
+:::
 
---- 
+---
 
-## 1. Diagnostics for Identification Assumptions
+:::{.callout-note}
+## Diagnostics for Identification Assumptions
 
 The core identification assumptions are:
 
-- **Consistency**  
-- **Exchangeability (No unmeasured confounding)**  
-- **Positivity**  
-- **Correct nuisance model specification**
+- **Consistency**: the observed outcome under the treatment actually received equals the potential outcome under that treatment
+- **Exchangeability (No unmeasured confounding)**: conditional on measured covariates, treatment groups are comparable
+- **Positivity**: every covariate stratum has a non-zero probability of each treatment level
+- **Correct nuisance model specification**: the models for treatment and outcome are well-specified enough to avoid bias
 
-While not directly testable, their **empirical implications** can be evaluated.
+While not directly testable, their **empirical implications** can be evaluated. Think of these as the load-bearing walls of your analysis -- if any one fails, the whole structure is compromised.
+:::
 
 ### 1.1 Data structure and quality checks
 
 Before causal modeling:
 
-- Verify time ordering  
-- Confirm treatment and outcome timestamps  
-- Inspect missingness patterns  
-- Look for coding shifts (ICD-9 to ICD-10)  
+- Verify time ordering
+- Confirm treatment and outcome timestamps
+- Inspect missingness patterns
+- Look for coding shifts (ICD-9 to ICD-10)
 - Examine distributions and implausible values  
 
-### 1.2 DAG review
+:::{.callout-tip}
+## DAG Review: Your Causal Roadmap on Paper
 
-A DAG clarifies:
+A DAG (Directed Acyclic Graph) is not just a statistical formality -- it is your most powerful communication tool. When you sit down with clinical collaborators, a DAG makes implicit assumptions explicit. It clarifies:
 
-- Adjustment sets  
-- Potential unmeasured confounding  
-- Variables that should **not** be adjusted for (mediators, colliders)
+- **Adjustment sets**: which variables must be conditioned on to block confounding paths
+- **Potential unmeasured confounding**: where you lack data on important causes
+- **Variables that should *not* be adjusted for**: mediators (which would block the causal path you want to estimate) and colliders (which would open bias paths)
 
-Use DAGs as a communication tool with clinical partners.
+Draw the DAG before writing any code. Share it with your clinical team. If they disagree with an arrow, that disagreement is a scientific conversation worth having before you run a single model.
+:::
 
 ---
 
-## 2. Positivity Diagnostics
+:::{.callout-warning}
+## Positivity Diagnostics: When Your Data Cannot Support Your Question
 
 Positivity requires:
 
 > Every combination of covariates has a non-zero probability of receiving each treatment.
 
+**Why this matters so much**: Positivity violations are dangerous because they are silent. Your code will still run, your model will still produce a number, but that number may be driven by a handful of observations with extreme weights rather than by the actual data. In epidemiologic terms, you are extrapolating beyond the support of your data -- making claims about what would happen to people for whom you have essentially no evidence.
+
 Violations cause unstable weights and unreliable estimates.
+:::
 
 ### 2.1 Propensity score overlap
 
@@ -81,30 +92,40 @@ ggplot(tibble(ps = ps, A = A), aes(x = ps, fill = factor(A))) +
 
 Indicators of concern:
 
-- Mass near 0 or 1  
+- Mass near 0 or 1
 - Disjoint distributions  
 
-### 2.2 Clever covariate range (TMLE)
+:::{.callout-caution}
+## Clever Covariate Range (TMLE)
+
+The clever covariate (H) is the quantity TMLE uses to update its initial outcome model. When propensity scores are near 0 or 1, the clever covariate explodes in magnitude -- and a single observation can hijack your entire estimate. Always inspect its range before trusting your TMLE output.
 
 ```r
 H <- A/ps - (1-A)/(1-ps)
 summary(H)
 ```
 
-Extreme values imply near-positivity violations.
+Extreme values imply near-positivity violations. If you see values in the hundreds or thousands, your estimate is likely unstable and you should investigate the propensity score distribution.
+:::
 
-### 2.3 Remedies
+:::{.callout-tip}
+## Remedies for Positivity Violations
 
-- Restrict to regions with support (“overlap population”)
-- Truncate weights  
-- Use **stochastic interventions** instead of static ones  
-- Simplify interventions  
+When you detect positivity problems, do not simply ignore them. You have several practical options:
+
+- **Restrict to the overlap population**: limit your analysis to the covariate region where both treatment groups have adequate representation. This changes your target population, but the estimate you get is actually supported by data.
+- **Truncate weights**: cap extreme weights at a percentile (e.g., 1st and 99th). This introduces a small amount of bias but can dramatically reduce variance.
+- **Use stochastic interventions instead of static ones**: rather than asking “what if everyone were treated?”, ask “what if the probability of treatment shifted by some amount?” This naturally respects the data support.
+- **Simplify the intervention**: coarser treatment definitions may have better overlap.
+:::
 
 ---
 
-## 3. Diagnostics for Nuisance Functions (Q and g)
+:::{.callout-note}
+## Diagnostics for Nuisance Functions (Q and g)
 
-Accurate nuisance models are crucial for TMLE, AIPW, and LMTP.
+In causal inference, "nuisance functions" are the models you fit not because you care about their parameters, but because you need them to estimate the causal effect. **Q** is the outcome model (predicting Y given treatment and covariates) and **g** is the treatment model (predicting treatment probability given covariates, i.e., the propensity score). Accurate nuisance models are crucial for TMLE, AIPW, and LMTP. If these models are badly misspecified, your causal estimate inherits that bias -- even with doubly robust methods, you need at least one of Q or g to be well-specified.
+:::
 
 ### 3.1 Predictive accuracy
 
@@ -137,9 +158,10 @@ Ensure top predictors are *clinically plausible*.
 
 ---
 
-## 4. Weight Diagnostics
+:::{.callout-warning}
+## Weight Diagnostics: Are a Few Observations Driving Your Results?
 
-For IPTW, MSMs, and censoring weights.
+Inverse probability weights are used in IPTW, MSMs, and censoring models. Extreme weights are a red flag that a small number of unusual observations are exerting outsized influence on your effect estimate. Always inspect weights before reporting results.
 
 ### 4.1 Weight summaries
 
@@ -150,9 +172,9 @@ quantile(weights, probs = c(0.01, 0.99))
 
 Red flags:
 
-- Mean far from 1  
-- Very heavy tail  
-- Huge max weights  
+- Mean far from 1 (for stabilized weights, the mean should be approximately 1)
+- Very heavy tail
+- Huge max weights (a single weight of 500 means that one person "counts" as 500 in your pseudo-population)
 
 ### 4.2 Visual check
 
@@ -169,13 +191,22 @@ upper <- quantile(weights, 0.99)
 w_trunc <- pmin(pmax(weights, lower), upper)
 ```
 
+Report results both with and without truncation. If they differ substantially, your findings are fragile.
+:::
+
 ---
 
 ## 5. Sensitivity Analyses for Unmeasured Confounding
 
-### 5.1 E-values
+:::{.callout-note}
+## E-values: How Strong Would Unmeasured Confounding Need to Be?
 
-Measures minimum strength of confounding needed to explain away an effect.
+An **E-value** answers a simple but powerful question: *What is the minimum strength of association that an unmeasured confounder would need to have with both the treatment and the outcome -- above and beyond the measured covariates -- to fully explain away the observed effect?*
+
+In plain language: if you find an E-value of 3.5, it means an unmeasured confounder would need to be associated with at least a 3.5-fold increase in both the likelihood of treatment *and* the likelihood of the outcome to reduce your observed effect to the null. The larger the E-value, the more robust your finding is to unmeasured confounding. A small E-value (close to 1) means even weak unmeasured confounding could account for your result.
+
+E-values do not prove the absence of confounding -- they quantify how extreme an unmeasured confounder would need to be. This helps reviewers and decision-makers calibrate their confidence in the finding.
+:::
 
 ### 5.2 Quantitative Bias Analysis (QBA)
 
@@ -193,14 +224,17 @@ LMTP can quantify robustness of static intervention effects.
 
 ---
 
-## 6. Negative Controls
+:::{.callout-important}
+## Negative Controls: One of the Most Powerful Tools for Detecting Unmeasured Confounding
 
-Negative control outcomes (NCOs):
+Negative controls are arguably the single most informative diagnostic you can run for unmeasured confounding. The logic is elegant: pick an outcome that you *know* the treatment should not affect, but that shares the same confounding structure as your primary outcome. Then estimate the "effect" of treatment on that negative control outcome. If you find an association, something is wrong -- and that something is almost certainly unmeasured confounding or some other systematic bias.
 
-- Causally unrelated to treatment  
-- Share confounding structures  
+**Negative control outcomes (NCOs):**
 
-If TMLE of treatment → NCO ≠ 0 → likely confounding remains.
+- Causally unrelated to treatment
+- Share confounding structures with the real outcome
+
+If TMLE of treatment on the NCO produces a non-null result, confounding likely remains in your primary analysis.
 
 Example:
 
@@ -212,15 +246,19 @@ tmle_nco <- tmle(
 )
 ```
 
-Negative control exposures are also useful.
+**Negative control exposures** work similarly: pick an exposure that should not affect your outcome but shares the same confounding structure as the real treatment. Both types serve as empirical "smoke tests" for bias.
+:::
 
 ---
 
-## 7. TMLE-Specific Diagnostics
+:::{.callout-caution}
+## TMLE-Specific Diagnostics: Things That Can Go Wrong in the Targeting Step
+
+TMLE adds a "targeting step" that updates the initial outcome model to optimize bias-variance tradeoff for your specific causal parameter. This step is powerful but can go wrong in subtle ways. Watch for these issues:
 
 ### 7.1 Clever covariate behavior
 
-Extreme clever covariate values lead to unstable targeting.
+Extreme clever covariate values lead to unstable targeting. If the clever covariate has values in the hundreds or thousands, the fluctuation parameter (epsilon) is being estimated from near-singular data. Revisit your propensity score model.
 
 ### 7.2 Targeting step convergence
 
@@ -230,6 +268,8 @@ Check for warnings in logistic fluctuation:
 glm.fit: algorithm did not converge
 ```
 
+This warning means the targeting step failed to find a stable update. Common causes include near-positivity violations or a very poor initial fit.
+
 ### 7.3 Influence-curve distribution
 
 ```r
@@ -237,15 +277,19 @@ IC <- tmle_fit$ic
 mean(IC); var(IC)
 ```
 
-Heavy tails → avoid Wald intervals, use bootstrap.
+The mean of the influence curve should be approximately zero (this is the efficient influence function equation that TMLE solves). Heavy tails in the IC distribution suggest that Wald-type confidence intervals may have poor coverage -- consider bootstrap-based inference instead.
+:::
 
 ---
 
-## 8. Longitudinal Diagnostics (LMTP & Longitudinal TMLE)
+:::{.callout-warning}
+## Longitudinal Diagnostics: Where Problems Compound Over Time
+
+In longitudinal settings (LMTP, longitudinal TMLE), every challenge from the cross-sectional case is amplified. Positivity must hold at *every* timepoint. Weights are *multiplied* across time, so moderate violations at each step can produce extreme cumulative weights. This section is critical for anyone working with repeated-measures or time-varying treatment data.
 
 ### 8.1 Sequential positivity
 
-Check treatment probabilities at each timepoint.
+Check treatment probabilities at each timepoint. A treatment probability of 0.05 at one time may be acceptable, but if you have 10 timepoints with similar probabilities, the cumulative probability can become vanishingly small.
 
 ### 8.2 Cumulative weights
 
@@ -254,53 +298,60 @@ cumw <- apply(weight_matrix, 1, prod)
 hist(cumw)
 ```
 
-Extreme cumulative weights → instability.
+Extreme cumulative weights signal instability. Even if weights look reasonable at each individual time step, their product can be enormous.
 
 ### 8.3 Truncation across time
 
-Truncate weights at each time step or truncate cumulative weights.
+Truncate weights at each time step or truncate cumulative weights. Both approaches involve tradeoffs -- per-step truncation is more conservative but can compound across time; cumulative truncation directly addresses the problem but is harder to interpret.
 
 ### 8.4 Time-varying confounding sanity checks
 
-Ensure intermediate variables are not inappropriate colliders.
+Ensure intermediate variables are not inappropriate colliders. In longitudinal settings, a variable can be both a confounder (of future treatment-outcome relationships) and a mediator (of past treatment effects). The DAG becomes essential for sorting out what should and should not be conditioned on at each time step.
+:::
 
 ---
 
-## 9. Recommended Diagnostics Workflow
+:::{.callout-tip}
+## Recommended Diagnostics Workflow: A Practical Checklist
+
+Use this as a step-by-step checklist for every causal analysis. Print it out, tape it to your monitor, or include it in your analysis plan. Skipping steps here is how "surprising" results end up in print.
 
 ### Before estimation
 
-- Confirm time-ordering  
-- Draw a DAG  
-- Check missingness  
-- Summarize covariate distributions by treatment  
+- [ ] Confirm time-ordering of treatment, covariates, and outcome
+- [ ] Draw a DAG and review it with clinical collaborators
+- [ ] Check missingness patterns (MCAR/MAR/MNAR)
+- [ ] Summarize covariate distributions by treatment group (Table 1)
 
 ### During estimation
 
-- Check PS overlap  
-- Evaluate weight distributions  
-- Inspect Q and g predictions  
-- Check TMLE targeting step  
+- [ ] Check propensity score overlap (density plots by treatment group)
+- [ ] Evaluate weight distributions (summaries, histograms, max values)
+- [ ] Inspect Q and g predictions (calibration, AUC, cross-validated risk)
+- [ ] Check TMLE targeting step convergence and clever covariate range
 
 ### After estimation
 
-- Sensitivity analyses  
-- Negative controls  
-- Compare across estimators (IPTW, TMLE, AIPW)  
-- Robustness checks (population restriction, alternative confounder sets)
+- [ ] Run sensitivity analyses (E-values, quantitative bias analysis)
+- [ ] Run negative control analyses (NCOs and/or NCEs)
+- [ ] Compare across estimators (IPTW, TMLE, AIPW) -- agreement increases credibility
+- [ ] Perform robustness checks (population restriction, alternative confounder sets, different SuperLearner libraries)
+:::
 
 ---
 
-## 10. Summary
+:::{.callout-important}
+## Summary: Diagnostics Are the Backbone of Credible Causal Inference
 
 To produce defensible causal evidence, diagnostics must be:
 
-- Systematic  
-- Transparent  
-- Documented in the analysis plan  
-- Interpreted with domain expertise  
+- **Systematic**: follow the workflow above for every analysis, not just when results look surprising
+- **Transparent**: report diagnostics in your paper or supplement, not just in your internal notes
+- **Documented in the analysis plan**: pre-specify which diagnostics you will run and how you will respond to problems
+- **Interpreted with domain expertise**: a propensity score distribution or E-value only becomes meaningful when contextualized by clinical knowledge
 
-With these tools, analysts can judge the **credibility**, **robustness**, and **transportability** of causal findings — essential for regulatory, clinical, and scientific decision‑making.
+With these tools, analysts can judge the **credibility**, **robustness**, and **transportability** of causal findings -- essential for regulatory, clinical, and scientific decision-making. An estimate without diagnostics is not a causal estimate; it is a hope.
+:::
 
 ```{r}
 sessionInfo()

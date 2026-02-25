@@ -16,27 +16,36 @@ We will walk carefully through:
 
 # 1. What Does It Mean to *Identify* a Causal Effect?
 
-A causal estimand (e.g., ATE = E[Y(1) – Y(0)]) is defined in terms of **potential outcomes**, which we cannot fully observe. Identification means:
+:::{.callout-important}
+## Identification: The Bridge from Theory to Data
+
+In plain language, **identification** asks: "Can we figure out the causal effect using only the data we actually collected?" We define causal effects using potential outcomes -- what *would have happened* under each treatment -- but we never observe both for the same person. Identification is the logical argument that, under stated assumptions, the unobservable causal quantity equals something we *can* compute from real data. Without identification, no amount of statistical sophistication will recover a valid causal estimate.
+
+A causal estimand (e.g., ATE = E[Y(1) -- Y(0)]) is defined in terms of **potential outcomes**, which we cannot fully observe. Identification means:
 
 > **Can we express the causal estimand entirely in terms of the observed data distribution?**
 
-If yes → causal effect is **identified**  
-If no → causal effect is **not identifiable** without additional untestable assumptions or new data
+If yes, the causal effect is **identified**.
+If no, the causal effect is **not identifiable** without additional untestable assumptions or new data.
+:::
 
 The three key assumptions required for identification are:
 
-## 1. Consistency
+:::{.callout-note}
+## Assumption 1: Consistency -- "You Get What You Get"
+
 The observed outcome equals the counterfactual outcome under the treatment actually received:
 
 $$
 Y = Y(A)
 $$
 
-Meaning:
-- If someone took denosumab, their observed outcome equals their potential outcome under denosumab  
-- If they took ZA, their observed outcome equals their potential outcome under ZA  
+In practice, this means the treatment is **well-defined** and there is only one version of it. If someone took denosumab, their observed outcome equals their potential outcome under denosumab. If they took ZA, their observed outcome equals their potential outcome under ZA. Consistency can break down when "treatment" is vague (e.g., "exercise more") or when the drug formulation, dose, or route of administration varies across patients in ways that matter for the outcome.
+:::
 
-## 2. Exchangeability (No Unmeasured Confounding)
+
+:::{.callout-warning}
+## Assumption 2: Exchangeability -- The Hardest Assumption to Defend
 
 Formally:
 
@@ -44,14 +53,17 @@ $$
 Y(a) \perp A \mid W
 $$
 
-Interpretation:
-- After adjusting for confounders \(W\), treatment groups are comparable.
-- In a randomized trial, randomization ensures this.
-- In observational data, we must assume it (and diagnose it).
+This is the assumption that **there are no unmeasured confounders**. After adjusting for the measured covariates $W$, the treated and untreated groups are comparable -- as if treatment had been randomly assigned within strata of $W$.
 
-If there are unmeasured factors that influence both treatment and outcome, identification fails.
+- In a randomized trial, randomization guarantees exchangeability by design.
+- In observational data, we must **assume** it holds -- and this assumption is **untestable** from the data alone.
 
-## 3. Positivity
+This is typically the most difficult assumption to defend in applied epidemiology. If there are unmeasured factors (e.g., frailty, physician preference, disease severity scores not in the data) that influence both treatment and outcome, identification fails. Always use a DAG to reason about which variables are sufficient to block all backdoor paths, and conduct sensitivity analyses (e.g., E-values) to assess how robust your conclusions are to potential unmeasured confounding.
+:::
+
+
+:::{.callout-caution}
+## Assumption 3: Positivity -- Watch for Practical Violations
 
 Everyone has a *positive probability* of receiving either treatment at each level of covariates:
 
@@ -59,15 +71,25 @@ $$
 0 < P(A=a \mid W=w) < 1
 $$
 
-Violations are common in real-world data (e.g., frail patients may *never* receive a certain drug).
+**Practical positivity violations** are extremely common in real-world observational data and deserve careful attention:
 
-We will practice diagnosing this with R shortly.
+- **Structural violations**: Some covariate strata *never* receive a particular treatment by clinical convention (e.g., patients over age 90 may never be prescribed aggressive chemotherapy). No statistical method can fix this -- the causal effect is simply not defined in those strata.
+- **Random violations**: Some strata have very few patients receiving one treatment, leading to near-zero propensity scores. This causes extreme inverse-probability weights and unstable estimates.
+
+Signs to look for: propensity scores piling up near 0 or 1, very large IPTW weights, and g-computation predictions extrapolating far outside the support of the data. We will practice diagnosing this with R shortly.
+:::
+
 
 ---
 
 # 2. The Identification Formula
 
-If assumptions hold, the ATE becomes:
+:::{.callout-tip}
+## The Key Insight: Replacing Counterfactuals with Observables
+
+The identification formula is the payoff of the three assumptions above. It tells us that **we can replace unobservable counterfactuals with observable conditional expectations**. In other words, instead of needing to see what *would have happened* to each person under both treatments (impossible), we can compute the causal effect from quantities we actually observe in the data.
+
+If the assumptions hold, the ATE becomes:
 
 $$
 E[Y(1) - Y(0)]
@@ -76,32 +98,33 @@ E_W\!\left[
 E[Y \mid A=1, W]
 -
 E[Y \mid A=0, W]
-
-right]
+\right]
 $$
 
 This formula tells us:
 
-→ First estimate outcome models separately for A=1 and A=0  
-→ Then average over the empirical distribution of W  
+- First, estimate the expected outcome conditional on treatment and covariates -- separately for $A=1$ and $A=0$.
+- Then, average the difference over the empirical distribution of $W$ in the study population.
 
-This motivates **g-computation**, **IPTW**, **AIPW**, and **TMLE**.
+This is the foundation for all standard causal inference estimators: **g-computation**, **IPTW**, **AIPW**, and **TMLE**.
+:::
 
 ---
 
 # 3. The Statistical Estimand
 
-A statistical estimand is the mapping of the causal parameter onto observable data.
+:::{.callout-important}
+## Causal Estimand vs. Statistical Estimand -- Know the Difference
 
-Example:
+A **causal estimand** is the scientific quantity of interest, defined in the language of potential outcomes (e.g., "What is the average difference in 3-year MI risk if everyone took denosumab vs. if everyone took ZA?"). A **statistical estimand** is the specific function of the observed data distribution that equals the causal estimand *under the identification assumptions*. These are conceptually distinct: the causal estimand lives in the world of "what if," while the statistical estimand lives in the world of "what we can compute."
 
-Causal estimand:
-> 3-year difference in MI risk if all patients received denosumab versus if all received ZA
+**Example:**
 
-Statistical estimand:
-> Mean difference in **standardized predicted risks** from a model of P(Y | A, W)
+- **Causal estimand**: 3-year difference in MI risk if all patients received denosumab versus if all received ZA
+- **Statistical estimand**: Mean difference in **standardized predicted risks** from a model of $P(Y \mid A, W)$, averaged over the covariate distribution
 
-Regression coefficients (e.g., log-odds ratios) are *not* this estimand.
+Regression coefficients (e.g., log-odds ratios from a logistic regression) are **not** the statistical estimand for the ATE. They are conditional measures on the log-odds scale, not marginal risk differences. Conflating the two is one of the most common errors in applied epidemiology.
+:::
 
 ---
 
@@ -153,11 +176,28 @@ ate_gcomp <- mean(p1 - p0)
 ate_gcomp
 ```
 
+:::{.callout-tip}
+## Interpreting the G-Computation ATE
+
+The number printed above is the **average treatment effect on the risk-difference scale**. It estimates how much the probability of MI would change, on average, if every patient in the study population were given denosumab ($A=1$) compared to a world where every patient received ZA ($A=0$). A positive value means denosumab is associated with *higher* MI risk after adjusting for age and CVD history; a negative value means *lower* risk. Because this is a standardized (marginal) estimate averaged over the real covariate distribution, it has a direct public-health interpretation -- unlike a conditional odds ratio from a logistic regression.
+:::
+
 ---
 
 # 6. Diagnosing Exchangeability and Positivity
 
 ## 6.1 Overlap check
+
+:::{.callout-warning}
+## What Positivity Violations Look Like in Practice
+
+The propensity score plot below is your primary diagnostic for positivity. You are looking for **red flags** in the distribution of estimated propensity scores:
+
+- **Mass piling up near 0 or 1**: This means some patients have a near-certain probability of receiving (or not receiving) treatment given their covariates. These are practical positivity violations -- the data contain little or no information about what would happen if these patients received the other treatment.
+- **Poor overlap between treated and untreated groups**: If the propensity score distributions for $A=1$ and $A=0$ do not share substantial common support, any causal estimate in the non-overlapping region relies on extrapolation rather than data.
+
+When you see these patterns, consider restricting the analysis to the region of common support, trimming extreme weights, or acknowledging the limitations in your interpretation.
+:::
 
 ```{r}
 plot(density(predict(glm(A ~ age + cvd, family = binomial, data = dat), type = "response")),
@@ -166,36 +206,40 @@ plot(density(predict(glm(A ~ age + cvd, family = binomial, data = dat), type = "
 ps <- predict(glm(A ~ age + cvd, family = binomial, data = dat), type = "response")
 ```
 
-Look for:
-- Mass near 0 or 1 → positivity problems  
-- Poor overlap → biased or unstable estimates  
-
 ---
 
 # 7. Interpretability: Why the Roadmap Matters
 
+:::{.callout-note}
+## The Causal Roadmap Keeps Your Analysis Honest
+
 Without explicit identification:
 
-- Analysts might report non-causal associations
-- Sensitivity analyses are impossible
-- Regulatory decisions become less defensible
+- Analysts might report non-causal associations as if they were causal effects
+- Sensitivity analyses are impossible because the assumptions were never stated
+- Regulatory and public-health decisions become less defensible under scrutiny
 
 With identification:
 
-- The causal effect has a clear interpretation
-- Assumptions are transparent
-- Methods are chosen consistently with the estimand
+- The causal effect has a clear, unambiguous interpretation tied to a well-defined intervention
+- Assumptions are transparent and can be interrogated by reviewers, clinicians, and regulators
+- Statistical methods are chosen *because they target the identified estimand*, not out of convenience
+:::
 
 ---
 
 # 8. Summary
 
+:::{.callout-tip}
+## Chapter Takeaways
+
 In this chapter, we connected the causal estimand to observable data using the identification step. You learned:
 
-- Causal effects are defined using potential outcomes  
-- Identification requires exchangeability, consistency, and positivity  
-- When identified, causal effects can be expressed in terms of observable data  
-- Statistical estimands correspond to causal estimands only under correct identification  
-- G-computation is a simple and transparent method for implementing the identification formula  
+- Causal effects are defined using **potential outcomes** -- quantities we cannot fully observe
+- Identification requires three assumptions: **consistency**, **exchangeability**, and **positivity**
+- When these assumptions hold, causal effects can be expressed entirely in terms of observable data via the **identification formula**
+- A **statistical estimand** is the observable-data function that equals the causal estimand under correct identification -- it is not the same as a regression coefficient
+- **G-computation** is a simple and transparent method for implementing the identification formula: fit an outcome model, predict under each treatment, and average
 
-Next, we turn to **estimation strategies**—how to choose and implement methods like IPTW, TMLE, or outcome regression to actually estimate the identified effect.
+Next, we turn to **estimation strategies** -- how to choose and implement methods like IPTW, TMLE, or outcome regression to actually estimate the identified effect.
+:::

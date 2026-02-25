@@ -22,39 +22,52 @@ This is still point treatment only. Longitudinal extensions come later.
 
 # 1. Intuition: Reweighting to Mimic a Trial
 
-In observational data, some types of patients are more likely to receive one treatment than another. This creates **confounding by indication**.
+:::{.callout-tip}
+## Key Insight: IPTW Creates a Pseudo-Population That Mimics a Randomized Trial
+
+In observational data, some types of patients are more likely to receive one treatment than another. This creates **confounding by indication**. Think of it this way: if sicker patients are preferentially given a new drug, a naive comparison of outcomes between treated and untreated groups will be biased.
 
 IPTW tackles this by
 
 > Giving more weight to underrepresented patients and less weight to overrepresented ones, so that in the weighted sample, treatment looks as if it were randomized given the measured covariates.
 
-Formally, we use the **propensity score**
+The result is a **pseudo-population** --- a reweighted version of your study sample where the distribution of confounders is the same across treatment groups, just as it would be in a well-conducted randomized trial. This is the core idea that makes IPTW so powerful for epidemiologic research.
+
+- Patients who got a treatment that was unlikely for their covariate pattern receive a large weight (they are "surprising" and therefore informative)
+- Patients who got the most expected treatment get a small weight (they are "predictable" and already well-represented)
+
+In the weighted pseudo-population, confounders are balanced between treatment groups (if the propensity score model is correctly specified).
+:::
+
+:::{.callout-note}
+## Definition: The Propensity Score
+
+The **propensity score** is the probability of receiving treatment given measured covariates:
 
 $$
 e(W) = P(A = 1 \mid W)
 $$
 
-and define weights such as
+IPTW weights are constructed from the propensity score:
 
 - For treated:  \( \displaystyle w_i = \frac{1}{e(W_i)} \)
 - For control: \( \displaystyle w_i = \frac{1}{1 - e(W_i)} \)
 
-Intuition
-
-- Patients who got a treatment that was unlikely for their covariate pattern receive a large weight
-- Patients who got the most expected treatment get a small weight
-
-In the weighted pseudo population, confounders are balanced between treatment groups (if the model is correct).
+The propensity score is a **balancing score**: conditioning on it is sufficient to remove confounding by all measured covariates $W$. This is why a single scalar summary can replace adjustment for many covariates.
+:::
 
 ---
 
 # 2. Identification Using IPTW
 
+:::{.callout-important}
+## The IPTW Identification Result and the Horvitz-Thompson Connection
+
 Under the same causal assumptions as before
 
-- Consistency
-- Exchangeability: \( Y(a) \perp A \mid W \)
-- Positivity
+- **Consistency**: the observed outcome equals the potential outcome under the treatment actually received
+- **Exchangeability**: \( Y(a) \perp A \mid W \) --- no unmeasured confounding
+- **Positivity**: every covariate stratum has a non-zero probability of receiving each treatment
 
 the average potential outcome under treatment can be expressed as
 
@@ -70,7 +83,8 @@ $$
 
 The IPTW estimator replaces the expectation with the sample average and replaces the true \( e(W) \) with an estimated one.
 
-This is why IPTW is sometimes called a **Horvitz Thompson type** estimator.
+This is called a **Horvitz-Thompson type** estimator because it has the same structure as the survey sampling estimator that reweights observations by the inverse of their selection probability. In our setting, "selection" is selection into a treatment group. Just as survey statisticians upweight undersampled populations, we upweight patients whose treatment assignment was unlikely given their covariates.
+:::
 
 ---
 
@@ -140,16 +154,34 @@ ggplot(dat, aes(x = ps, fill = factor(A))) +
   theme_minimal()
 ```
 
-Interpretation
+:::{.callout-tip}
+## Reading the Propensity Score Overlap Plot
 
-- Good overlap is important for positivity
-- If treatment groups have little overlap in ps, IPTW will rely on extrapolation and produce unstable weights
+**Good overlap** looks like two density curves that cover mostly the same range of propensity scores, even if their peaks differ. This means that for most covariate patterns, there are both treated and untreated patients --- exactly what positivity requires.
+
+**Bad overlap** looks like two density curves that barely touch, with the treated group concentrated at high propensity scores and the untreated group concentrated at low ones. When this happens:
+
+- IPTW produces extreme weights for patients in the non-overlapping tails
+- Estimates become highly variable and unreliable
+- You may need to restrict your target population to the region of overlap (trimming) or reconsider your study design
+
+As a rule of thumb, be concerned if propensity scores for either group pile up near 0 or 1.
+:::
 
 ---
 
 # 5. Constructing IPTW Weights
 
-### 5.1 Unstabilized weights
+:::{.callout-note}
+## Unstabilized Weights
+
+Unstabilized weights are the simplest form of IPTW weights. For each individual, the weight is the inverse of the probability of receiving the treatment they actually received:
+
+- Treated ($A = 1$): $w_i = 1 / e(W_i)$
+- Untreated ($A = 0$): $w_i = 1 / (1 - e(W_i))$
+
+These weights create a pseudo-population where treatment is independent of measured confounders. However, they can be highly variable --- especially when some propensity scores are close to 0 or 1.
+:::
 
 ```{r}
 dat <- dat %>%
@@ -163,14 +195,15 @@ quantile(dat$w_ipw, probs = c(0.01, 0.99))
 
 Keep an eye on
 
-- Very large weights
-- Range and extreme quantiles
+- Very large weights (suggest near-violations of positivity)
+- Range and extreme quantiles (the 99th percentile should not be orders of magnitude larger than the median)
 
-### 5.2 Stabilized weights
+:::{.callout-tip}
+## Why Stabilized Weights Are Preferred in Practice
 
-Stabilized weights can improve variance properties and interpretability.
+Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment**, which brings the weights closer to 1 on average and reduces their variance without introducing bias for the marginal causal effect.
 
-For a binary treatment
+For a binary treatment:
 
 $$
 SW_i = \frac{P(A_i)}{e(W_i)} \text{ if } A_i = 1
@@ -182,7 +215,16 @@ $$
 SW_i = \frac{P(A_i)}{1 - e(W_i)} \text{ if } A_i = 0
 $$
 
-Here \( P(A_i) \) is the marginal probability of treatment.
+Here \( P(A_i) \) is the marginal probability of treatment (estimated as the sample proportion treated).
+
+**Why this helps:** Unstabilized weights create a pseudo-population that is larger than the original sample, which inflates standard errors. Stabilized weights preserve the original sample size in expectation, leading to:
+
+- Narrower confidence intervals
+- More stable point estimates
+- Better finite-sample performance
+
+In epidemiologic practice, **always prefer stabilized weights** unless you have a specific reason to use unstabilized ones.
+:::
 
 ```{r}
 pA <- mean(dat$A)
@@ -198,8 +240,6 @@ dat <- dat %>%
 summary(dat$sw_ipw)
 quantile(dat$sw_ipw, probs = c(0.01, 0.99))
 ```
-
-Stabilized weights often have a smaller variance and can lead to more stable estimates.
 
 ---
 
@@ -229,7 +269,7 @@ $$
 
 We can also fit a weighted regression with treatment as the only predictor.
 
-```{r}
+```{r, eval=FALSE}
 library(sandwich)
 library(lmtest)
 
@@ -264,11 +304,19 @@ c(ate_gcomp = ate_g, ate_iptw = ate_ipw)
 
 Under correct models and adequate positivity, these methods should converge to similar estimates as sample size grows.
 
-However
+:::{.callout-important}
+## Critical Takeaway: IPTW and G-Computation Depend on Different Models
 
-- g computation depends on correctly specifying the outcome model
-- IPTW depends on correctly specifying the treatment model
-- Neither uses both models at once, which motivates **doubly robust** methods (next chapter)
+This is one of the most important conceptual points in causal inference methodology:
+
+- **G-computation** depends on correctly specifying the **outcome model** $E[Y \mid A, W]$
+- **IPTW** depends on correctly specifying the **treatment model** $P(A \mid W)$
+- **Neither uses both models at once**
+
+In practice, you rarely know which model is correct. This motivates **doubly robust** methods (next chapter), which combine both approaches and provide consistent estimates if *either* the treatment model *or* the outcome model is correctly specified --- giving you two chances to get it right.
+
+For MPH epidemiologists: when you present IPTW results, always show propensity score diagnostics (overlap, balance) alongside your estimates. When you present g-computation results, discuss outcome model fit. When the two approaches give very different answers, that is a signal that at least one model may be misspecified.
+:::
 
 ---
 
@@ -276,15 +324,27 @@ However
 
 IPTW is powerful but fragile if diagnostics are ignored.
 
+:::{.callout-important}
+## Diagnostic Checklist: Never Report IPTW Without These Checks
+
+Every IPTW analysis should include diagnostics. Reviewers and readers should expect to see them. Omitting diagnostics is a red flag in any manuscript.
+:::
+
 ### 8.1 Check propensity score overlap
 
-- Plot densities by treatment group
-- Flag regions where one group is missing
+:::{.callout-note}
+## Assessing Positivity via Overlap
+
+- Plot propensity score densities by treatment group (as we did in Section 4)
+- Flag regions where one group is missing or sparse
+- If the treated and untreated distributions do not overlap, the ATE may not be identifiable in that region
+- Consider restricting inference to the overlap population or reporting the ATT instead
+:::
 
 ### 8.2 Check weights
 
 ```{r}
-dat %>% 
+dat %>%
   summarize(
     min_w = min(sw_ipw),
     max_w = max(sw_ipw),
@@ -293,7 +353,17 @@ dat %>%
   )
 ```
 
-Large extreme values are a red flag.
+:::{.callout-warning}
+## When Extreme Weights Signal Trouble
+
+Large extreme weights are a red flag. Watch for these warning signs:
+
+- **Maximum weight > 10--20**: a single observation is being counted as 10--20 people. Your estimate may be driven by one or two individuals.
+- **Mean of stabilized weights far from 1**: stabilized weights should average approximately 1. Deviations suggest model misspecification.
+- **Ratio of max to median weight > 20**: indicates near-violation of positivity for some covariate patterns.
+
+When you see extreme weights, consider: (1) improving your propensity score model, (2) checking for data errors in the extreme-weight observations, and (3) applying weight truncation (see below).
+:::
 
 ### 8.3 Consider truncation
 
@@ -316,28 +386,50 @@ ate_trunc   <- risk1_trunc - risk0_trunc
 c(ate_truncated = ate_trunc)
 ```
 
-Truncation reduces variance at the cost of some bias. In practice it often improves mean squared error.
+:::{.callout-caution}
+## The Truncation Trade-Off: Bias vs. Variance
+
+Truncation (also called "winsorizing") reduces variance at the cost of introducing some bias. By capping extreme weights, you are effectively saying: "I am willing to accept a small amount of bias in exchange for a much more stable estimate."
+
+**The trade-off in practice:**
+
+- **Without truncation**: unbiased (if the propensity model is correct) but potentially high variance, with confidence intervals that may be uninformatively wide
+- **With truncation**: slightly biased but often lower mean squared error, producing more useful estimates
+
+**Common approaches:**
+
+- Truncate at the 1st and 99th percentiles (as shown above)
+- Truncate at fixed values (e.g., cap weights at 10 or 20)
+- Report results with and without truncation as a sensitivity analysis
+
+There is no single "right" truncation threshold. In your manuscripts, always report which threshold you used and show sensitivity to this choice.
+:::
 
 ---
 
 # 9. Summary
 
-In this chapter we covered
+:::{.callout-tip}
+## Chapter Takeaways and Limitations
 
-- The intuition for IPTW as a method that reweights data to mimic a trial
-- The key role of the propensity score in computing weights
-- How to construct unstabilized and stabilized IPTW weights
+**What we covered:**
+
+- The intuition for IPTW as a method that reweights observational data to mimic a randomized trial
+- The key role of the propensity score in computing weights, and its connection to the Horvitz-Thompson estimator from survey sampling
+- How to construct unstabilized and stabilized IPTW weights (prefer stabilized in practice)
 - How to estimate ATEs via weighted means or weighted regression
-- How to diagnose overlap and extreme weights
-- How IPTW compares to g computation
+- How to diagnose propensity score overlap and extreme weights --- never skip these diagnostics
+- How IPTW compares to g-computation, and why each depends on a different model
 
-Limitations
+**Limitations to keep in mind:**
 
-- Depends entirely on a correct treatment model
-- Sensitive to violations of positivity
+- Depends entirely on a correctly specified treatment model --- if you miss a confounder or misspecify the functional form, your weights will not balance the confounders
+- Sensitive to violations of positivity --- extreme weights can dominate your estimates
 - Does not use information from the outcome model, which motivates doubly robust approaches
+- For rare exposures or outcomes, IPTW can be particularly unstable
 
-In the next chapter, we will introduce **doubly robust estimators** and **Targeted Maximum Likelihood Estimation (TMLE)**, which combine the strengths of g computation and IPTW and allow the use of machine learning for both nuisance models.
+**Looking ahead:** In the next chapter, we will introduce **doubly robust estimators** and **Targeted Maximum Likelihood Estimation (TMLE)**, which combine the strengths of g-computation and IPTW and allow the use of machine learning for both nuisance models.
+:::
 
 ```{r}
 sessionInfo()

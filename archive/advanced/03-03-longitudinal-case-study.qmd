@@ -28,23 +28,32 @@ This chapter integrates lessons from Chapter 1 (causal roadmap) and Chapter 2 (e
 
 # 1. The Clinical and Real-World Context
 
-Osteoporosis treatments such as **denosumab** and **zoledronic acid** are widely used in postmenopausal women.  
-Observational data registries show:
+:::{.callout-note}
+## Why Longitudinal Analysis? The Clinical Reality
 
-- Frequent **treatment interruptions**  
-- **Switching** between agents  
-- **Loss to follow-up**  
+Osteoporosis treatments such as **denosumab** and **zoledronic acid** are widely used in postmenopausal women. But real-world treatment trajectories are messy. Observational data registries show:
+
+- Frequent **treatment interruptions**
+- **Switching** between agents
+- **Loss to follow-up**
 - Time-varying covariates (e.g., frailty, kidney function, fall risk)
 
-These complexities make longitudinal causal inference necessary.
+These complexities mean that a single baseline snapshot cannot capture the full causal story. Patients change treatments over time, their risk factors evolve, and those evolving risk factors influence both future treatment decisions and the outcome. **This is why longitudinal causal inference is necessary** --- standard regression on baseline data alone will produce biased estimates when treatment and confounders co-evolve over time.
+:::
+
+:::{.callout-caution}
+## Why a Naive Cox Model Fails Here
 
 A naive Cox model adjusting for baseline covariates would **fail** to address:
 
-- Time-varying confounding affected by prior treatment  
-- Informative censoring (patients at higher risk may discontinue)  
-- Treatment switching  
-- Differing follow-up time  
-- Positivity issues  
+- **Time-varying confounding affected by prior treatment** --- a patient's kidney function at month 6 is influenced by the treatment they received in months 1--5, and also affects what treatment they receive next
+- **Informative censoring** --- patients at higher risk may discontinue therapy, making dropouts systematically different from those who remain
+- **Treatment switching** --- patients who switch from one agent to another introduce post-baseline confounding that baseline adjustment cannot handle
+- **Differing follow-up time** --- varying observation windows across patients create structural biases when not properly modeled
+- **Positivity violations** --- some covariate histories may make one treatment nearly impossible, leading to extreme extrapolation
+
+If you adjust for time-varying confounders in a Cox model, you **block causal pathways** (overadjustment bias). If you do not adjust, you have **uncontrolled confounding**. This is the fundamental dilemma that methods like Longitudinal TMLE and LMTP are designed to solve.
+:::
 
 We instead use **Longitudinal TMLE** or **LMTP** to estimate causal effects under hypothetical longitudinal interventions.
 
@@ -52,21 +61,27 @@ We instead use **Longitudinal TMLE** or **LMTP** to estimate causal effects unde
 
 # 2. The Longitudinal Data Structure
 
-Assume patient \(i\) is followed monthly for 36 months.
+:::{.callout-note}
+## The Canonical Longitudinal Data Structure
 
-The canonical structure:
+Assume patient $i$ is followed monthly for 36 months. In longitudinal causal inference, we represent each patient's observed data as an **ordered sequence** of baseline variables, treatments, time-varying confounders, censoring indicators, and the final outcome:
 
-\[
+$$
 O_i = (W_i, A_{i0}, L_{i1}, A_{i1}, C_{i1}, L_{i2}, A_{i2}, C_{i2}, \dots, Y_i)
-\]
+$$
+
+**Reading this notation:** at each time point, we first observe the patient's updated covariates ($L_t$), then their treatment decision ($A_t$), then whether they dropped out ($C_t$). This ordering matters because it encodes our assumptions about what causes what.
 
 Where:
 
-- **W**: baseline covariates (age, CVD history, frailty)
-- **A_t**: treatment status at time \(t\) (1 = denosumab, 0 = zoledronic acid)
-- **L_t**: time-varying covariates (kidney function, fracture risk, comorbidities)
-- **C_t**: censoring/loss to follow-up (1 = censored)
-- **Y**: cardiovascular event by 36 months
+- **$W$**: baseline covariates (age, CVD history, frailty) --- measured once at study entry
+- **$A_t$**: treatment status at time $t$ (1 = denosumab, 0 = zoledronic acid) --- can change over time
+- **$L_t$**: time-varying covariates (kidney function, fracture risk, comorbidities) --- updated each visit
+- **$C_t$**: censoring/loss to follow-up (1 = censored) --- captures informative dropout
+- **$Y$**: cardiovascular event by 36 months --- the final outcome of interest
+
+This structure is the foundation for everything that follows. Every longitudinal causal method --- whether IPTW, g-computation, or TMLE --- operates on data organized this way.
+:::
 
 We simulate a small example below.
 
@@ -127,15 +142,32 @@ for (t in 1:Tmax) {
 glimpse(dat_long)
 ```
 
+:::{.callout-tip}
+## What This Simulated Data Represents
+
+In plain language, the code above creates **2,000 hypothetical patients** each observed over **6 time points**. Here is what is happening at each step:
+
+1. **Baseline**: Each patient starts with an age (centered around 75) and a baseline CVD history that depends on age --- older patients are more likely to have prior cardiovascular disease.
+2. **Initial treatment ($A_0$)**: Whether a patient starts on denosumab depends on their age and CVD history --- sicker, older patients are more likely to receive denosumab (confounding by indication).
+3. **At each time point**: A time-varying comorbidity score ($L_t$) evolves based on age, CVD history, *and the prior treatment* --- this is the hallmark of **time-varying confounding affected by prior treatment**. Treatment can then switch based on the current comorbidity score.
+4. **Censoring**: Dropout probability depends on current comorbidity and treatment --- making censoring **informative** (sicker patients on certain treatments are more likely to be lost).
+5. **Outcome**: The final cardiovascular event depends on the *entire treatment history* (average treatment across all time points) and the *entire covariate history*.
+
+This is exactly the kind of data structure where naive methods break down: treatment affects future confounders, which affect future treatment, which affects the outcome.
+:::
+
 ---
 
 # 4. Defining the Longitudinal Causal Question
+
+:::{.callout-important}
+## Static Treatment Regimes: The Causal Question in Plain Language
 
 Our target estimand:
 
 > **What is the 36-month cardiovascular event risk if everyone remained continuously on denosumab vs continuously on zoledronic acid?**
 
-This is a **static treatment regime**:
+In plain language, a **static treatment regime** is a hypothetical rule that says: "No matter what happens to the patient over time --- regardless of side effects, lab values, or clinical events --- keep them on this treatment at every visit." We are comparing two such rules:
 
 \[
 d_1: A_t = 1 \ orall t  
@@ -144,41 +176,62 @@ d_1: A_t = 1 \ orall t
 d_0: A_t = 0 \ orall t
 \]
 
-Equivalent to a “perfect adherence” scenario.
+This is equivalent to a **”perfect adherence” scenario** --- asking what *would* happen if every patient stayed on their assigned treatment for the full 36 months, something that rarely occurs in practice.
+
+**Why this matters for MPH epidemiologists:** This is the longitudinal analogue of the intention-to-treat vs. per-protocol distinction from RCTs. We are estimating a per-protocol-like effect, but from observational data, using methods that properly handle the time-varying confounding that makes naive per-protocol analyses biased.
 
 We can also define:
 
-- **Dynamic regimes** (treatment depends on predicted fracture risk)
-- **Stochastic regimes** (shift interventions on treatment probabilities)
+- **Dynamic regimes** (treatment depends on predicted fracture risk --- e.g., “treat with denosumab only if eGFR drops below 45”)
+- **Stochastic regimes** (shift interventions on treatment probabilities --- e.g., “increase the probability of receiving denosumab by 10%”)
 
-But for now we use static interventions.
+But for now we use static interventions to keep the exposition clear.
+:::
 
 ---
 
 # 5. Identification: Assumptions for Longitudinal Effects
 
-To identify the causal effect using observed data, we require:
+:::{.callout-warning}
+## Identification Assumptions --- Sequential Exchangeability Is the Hardest to Defend
 
-- **Sequential exchangeability:**  
-  \( Y^{\bar a} \perp A_t \mid \bar L_t, \bar A_{t-1}, W \)
-- **Sequential positivity:**  
-  Each treatment is possible at each time for every covariate history
-- **Consistency:**  
-  Observed outcomes correspond to the regime actually followed
+To identify the causal effect using observed data, we require three assumptions. These are the longitudinal analogues of the point-treatment assumptions, but they must hold **at every time point**:
 
-These are the longitudinal analogues of the point-treatment assumptions.
+- **Sequential exchangeability (no unmeasured time-varying confounding):**
+  $Y^{\bar{a}} \perp A_t \mid \bar{L}_t, \bar{A}_{t-1}, W$
+  At each time $t$, conditional on the full covariate and treatment history up to that point, the treatment assignment is "as good as random." **This is the hardest assumption to defend in practice.** It requires that you have measured *every* variable that simultaneously affects treatment decisions and the outcome at *every* time point. In osteoporosis research, this means capturing not only lab values and diagnoses but also physician judgment, patient preferences, and symptom severity --- variables that may not appear in claims data.
+
+- **Sequential positivity:**
+  Each treatment must be possible at each time for every covariate history. If certain patients *never* receive one of the treatments at some point in follow-up (e.g., patients with severe renal impairment never receive zoledronic acid), the causal effect is not identifiable for those subgroups.
+
+- **Consistency:**
+  The observed outcome for a patient who happened to follow regime $\bar{a}$ is the same as the potential outcome under intervention $\bar{a}$. This is usually reasonable but requires that the treatment is well-defined (e.g., "denosumab 60mg SC every 6 months" not just "denosumab").
+
+**Practical guidance:** In your DAG and protocol, explicitly list which time-varying confounders you are conditioning on and which might be unmeasured. Sensitivity analyses (Section 9) can help assess how robust your conclusions are to violations of sequential exchangeability.
+:::
 
 ---
 
 # 6. Using LMTP for Longitudinal Interventions
 
-The **lmtp** package is a modern tool for estimating longitudinal modified treatment policies (MTPs).  
-It supports:
+:::{.callout-note}
+## What LMTP Does in Plain Language
 
-- Static interventions  
-- Dynamic rules  
-- Stochastic shifts  
-- Censoring adjustments  
+The **lmtp** R package lets you answer "what if" questions about treatment strategies that unfold over time. In plain language, it does the following:
+
+1. **You specify a hypothetical treatment rule** (e.g., "always give denosumab" or "increase the probability of treatment by 20%").
+2. **LMTP estimates what the outcome would have been** if every patient in your dataset had followed that rule, adjusting for the fact that treatment, confounders, and censoring all evolve together over time.
+3. **Under the hood**, it uses a combination of outcome regression and treatment/censoring models (doubly robust estimation via TMLE), with **SuperLearner** to flexibly estimate these nuisance functions.
+
+The package supports:
+
+- **Static interventions** --- set treatment to a fixed value at every time point
+- **Dynamic rules** --- treatment depends on patient characteristics at each visit
+- **Stochastic shifts** --- nudge treatment probabilities rather than forcing a deterministic rule
+- **Censoring adjustments** --- properly handle informative dropout
+
+This is a major practical advantage: you do not need to hand-code the sequential regression or the clever covariate targeting step. LMTP automates the entire longitudinal TMLE pipeline.
+:::
 
 Here we implement:
 
@@ -211,19 +264,36 @@ This gives a TMLE estimate of:
 
 # 7. Using Longitudinal TMLE (Manual Concept)
 
-Longitudinal TMLE proceeds:
+:::{.callout-tip}
+## The Backward Regression Intuition
 
-1. Start at final timepoint  
-2. Estimate Q-models backward in time  
-3. Estimate g-models for each treatment and censoring event  
-4. Apply sequential targeting  
-5. Compute counterfactual outcomes  
+Longitudinal TMLE can feel abstract, but the core intuition is straightforward: **work backward from the outcome**.
 
-This is mathematically complex but **automated by LMTP** in most real applications.
+Think of it like this: imagine you are standing at the end of the study (month 36) and asking, "Given everything that happened up to this point, what is the expected outcome?" Then you step back one month and ask the same question, incorporating the answer from the future. You keep stepping backward, month by month, until you reach baseline.
+
+At each step, the method:
+
+1. **Estimates the expected outcome** given the current and future treatment/covariate history (the "Q-model" or outcome regression)
+2. **Estimates the probability of the observed treatment and remaining uncensored** at that time point (the "g-model" or propensity/censoring model)
+3. **Applies a targeting step** --- a small, clever update to the outcome regression that ensures the final estimate is **doubly robust** (consistent if *either* the Q-model or the g-model is correct) and has valid confidence intervals
+
+The procedure in summary:
+
+1. Start at the final timepoint
+2. Estimate Q-models backward in time
+3. Estimate g-models for each treatment and censoring event
+4. Apply sequential targeting
+5. Compute counterfactual outcomes
+
+This is mathematically involved but **automated by LMTP** in most real applications. You do not need to implement the backward iteration yourself --- but understanding the intuition helps you diagnose problems (e.g., if g-models at certain time points are near 0 or 1, you have a positivity issue at that step).
+:::
 
 ---
 
 # 8. Interpretation of Results
+
+:::{.callout-tip}
+## Interpreting Longitudinal Causal Estimates
 
 Assume hypothetical results:
 
@@ -238,40 +308,58 @@ ATE (risk difference):
 -0.004 (0.4 percentage points lower cardiovascular risk)
 ```
 
-Interpretation:
+**How to read this table:** Under the hypothetical scenario where *all* patients adhered perfectly to denosumab for 36 months, we estimate a 5.1% cardiovascular event rate. Under perfect adherence to zoledronic acid, we estimate 5.5%. The difference --- 0.4 percentage points --- is the estimated causal effect of the treatment policy.
 
-- The estimated cardiovascular risk difference between continuous denosumab vs continuous ZA is small.  
-- Both therapies appear similar in risk, consistent with findings in published RWE studies.  
-- Subgroup and sensitivity analyses may explore heterogeneity and robustness.
+Key interpretive points:
+
+- The estimated cardiovascular risk difference between continuous denosumab vs continuous ZA is **clinically small**. Whether this is meaningful depends on the clinical context (absolute risk, NNT, cost).
+- Both therapies appear similar in cardiovascular risk, consistent with findings in published real-world evidence (RWE) studies.
+- These estimates reflect a **per-protocol effect** --- what would happen under perfect adherence --- which is different from what you would observe in practice where patients switch and discontinue.
+- Subgroup and sensitivity analyses should explore heterogeneity (e.g., does the effect differ by baseline CVD risk?) and robustness to assumption violations.
+:::
 
 ---
 
 # 9. Sensitivity & Diagnostic Considerations
 
-### 9.1 Positivity
-Check treatment probabilities at each timepoint.
+:::{.callout-caution}
+## Positivity Violations in Longitudinal Settings
 
-### 9.2 Extreme weights
-LMTP handles this better than IPTW, but diagnostics still matter.
+**9.1 Positivity.** In a longitudinal study, positivity must hold *at every time point* for *every observed covariate history*. This is a much stronger requirement than in a single-timepoint study. Check treatment probabilities at each timepoint --- if at any visit, certain patient profiles have near-zero probability of receiving one treatment, your estimates for that subgroup are extrapolating beyond the data.
 
-### 9.3 Truncation
-May be needed for sparse treatment histories.
+**Practical check:** Plot the estimated propensity scores (probability of treatment) at each time point, stratified by key covariates. If scores cluster near 0 or 1 at later time points, you may have a structural positivity violation.
 
-### 9.4 Negative control outcomes
-Useful to diagnose unmeasured confounding.
+**9.2 Extreme weights.** LMTP and longitudinal TMLE handle extreme weights better than inverse probability of treatment weighting (IPTW), because they use substitution estimators rather than relying solely on inverse weighting. However, diagnostics still matter --- examine the distribution of the estimated clever covariates or influence function values for outliers.
+
+**9.3 Truncation.** Weight or density ratio truncation may be needed for sparse treatment histories. If only a handful of patients follow a particular treatment sequence, the variance of your estimate will be large. Consider whether the target estimand is realistic given the data support.
+:::
+
+:::{.callout-important}
+## Negative Control Outcomes: A Diagnostic for Unmeasured Confounding
+
+**9.4 Negative control outcomes** are outcomes that *should not* be affected by the treatment if your causal model is correct. For example, if denosumab and zoledronic acid should have no differential effect on, say, accidental injury rates, then finding a "treatment effect" on accidental injuries is evidence of residual confounding.
+
+**How to use them:** Run your entire LMTP pipeline with the negative control outcome substituted for the real outcome. If the estimated effect is close to the null, that is reassuring (though not definitive). If you see a substantial effect, your primary analysis may be biased by unmeasured confounding.
+
+This is one of the most practical tools available to an epidemiologist for assessing the plausibility of the sequential exchangeability assumption.
+:::
 
 ---
 
 # 10. Summary
 
+:::{.callout-note}
+## Chapter Takeaways
+
 In this chapter, you learned how to:
 
-- Build and structure longitudinal data  
-- Define static longitudinal interventions  
-- Apply LMTP/TMLE for longitudinal causal effects  
-- Interpret results in a real-world regulatory context  
+- **Build and structure longitudinal data** using the canonical ordering $O = (W, A_0, L_1, A_1, C_1, \dots, Y)$ --- the foundation for any longitudinal causal analysis
+- **Define static longitudinal interventions** --- hypothetical "always treat" regimes that formalize the causal question as a comparison of treatment policies over time
+- **Apply LMTP/TMLE for longitudinal causal effects** --- doubly robust, semiparametric methods that correctly handle time-varying confounding affected by prior treatment, informative censoring, and treatment switching
+- **Interpret results in a real-world regulatory context** --- distinguishing per-protocol causal effects from observed associational quantities, and understanding what the estimates do (and do not) tell us
 
-This case study demonstrates how to use targeted learning methods to generate high-quality causal evidence from complex real-world data.
+**The bottom line:** When treatment, confounders, and censoring co-evolve over time, standard regression and Cox models produce biased estimates. Longitudinal TMLE and LMTP provide a principled, flexible framework for causal inference in these settings. The LMTP package makes this accessible in practice, automating the sequential targeting procedure while allowing SuperLearner-based estimation of nuisance functions.
+:::
 
 ```{r}
 sessionInfo()

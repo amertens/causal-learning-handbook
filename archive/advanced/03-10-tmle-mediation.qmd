@@ -599,13 +599,18 @@ nde_mc <- numeric(n)
 for (i in 1:n) {
   m_draws <- rnorm(n_mc, mean = M_mean_a0[i], sd = sigma_m)
 
+  # Density ratio for each MC draw: f(m|A=0,W) / f(m|A=1,W)
+  dr_draws <- dnorm(m_draws, mean = M_mean_a0[i], sd = sigma_m) /
+              pmax(dnorm(m_draws, mean = M_mean_a1[i], sd = sigma_m), 1e-10)
+
   # Q*(1, m, W) for each m draw
+  # H_NDE at (A=1, m) = density_ratio(m) / ps
   newdat_1 <- dat[rep(i, n_mc), ] %>% mutate(A = 1, M = m_draws)
   q1m <- predict(q_mod, newdata = newdat_1, type = "response")
-  # Apply targeting offset
-  q1m_star <- plogis(logit(q1m) + eps_nde * (1 / ps[i]))
+  q1m_star <- plogis(logit(q1m) + eps_nde * dr_draws / ps[i])
 
   # Q*(0, m, W) for each m draw
+  # H_NDE at (A=0, m) = -1 / (1 - ps)
   newdat_0 <- dat[rep(i, n_mc), ] %>% mutate(A = 0, M = m_draws)
   q0m <- predict(q_mod, newdata = newdat_0, type = "response")
   q0m_star <- plogis(logit(q0m) + eps_nde * (-1 / (1 - ps[i])))
@@ -636,15 +641,22 @@ for (i in 1:n) {
   # M draws from P(M|A=0,W)
   m_draws_a0 <- rnorm(n_mc, mean = M_mean_a0[i], sd = sigma_m)
 
+  # Density ratios for each draw: f(m|A=0,W) / f(m|A=1,W)
+  dr_a1 <- dnorm(m_draws_a1, mean = M_mean_a0[i], sd = sigma_m) /
+           pmax(dnorm(m_draws_a1, mean = M_mean_a1[i], sd = sigma_m), 1e-10)
+  dr_a0 <- dnorm(m_draws_a0, mean = M_mean_a0[i], sd = sigma_m) /
+           pmax(dnorm(m_draws_a0, mean = M_mean_a1[i], sd = sigma_m), 1e-10)
+
   # Q*(1, M(1), W) - Q*(1, M(0), W)
+  # H_NIE at (A=1, m) = (1 - density_ratio(m)) / ps
   newdat_1_m1 <- dat[rep(i, n_mc), ] %>% mutate(A = 1, M = m_draws_a1)
   newdat_1_m0 <- dat[rep(i, n_mc), ] %>% mutate(A = 1, M = m_draws_a0)
 
   q_m1 <- predict(q_mod, newdata = newdat_1_m1, type = "response")
   q_m0 <- predict(q_mod, newdata = newdat_1_m0, type = "response")
 
-  q_m1_star <- plogis(logit(q_m1) + eps_nie * (1 / ps[i]))
-  q_m0_star <- plogis(logit(q_m0) + eps_nie * (1 / ps[i]))
+  q_m1_star <- plogis(logit(q_m1) + eps_nie * (1 - dr_a1) / ps[i])
+  q_m0_star <- plogis(logit(q_m0) + eps_nie * (1 - dr_a0) / ps[i])
 
   nie_mc[i] <- mean(q_m1_star) - mean(q_m0_star)
 }
