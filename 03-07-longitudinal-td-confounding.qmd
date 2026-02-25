@@ -1,0 +1,1093 @@
+---
+title: "Chapter 3.7: Imperfect Adherence, Time-Varying Confounding, and Longitudinal TMLE"
+subtitle: "An illustrated guide to why conditioning on adherence biases causal effects, and how longitudinal TMLE and LMTP address this"
+format: html
+---
+
+# Chapter 3.7: Imperfect Adherence in Longitudinal Data
+*Why conditioning on adherence biases causal effects, and how longitudinal TMLE and LMTP address this*
+
+In randomized trials, the intent-to-treat (ITT) analysis compares groups as randomized, regardless of whether patients actually took their medication. But in pharmacoepidemiology, we often want to know:
+
+> What would have happened if patients had actually followed a particular treatment strategy?
+
+This chapter addresses **imperfect adherence** --- a central challenge in longitudinal causal inference. We show:
+
+- Why standard regression conditioning on time-varying adherence introduces bias
+- How the causal roadmap handles time-varying treatments and confounders
+- How to define realistic adherence-based estimands
+- How to implement longitudinal TMLE and LMTP to estimate effects under hypothetical adherence patterns
+
+The motivating example: **antiretroviral therapy (ART) adherence and HIV virologic suppression**.
+
+---
+
+# 1. Clinical Motivation
+
+## The Setting
+
+A public health agency wants to evaluate antiretroviral therapy strategies for people living with HIV. The key question:
+
+> **What is the probability of virologic suppression (HIV RNA < 200 copies/mL) at 12 months if all patients maintained high adherence to their ART regimen, compared to the observed adherence pattern?**
+
+### Why this question is hard
+
+In practice, ART adherence varies over time due to:
+
+- **Side effects** (nausea, fatigue) that reduce adherence
+- **Viral load response** --- patients who achieve suppression may become less diligent
+- **CD4 count changes** --- worsening health may change both adherence and outcomes
+- **Mental health** and substance use --- confounders that affect both adherence and outcomes
+
+Critically, adherence at each time point is influenced by time-varying health status, and time-varying health status is itself influenced by past adherence. This creates **time-varying confounding affected by prior treatment** --- a situation where standard methods fail.
+
+### Target population
+Adults living with HIV initiating a new ART regimen
+
+### Treatment strategies
+- **Strategy 1:** Maintain high adherence ($\geq$ 95% of doses) at every monthly interval
+- **Strategy 0:** Natural (observed) adherence course
+
+### Outcome
+Virologic suppression (HIV RNA < 200 copies/mL) at 12 months
+
+### Intercurrent events
+- Loss to follow-up (informative censoring)
+- Treatment switching
+- Death
+
+### The decision
+Should adherence support programs be intensified? How much improvement in suppression could be expected from perfect adherence?
+
+---
+
+# 2. The Problem with Conditioning on Adherence
+
+Before introducing the correct methods, let us understand **why standard approaches fail**.
+
+## Why not just adjust for adherence in a regression?
+
+Consider a simple model:
+$$
+\text{logit}\big(P(Y = 1)\big) = \beta_0 + \beta_1 \cdot \text{Cumulative Adherence} + \beta_2 \cdot \text{Baseline CD4}
+$$
+
+This conditions on adherence. But why is that a problem?
+
+:::{.callout-caution}
+## The Conditioning-on-Adherence Trap
+
+The problem is that adherence is **affected by prior health status**, which also affects the outcome. Adherence is simultaneously:
+
+- A **mediator** (treatment $\to$ adherence $\to$ outcome)
+- A **collider** when conditioned on (because both health status and unmeasured factors affect it)
+
+Conditioning on adherence opens **backdoor paths** through time-varying confounders, introducing selection bias. This is a fundamental result from causal inference theory.
+
+**Think of it this way:** If you compare patients who adhered well vs. poorly, you are not comparing like-with-like. Patients who adhered poorly may have done so *because* they were sicker --- and that sickness, not the low adherence, may explain worse outcomes. Conditioning on adherence mixes up the reason for adherence with the effect of adherence.
+:::
+
+## Visual intuition
+
+:::{.callout-warning}
+## The Collider Problem in a Diagram
+
+```
+    CD4(t-1) -----> Adherence(t) -----> CD4(t) -----> Outcome
+       |                ^                  |
+       |                |                  |
+       +---------> Adherence(t) <----------+
+                     (collider when conditioned on)
+```
+
+When you condition on adherence at time $t$, you induce an association between CD4 at time $t-1$ and unmeasured factors that affect adherence --- biasing the effect estimate.
+
+**Why does this matter?** Once you "hold adherence fixed" in a regression, you create a spurious link between everything that caused adherence. This is collider bias, and it distorts the causal effect estimate in unpredictable ways --- sometimes making the treatment look more effective, sometimes less.
+:::
+
+## A common mistake: GEE models
+
+Generalized Estimating Equations (GEE) are popular for longitudinal data, but a GEE model that adjusts for time-varying covariates **and** conditions on time-varying treatment (adherence) will produce biased estimates for causal effects when time-varying confounders are affected by prior treatment.
+
+**The solution:** Use g-methods (g-computation, IPTW, or TMLE) that properly handle the time-ordering of treatment, confounders, and outcome.
+
+---
+
+# 3. Causal Roadmap for Longitudinal Data
+
+:::{.callout-note}
+## Step 1: Define the Causal Question
+
+**Plain language:** What would the 12-month virologic suppression rate be if every patient maintained high adherence, compared to the naturally observed adherence pattern?
+
+**Counterfactual estimand:**
+
+Let $\bar{A} = (A_1, A_2, \ldots, A_T)$ denote the adherence history. Define two regimes:
+
+- **Always high adherence:** $d_1: A_t = 1$ for all $t$ (deterministic static regime)
+- **Natural course:** $d_0:$ treatment follows the observed distribution
+
+The estimand is:
+
+$$
+\psi = E\big[Y(\bar{a} = \bar{1})\big] - E\big[Y^{\text{obs}}\big]
+$$
+
+where $Y(\bar{a} = \bar{1})$ is the potential outcome under the always-high-adherence regime.
+
+We can also define **stochastic interventions** that shift the probability of high adherence (e.g., increase it by 20%) rather than forcing it to 100% --- more realistic and less prone to positivity violations.
+:::
+
+:::{.callout-note}
+## Step 2: Specify the Causal Model
+
+The longitudinal data structure for patient $i$ at time $t$:
+
+$$
+O_i = \big(W_i, \; L_{i,1}, A_{i,1}, C_{i,1}, \; L_{i,2}, A_{i,2}, C_{i,2}, \; \ldots, \; L_{i,T}, A_{i,T}, C_{i,T}, \; Y_i\big)
+$$
+
+Where:
+
+- $W$: baseline covariates (age, sex, baseline CD4, baseline viral load, comorbidities)
+- $L_t$: time-varying covariates at time $t$ (CD4 count, viral load, symptoms, mental health score)
+- $A_t$: adherence indicator at time $t$ (1 = high adherence, 0 = low)
+- $C_t$: censoring at time $t$ (1 = lost to follow-up, 0 = still observed)
+- $Y$: virologic suppression at 12 months
+
+**The key causal feature:** $L_t$ is affected by past treatment $\bar{A}_{t-1}$ and also affects future treatment $A_t$ and the outcome $Y$. This is time-varying confounding affected by prior treatment.
+:::
+
+:::{.callout-warning}
+## Step 3: State the Assumptions
+
+These assumptions are critical. If they fail, even the best estimator will give biased answers.
+
+**Sequential exchangeability:**
+$$
+Y(\bar{a}) \perp\!\!\!\perp A_t \mid \bar{L}_t, \bar{A}_{t-1}, W \quad \text{for all } t
+$$
+At each time point, treatment is as-good-as-random given the observed history. This is the longitudinal analogue of "no unmeasured confounding."
+
+**Sequential positivity:**
+$$
+P(A_t = a \mid \bar{L}_t, \bar{A}_{t-1}, W) > 0 \quad \text{for all } t, a
+$$
+Every adherence level must be possible at every time point for every covariate history. Violations occur when certain health states make adherence nearly deterministic.
+
+**Consistency:**
+The observed outcome matches the potential outcome under the treatment actually received.
+
+**Independent censoring (conditional):**
+$$
+Y(\bar{a}) \perp\!\!\!\perp C_t \mid \bar{L}_t, \bar{A}_{t-1}, W \quad \text{for all } t
+$$
+Censoring is independent of potential outcomes given the measured history.
+
+**Why does this matter?** If unmeasured factors (e.g., substance use severity, housing instability) drive both adherence and outcomes, sequential exchangeability fails. If some patient subgroups never achieve high adherence, positivity fails. Both scenarios lead to biased estimates, regardless of the statistical method used.
+:::
+
+:::{.callout-tip}
+## Step 4: Map to a Statistical Estimand
+
+Under the above assumptions, the G-computation formula for the longitudinal setting is:
+
+$$
+E[Y(\bar{a})] = \sum_{\bar{l}} E[Y \mid \bar{A} = \bar{a}, \bar{L} = \bar{l}, W] \prod_t P(L_t = l_t \mid \bar{A}_{t-1}, \bar{L}_{t-1}, W)
+$$
+
+This is a high-dimensional integral that iterates over all possible covariate histories --- practically estimated via sequential regression or TMLE.
+
+**The good news:** This formula tells us exactly what we need to estimate. The assumptions above bridge the gap from the causal question (what *would* happen) to a statistical quantity we can estimate from observed data (what *did* happen, reweighted or modeled appropriately).
+:::
+
+:::{.callout-important}
+## Step 5: Choose an Estimation Strategy
+
+| Method | Approach | Limitation |
+|--------|----------|------------|
+| GEE with time-varying covariates | Conditions on $L_t$ directly | Biased under time-varying confounding |
+| Marginal structural model (MSM) via IPTW | Reweights by cumulative propensity | Products of weights become extreme |
+| Longitudinal G-computation | Sequential outcome regression | Fully parametric; error compounds |
+| Longitudinal TMLE (LTMLE) | Sequential targeting | Best properties but complex |
+| LMTP | Modified treatment policies with TMLE | Handles stochastic interventions naturally |
+
+We implement the last two approaches.
+
+**Why LTMLE and LMTP?** These methods combine the strengths of outcome modeling and propensity weighting. They handle the feedback loop between treatment and confounders, avoid extreme weights, provide doubly robust estimation, and support flexible machine learning for nuisance parameter estimation.
+:::
+
+---
+
+# 4. Data Simulation
+
+We simulate a realistic longitudinal HIV cohort with 6 monthly time points.
+
+```{r}
+library(tidyverse)
+
+set.seed(2026)
+n  <- 3000
+T_max <- 6  # 6 monthly intervals (representing a 12-month follow-up, bi-monthly)
+
+# --- Baseline covariates ---
+W_age     <- rnorm(n, mean = 38, sd = 10)
+W_male    <- rbinom(n, 1, 0.65)
+W_cd4_bl  <- rnorm(n, mean = 350, sd = 150)  # baseline CD4
+W_cd4_bl  <- pmax(50, W_cd4_bl)               # floor at 50
+W_vl_bl   <- rnorm(n, mean = 4.5, sd = 0.8)  # baseline log10 viral load
+W_depress <- rbinom(n, 1, 0.30)               # baseline depression
+
+# --- Containers for longitudinal data ---
+L_cd4  <- matrix(NA, n, T_max)   # time-varying CD4
+L_sympt <- matrix(NA, n, T_max)  # time-varying symptom burden
+A_adh  <- matrix(NA, n, T_max)   # adherence at each time
+C_cens <- matrix(0, n, T_max)    # censoring indicator
+alive  <- rep(TRUE, n)           # tracking who is still observed
+
+# --- Simulate longitudinal process ---
+for (t in 1:T_max) {
+
+  # Previous adherence (for t=1, use a starting value)
+  if (t == 1) {
+    A_prev <- rbinom(n, 1, 0.7)  # initial adherence tendency
+  } else {
+    A_prev <- A_adh[, t - 1]
+    A_prev[is.na(A_prev)] <- 0
+  }
+
+  # Previous CD4 (for t=1, use baseline)
+  cd4_prev <- if (t == 1) W_cd4_bl else L_cd4[, t - 1]
+  cd4_prev[is.na(cd4_prev)] <- W_cd4_bl[is.na(cd4_prev)]
+
+  # --- Time-varying CD4 ---
+  # CD4 increases with adherence, depends on history
+  L_cd4[, t] <- pmax(50,
+    cd4_prev +
+    rnorm(n, mean = 30 * A_prev - 10 * (1 - A_prev), sd = 40) +
+    -0.5 * (W_age - 38) +
+    20 * W_male
+  )
+
+  # --- Time-varying symptom burden ---
+  # Higher with low CD4, depression; reduced by adherence
+  L_sympt[, t] <- rbinom(n, 1,
+    plogis(-1.5 + -0.003 * L_cd4[, t] + 0.8 * W_depress + -0.5 * A_prev +
+           0.01 * (W_age - 38))
+  )
+
+  # --- Adherence at time t ---
+  # Affected by: symptoms (reduce adherence), CD4 response (feedback),
+  # prior adherence (habit), depression, age
+  lp_adh <- 0.5 +
+    -0.8 * L_sympt[, t] +
+    0.002 * (L_cd4[, t] - 350) +
+    0.6 * A_prev +
+    -0.7 * W_depress +
+    0.01 * (W_age - 38) +
+    0.2 * W_male
+
+  A_adh[, t] <- rbinom(n, 1, plogis(lp_adh))
+
+  # --- Censoring ---
+  # More likely with low CD4, symptoms, low adherence
+  lp_cens <- -4.0 +
+    -0.002 * L_cd4[, t] +
+    0.5 * L_sympt[, t] +
+    -0.3 * A_adh[, t] +
+    0.5 * W_depress
+
+  C_cens[, t] <- rbinom(n, 1, plogis(lp_cens)) * alive
+  alive <- alive & (C_cens[, t] == 0)
+
+  # Set future values to NA for censored individuals
+  if (t < T_max) {
+    A_adh[!alive, (t+1):T_max] <- NA
+    L_cd4[!alive, (t+1):T_max] <- NA
+    L_sympt[!alive, (t+1):T_max] <- NA
+    C_cens[!alive, (t+1):T_max] <- NA
+  }
+}
+
+# --- Outcome: virologic suppression at end of follow-up ---
+# Depends on cumulative adherence, final CD4, baseline VL
+cum_adh <- rowMeans(A_adh, na.rm = TRUE)
+final_cd4 <- apply(L_cd4, 1, function(x) {
+  valid <- x[!is.na(x)]
+  if (length(valid) > 0) tail(valid, 1) else NA
+})
+
+lp_outcome <- -1.0 +
+  2.5 * cum_adh +
+  0.003 * (final_cd4 - 350) +
+  -0.6 * W_vl_bl +
+  -0.3 * W_depress +
+  0.02 * W_male +
+  0.8 * cum_adh * (final_cd4 > 400)  # interaction: adherence more effective with good immune response
+
+Y_supp <- rbinom(n, 1, plogis(lp_outcome))
+# Censored individuals: outcome is missing
+Y_supp[!alive] <- NA
+
+cat("Sample size:", n, "\n")
+cat("Censored by end:", sum(!alive), "(", round(100*mean(!alive), 1), "%)\n")
+cat("Among uncensored, suppression rate:", round(mean(Y_supp[alive]), 3), "\n")
+cat("Mean cumulative adherence:", round(mean(cum_adh, na.rm=TRUE), 3), "\n")
+```
+
+### True effect of perfect adherence
+
+We can compute the counterfactual suppression rate under always-high adherence from the structural model. Since the true DGP is complex (with feedback), we approximate using simulation:
+
+```{r}
+# Simulate counterfactual under always-high adherence (A_t = 1 for all t)
+set.seed(2026)
+cf_cd4 <- matrix(NA, n, T_max)
+cf_sympt <- matrix(NA, n, T_max)
+
+for (t in 1:T_max) {
+  cd4_prev_cf <- if (t == 1) W_cd4_bl else cf_cd4[, t - 1]
+  A_prev_cf <- 1  # always high adherence
+
+  cf_cd4[, t] <- pmax(50,
+    cd4_prev_cf +
+    rnorm(n, mean = 30 * 1 - 10 * 0, sd = 40) +
+    -0.5 * (W_age - 38) + 20 * W_male
+  )
+
+  cf_sympt[, t] <- rbinom(n, 1,
+    plogis(-1.5 + -0.003 * cf_cd4[, t] + 0.8 * W_depress + -0.5 * 1 +
+           0.01 * (W_age - 38))
+  )
+}
+
+cf_cum_adh <- 1.0  # perfect adherence
+cf_final_cd4 <- cf_cd4[, T_max]
+
+lp_cf <- -1.0 +
+  2.5 * cf_cum_adh +
+  0.003 * (cf_final_cd4 - 350) +
+  -0.6 * W_vl_bl +
+  -0.3 * W_depress +
+  0.02 * W_male +
+  0.8 * cf_cum_adh * (cf_final_cd4 > 400)
+
+true_suppression_perfect <- mean(plogis(lp_cf))
+true_suppression_observed <- mean(plogis(lp_outcome), na.rm = TRUE)
+
+cat("True suppression under always-high adherence:", round(true_suppression_perfect, 3), "\n")
+cat("True suppression under observed adherence:   ", round(true_suppression_observed, 3), "\n")
+cat("True effect of perfect adherence:             ", round(true_suppression_perfect - true_suppression_observed, 3), "\n")
+```
+
+### Prepare data in long format
+
+```{r}
+# Build a wide-format dataframe for analysis
+dat_wide <- tibble(
+  id = 1:n,
+  age = W_age,
+  male = W_male,
+  cd4_bl = W_cd4_bl,
+  vl_bl = W_vl_bl,
+  depress = W_depress
+)
+
+for (t in 1:T_max) {
+  dat_wide[[paste0("cd4_", t)]]   <- L_cd4[, t]
+  dat_wide[[paste0("sympt_", t)]] <- L_sympt[, t]
+  dat_wide[[paste0("A_", t)]]     <- A_adh[, t]
+  dat_wide[[paste0("C_", t)]]     <- C_cens[, t]
+}
+dat_wide$Y <- Y_supp
+
+# For long format (useful for some analyses)
+dat_long <- dat_wide %>%
+  pivot_longer(
+    cols = matches("^(cd4|sympt|A|C)_\\d+$"),
+    names_to = c(".value", "time"),
+    names_pattern = "(\\w+)_(\\d+)"
+  ) %>%
+  mutate(time = as.integer(time)) %>%
+  arrange(id, time)
+
+glimpse(dat_long)
+```
+
+---
+
+# 5. The Naive (Biased) Approach
+
+First, let us see what happens if we ignore the time-varying confounding structure.
+
+## 5A. Cross-sectional regression on cumulative adherence
+
+```{r}
+# Only among uncensored
+dat_complete <- dat_wide %>% filter(!is.na(Y))
+dat_complete$cum_adh <- cum_adh[alive]
+
+naive_gee <- glm(Y ~ cum_adh + cd4_bl + vl_bl + depress + age + male,
+                 family = binomial, data = dat_complete)
+
+# Predicted suppression at 100% vs 50% adherence
+nd_perfect <- dat_complete %>% mutate(cum_adh = 1.0)
+nd_half    <- dat_complete %>% mutate(cum_adh = 0.5)
+
+naive_perfect <- mean(predict(naive_gee, newdata = nd_perfect, type = "response"))
+naive_half    <- mean(predict(naive_gee, newdata = nd_half, type = "response"))
+
+cat("Naive model:\n")
+cat("  Predicted suppression at 100% adherence:", round(naive_perfect, 3), "\n")
+cat("  Predicted suppression at 50% adherence: ", round(naive_half, 3), "\n")
+cat("  Difference:", round(naive_perfect - naive_half, 3), "\n")
+cat("\nThis estimate is biased because it conditions on post-treatment variables.\n")
+```
+
+:::{.callout-caution}
+## Why Is This Wrong?
+
+The model treats cumulative adherence as a fixed baseline variable, but adherence is:
+
+1. **Affected by time-varying CD4 and symptoms** (confounders) --- patients who feel worse adhere less, and feeling worse also worsens the outcome directly
+2. **Itself affects future CD4 and symptoms** (it is a treatment) --- taking medication changes the very health indicators that influence future adherence
+3. **A collider** when conditioned on --- because both health status and unmeasured factors drive adherence decisions
+
+The estimate conflates the causal effect of adherence with the reverse causal effect of health on adherence. You cannot untangle "does adherence improve outcomes?" from "do better outcomes sustain adherence?" using standard regression.
+
+**The fundamental issue:** Standard regression assumes covariates are fixed. But in a longitudinal feedback loop, today's treatment changes tomorrow's confounders, which change the day after's treatment. No single regression equation can properly account for this temporal cascade.
+:::
+
+---
+
+# 6. IPTW for Marginal Structural Models
+
+The first correct approach is IPTW, which avoids conditioning on time-varying confounders by reweighting.
+
+### Estimate treatment weights at each time point
+
+```{r}
+# Work in long format; only uncensored observations
+dat_long_uc <- dat_long %>%
+  group_by(id) %>%
+  filter(cumall(!is.na(A))) %>%  # keep complete treatment histories
+  ungroup()
+
+# Propensity model at each time point
+# P(A_t = 1 | history)
+dat_long_uc <- dat_long_uc %>%
+  group_by(id) %>%
+  mutate(
+    A_lag = lag(A, default = 0.7),  # lagged adherence
+    cd4_lag = lag(cd4, default = first(cd4))
+  ) %>%
+  ungroup()
+
+# Time-specific propensity models
+g_models <- list()
+dat_long_uc$ps_t <- NA
+
+for (t_val in 1:T_max) {
+  dat_t <- dat_long_uc %>% filter(time == t_val)
+
+  g_t <- glm(A ~ cd4 + sympt + A_lag + depress + age + male + vl_bl,
+             family = binomial, data = dat_t)
+  g_models[[t_val]] <- g_t
+
+  ps_pred <- predict(g_t, type = "response")
+  # Stabilized numerator: P(A_t | baseline, past A)
+  g_num_t <- glm(A ~ A_lag + age + male,
+                 family = binomial, data = dat_t)
+  ps_num <- predict(g_num_t, type = "response")
+
+  dat_long_uc$ps_t[dat_long_uc$time == t_val] <- ifelse(
+    dat_t$A == 1, ps_pred, 1 - ps_pred
+  )
+  dat_long_uc$ps_num_t <- ifelse(
+    dat_long_uc$time == t_val,
+    ifelse(dat_t$A == 1, ps_num, 1 - ps_num),
+    dat_long_uc$ps_num_t
+  )
+}
+
+# Initialize ps_num_t for times not yet assigned
+dat_long_uc$ps_num_t[is.na(dat_long_uc$ps_num_t)] <- 1
+```
+
+### Compute cumulative weights
+
+```{r}
+# Cumulative product of time-specific propensity scores
+weight_df <- dat_long_uc %>%
+  group_by(id) %>%
+  summarise(
+    cum_ps_denom = prod(ps_t, na.rm = TRUE),
+    cum_adh = mean(A, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Stabilized weights (using marginal model in numerator)
+weight_df$sw <- 1 / weight_df$cum_ps_denom
+
+# Merge outcome
+weight_df <- weight_df %>%
+  left_join(dat_wide %>% select(id, Y), by = "id") %>%
+  filter(!is.na(Y))
+
+# Truncate extreme weights
+w99 <- quantile(weight_df$sw, 0.99)
+weight_df$sw_trunc <- pmin(weight_df$sw, w99)
+
+cat("Weight summary (truncated):\n")
+summary(weight_df$sw_trunc)
+```
+
+```{r}
+# Plot weight distribution
+ggplot(weight_df, aes(x = sw_trunc)) +
+  geom_histogram(bins = 50, fill = "#228833", alpha = 0.7) +
+  labs(
+    x = "Stabilized cumulative IPTW weight (truncated at 99th pctile)",
+    y = "Count",
+    title = "Distribution of Longitudinal IPTW Weights"
+  ) +
+  theme_minimal()
+```
+
+:::{.callout-warning}
+## Beware: Extreme Cumulative Weights
+
+Cumulative weights from longitudinal IPTW are **products** of time-specific weights. Even with modest individual weights (e.g., each between 0.5 and 2.0), the product over 6 or 12 time points can become extreme.
+
+**Why this happens:** If a patient's observed treatment history is unlikely under the model (e.g., they adhered despite many risk factors for non-adherence), their cumulative weight $w = \prod_{t=1}^{T} 1/g_t$ can explode. A few such patients can dominate the entire weighted analysis.
+
+**Practical consequences:**
+
+- A single patient with weight 500 can outweigh hundreds of others combined
+- Truncating weights introduces bias but reduces variance --- a delicate trade-off
+- Confidence intervals become unreliable when weights are extreme
+- Weight instability gets worse with more time points
+
+This is a well-known limitation of longitudinal IPTW and a key reason to prefer TMLE-based methods, which incorporate treatment information through numerically stable logistic fluctuation models rather than multiplicative weights.
+:::
+
+### Weighted outcome model
+
+```{r}
+# MSM: weighted regression of outcome on cumulative adherence
+msm_fit <- glm(Y ~ cum_adh, family = binomial,
+               weights = sw_trunc, data = weight_df)
+
+# Predicted suppression under perfect vs half adherence
+msm_perfect <- predict(msm_fit,
+                       newdata = data.frame(cum_adh = 1.0),
+                       type = "response")
+msm_half <- predict(msm_fit,
+                    newdata = data.frame(cum_adh = 0.5),
+                    type = "response")
+
+cat("IPTW-MSM estimate:\n")
+cat("  Suppression at 100% adherence:", round(msm_perfect, 3), "\n")
+cat("  Suppression at 50% adherence: ", round(msm_half, 3), "\n")
+cat("  Difference:", round(msm_perfect - msm_half, 3), "\n")
+```
+
+---
+
+# 7. Longitudinal TMLE: Conceptual Overview
+
+Longitudinal TMLE extends the point-treatment TMLE from Chapter 2.4 to the time-varying setting. The core idea is the same --- fit initial models, then target them --- but now we work backwards through time.
+
+### The algorithm (simplified)
+
+:::{.callout-note}
+## Step 1: Outcome Model --- Start at the End
+**Start at the final time point** $T$ and fit the outcome model:
+
+$$\hat{Q}_T(\bar{A}_T, \bar{L}_T, W) = E[Y \mid \bar{A}_T, \bar{L}_T, W]$$
+
+This is the same initial outcome regression as in point-treatment TMLE --- estimate the expected outcome given the full observed history. The difference is that "history" now includes treatment and covariates at every time point.
+:::
+
+:::{.callout-tip}
+## Step 2: Propensity Scores --- One at Every Time Point
+Estimate the treatment mechanism at each time $t$:
+
+$$g_t = P(A_t \mid \bar{A}_{t-1}, \bar{L}_t, W)$$
+
+Unlike point-treatment TMLE which has a single propensity score, here you need $T$ separate propensity models --- one for each treatment decision. Each conditions on the full history available at that time point.
+:::
+
+:::{.callout-important}
+## Step 3: Clever Covariates --- Cumulative Inverse Probabilities
+For each time $t$ from $T$ down to 1, compute the clever covariate using the cumulative treatment probability:
+
+$$H_t = \frac{I(\bar{A}_t = \bar{a}_t)}{\prod_{s=1}^{t} \hat{g}_s}$$
+
+The clever covariate at time $t$ involves the product of all propensity scores up to that time. This is what links the treatment model to the outcome model at each step of the backwards iteration.
+:::
+
+:::{.callout-warning}
+## Step 4: Targeting --- Update Backwards Through Time
+For each time $t$ from $T$ down to 1, run a targeting (fluctuation) step to update $\hat{Q}_t$:
+
+1. Regress the outcome (or pseudo-outcome from the next step) on the clever covariate $H_t$ with the logit of $\hat{Q}_t$ as offset
+2. Use the estimated fluctuation parameter $\hat{\epsilon}_t$ to update predictions
+
+**Then average** the targeted predictions under the intervention of interest.
+
+Each targeting step corrects the outcome model at that time point using information from the treatment model, achieving sequential double robustness.
+:::
+
+:::{.callout-caution}
+## How Does This Handle Time-Dependent Confounding?
+
+The backwards iteration is the key. At each step:
+
+- **Conditioning on $L_t$** in the outcome model at time $t$ correctly adjusts for confounding of $A_t$
+- **Integrating out $L_t$** in the backwards regression from time $t$ to $t-1$ preserves the mediated effect of $A_{t-1}$ through $L_t$
+
+This is exactly the dilemma that standard regression cannot solve: you need to adjust for $L_t$ as a confounder of $A_t$ but not block it as a mediator of $A_{t-1}$. The sequential backwards structure does both, by conditioning on $L_t$ only at the time step where it is a confounder and then marginalizing over it at the step where it is a mediator.
+
+**In plain language:** L-TMLE "peels off" one layer of time-varying confounding at each step, working from the outcome back to baseline. By the time it reaches the first treatment decision, all the intermediate confounders have been properly handled.
+:::
+
+### Why LTMLE is better than longitudinal IPTW
+
+- Does not require computing cumulative weight products (avoids extreme weights)
+- Doubly robust at each time step
+- Can incorporate Super Learner for each nuisance model
+- Provides efficient influence curve-based inference
+
+### Packages
+
+- **ltmle:** The `ltmle` R package implements longitudinal TMLE for binary and continuous treatments with censoring
+- **lmtp:** The `lmtp` package implements a more general framework for modified treatment policies (static, dynamic, and stochastic interventions) using TMLE
+
+---
+
+# 8. Implementing Longitudinal TMLE
+
+We demonstrate a simplified by-hand longitudinal TMLE for the static "always treat" regime, then show the package interface.
+
+### By-hand sequential regression approach
+
+:::{.callout-note}
+## Outcome Model: Initial Sequential Regression
+
+First, fit the outcome model at the final time step --- $Q_T = E[Y \mid A_T, L_T, \ldots, W]$ --- using all available information. Then predict under the counterfactual where all treatment decisions are set to "high adherence."
+
+This is the starting point: a G-computation estimate that would be correct if the outcome model is perfectly specified, but may be biased otherwise. The targeting steps below will correct this.
+:::
+
+```{r}
+# Work with complete cases for the by-hand demonstration
+dat_analysis <- dat_wide %>% filter(!is.na(Y))
+
+# --- Step 1: Fit outcome model at the final time step ---
+# Q_T = E[Y | A_T, L_T, ..., W]
+# We use all available information
+
+# Construct features for the final outcome model
+dat_analysis <- dat_analysis %>%
+  mutate(
+    cum_adh = rowMeans(across(starts_with("A_")), na.rm = TRUE),
+    last_cd4 = cd4_6,
+    last_sympt = sympt_6
+  )
+
+# Initial outcome regression
+Q_mod <- glm(Y ~ A_1 + A_2 + A_3 + A_4 + A_5 + A_6 +
+               cd4_bl + vl_bl + depress + age + male +
+               cd4_6 + sympt_6,
+             family = binomial, data = dat_analysis)
+
+# Predict under always-high adherence (all A_t = 1)
+dat_cf <- dat_analysis %>%
+  mutate(across(starts_with("A_"), ~1))
+
+Q_star <- predict(Q_mod, newdata = dat_cf, type = "response")
+
+cat("Sequential G-computation estimate (no targeting):\n")
+cat("  Suppression under always-high adherence:", round(mean(Q_star), 3), "\n")
+```
+
+### Iterative targeting (simplified 2-step)
+
+:::{.callout-tip}
+## Propensity Scores: Modeling Treatment at Each Time Point
+
+We estimate $P(A_t = 1 \mid \text{history}_t)$ at each time point. In this simplified demonstration, we model the cumulative probability of the full "always treat" regime as the product of time-specific propensities.
+:::
+
+```{r}
+logit <- function(p) log(p / (1 - p))
+
+# --- Propensity scores for cumulative treatment ---
+# Simplified: model P(all A_t = 1 | W) as product of marginals
+# This is an approximation for demonstration
+g_cum <- rep(1, nrow(dat_analysis))
+
+for (t_val in 1:T_max) {
+  A_col <- paste0("A_", t_val)
+  A_lag_col <- if(t_val > 1) paste0("A_", t_val - 1) else NULL
+  cd4_col <- paste0("cd4_", t_val)
+  sympt_col <- paste0("sympt_", t_val)
+
+  formula_vars <- c(cd4_col, sympt_col, "depress", "age", "male", "vl_bl")
+  if (!is.null(A_lag_col)) formula_vars <- c(formula_vars, A_lag_col)
+
+  g_t_mod <- glm(
+    as.formula(paste(A_col, "~", paste(formula_vars, collapse = " + "))),
+    family = binomial, data = dat_analysis
+  )
+
+  g_t_pred <- predict(g_t_mod, type = "response")
+  g_cum <- g_cum * g_t_pred  # cumulative probability of always-treated
+}
+
+# Bound away from zero
+g_cum <- pmax(g_cum, 0.001)
+```
+
+:::{.callout-important}
+## Clever Covariate: Bridging Outcome and Treatment Models
+
+The clever covariate for the "always treat" intervention is:
+
+$$H = \frac{I(\text{all } A_t = 1)}{g_{\text{cum}}}$$
+
+For patients who followed the regime at every time point, $H$ equals the inverse of their cumulative probability of doing so. For patients who deviated at any point, $H = 0$. This is the same logic as point-treatment TMLE's $H = I(A=1)/g(W)$, extended to the full treatment history.
+:::
+
+```{r}
+# Clever covariate for the "always treat" intervention
+# H = I(all A_t = 1) / g_cum
+all_treated <- rowSums(dat_analysis %>% select(starts_with("A_"))) == T_max
+H_clever <- as.numeric(all_treated) / g_cum
+```
+
+:::{.callout-warning}
+## Targeting Step: Updating the Initial Estimates
+
+Run a logistic regression of $Y$ on $H$ with the logit of $\hat{Q}$ as an offset. The coefficient $\hat{\epsilon}$ is the fluctuation parameter that corrects the initial outcome model to be unbiased for our specific estimand.
+
+$$\text{logit}(Y) = \text{logit}(\hat{Q}) + \epsilon \cdot H$$
+
+Then update the counterfactual predictions:
+
+$$\hat{Q}^* = \text{expit}(\text{logit}(\hat{Q}_{\text{cf}}) + \hat{\epsilon} \cdot H_{\text{cf}})$$
+
+where $H_{\text{cf}} = 1/g_{\text{cum}}$ because under the intervention, everyone is treated.
+:::
+
+```{r}
+# Targeting step
+Q_init <- predict(Q_mod, type = "response")
+fluc_mod <- glm(dat_analysis$Y ~ -1 + offset(logit(Q_init)) + H_clever,
+                family = binomial)
+epsilon <- coef(fluc_mod)
+
+# Update counterfactual predictions
+H_cf <- 1 / g_cum  # under the intervention, everyone is treated
+Q_targeted <- plogis(logit(Q_star) + epsilon * H_cf)
+
+cat("Targeted estimate (simplified LTMLE):\n")
+cat("  Suppression under always-high adherence:", round(mean(Q_targeted), 3), "\n")
+cat("  Epsilon:", round(epsilon, 5), "\n")
+```
+
+:::{.callout-caution}
+## What Just Happened?
+
+The targeting step nudged the initial G-computation predictions toward the truth by incorporating information from the treatment model. Here is the intuition:
+
+- If the outcome model was **already correct**, the fluctuation parameter $\epsilon$ will be close to zero --- no correction needed
+- If the outcome model was **biased**, the clever covariate $H$ steers the correction in the right direction, using the treatment mechanism as a guide
+
+The result is **double robustness**: the final estimate is consistent if either the outcome model $\hat{Q}$ or the treatment model $\hat{g}$ is correctly specified. Neither needs to be perfect on its own --- they compensate for each other's errors.
+:::
+
+### Influence-curve based inference
+
+```{r}
+# EIC for the always-treat estimand
+psi_hat <- mean(Q_targeted)
+eic_long <- H_cf * (dat_analysis$Y - plogis(logit(Q_init) + epsilon * H_clever)) +
+            Q_targeted - psi_hat
+
+se_long <- sqrt(var(eic_long) / nrow(dat_analysis))
+ci_long <- psi_hat + c(-1.96, 1.96) * se_long
+
+cat("Simplified LTMLE for always-high adherence:\n")
+cat("  Estimate:", round(psi_hat, 3), "\n")
+cat("  SE:", round(se_long, 3), "\n")
+cat("  95% CI: [", round(ci_long[1], 3), ",", round(ci_long[2], 3), "]\n")
+```
+
+---
+
+# 9. Using the LMTP Package
+
+The `lmtp` package provides a clean interface for estimating effects of longitudinal modified treatment policies. It handles:
+
+- Static interventions (always treat)
+- Dynamic interventions (treat based on covariate values)
+- Stochastic interventions (shift treatment probabilities)
+- Censoring adjustment
+- Super Learner integration
+
+### LMTP interface (conceptual)
+
+```{r, eval=FALSE}
+library(lmtp)
+
+# Define the shift function for "always high adherence"
+always_adhere <- function(data, trt) {
+  rep(1, nrow(data))
+}
+
+# Define variable names
+trt_vars <- paste0("A_", 1:6)
+cens_vars <- paste0("C_", 1:6)
+baseline_vars <- c("age", "male", "cd4_bl", "vl_bl", "depress")
+tv_vars <- list(
+  paste0("cd4_", 1:6),
+  paste0("sympt_", 1:6)
+)
+
+# Run LMTP-TMLE
+result_lmtp <- lmtp_tmle(
+  data = dat_wide,
+  trt = trt_vars,
+  outcome = "Y",
+  baseline = baseline_vars,
+  time_vary = tv_vars,
+  cens = cens_vars,
+  shift = always_adhere,
+  outcome_type = "binomial",
+  learners_outcome = c("SL.glm", "SL.glmnet"),
+  learners_trt = c("SL.glm", "SL.glmnet"),
+  folds = 5
+)
+
+# View results
+result_lmtp
+
+# Confidence interval
+confint(result_lmtp)
+```
+
+### Stochastic intervention: shift adherence probability
+
+A more realistic intervention does not force 100% adherence but increases the probability of high adherence:
+
+```{r, eval=FALSE}
+# Shift function: increase P(A=1) by 20 percentage points
+# but cap at 1
+shift_adherence <- function(data, trt) {
+  pmin(data[[trt]] + 0.2, 1)
+}
+
+result_shift <- lmtp_tmle(
+  data = dat_wide,
+  trt = trt_vars,
+  outcome = "Y",
+  baseline = baseline_vars,
+  time_vary = tv_vars,
+  cens = cens_vars,
+  shift = shift_adherence,
+  outcome_type = "binomial",
+  learners_outcome = c("SL.glm", "SL.glmnet"),
+  learners_trt = c("SL.glm", "SL.glmnet"),
+  folds = 5
+)
+
+result_shift
+```
+
+:::{.callout-tip}
+## Why Stochastic Interventions?
+
+Stochastic interventions mitigate positivity violations by only shifting treatment probabilities rather than forcing them to 0 or 1. This makes the estimand more realistic --- no intervention can achieve 100% adherence.
+
+**Three reasons to prefer stochastic interventions:**
+
+1. **Realistic estimands:** Asking "what if we increased the probability of adherence by 20%?" is more actionable than "what if everyone adhered perfectly?" No real-world program achieves perfect adherence.
+
+2. **Positivity preservation:** If some patients have near-zero probability of adhering (e.g., due to severe side effects), a static "always adhere" intervention violates positivity for those patients. A shift intervention only moves probabilities incrementally, staying within the support of the observed data.
+
+3. **Policy relevance:** Decision-makers want to know the expected benefit of feasible interventions (SMS reminders, pill organizers, peer support) that shift adherence by realistic amounts --- not the theoretical maximum under impossible conditions.
+
+The `lmtp` package makes stochastic interventions as easy to implement as static ones --- you just change the shift function.
+:::
+
+---
+
+# 10. Comparison: GEE vs. IPTW-MSM vs. LTMLE
+
+```{r}
+comparison <- tibble(
+  Method = c("Naive regression (biased)",
+             "IPTW-MSM (truncated weights)",
+             "Simplified LTMLE"),
+  Approach = c("Conditions on cumulative adherence",
+               "Reweights by cumulative propensity",
+               "Sequential targeting with EIC inference"),
+  Issue = c("Confounded by time-varying health",
+            "Extreme cumulative weights",
+            "More complex but doubly robust")
+)
+
+comparison
+```
+
+---
+
+# 11. Diagnostics for Longitudinal Settings
+
+## 11.1 Time-specific propensity score overlap
+
+```{r}
+# Check overlap at each time point
+overlap_checks <- list()
+for (t_val in 1:T_max) {
+  A_col <- paste0("A_", t_val)
+  cd4_col <- paste0("cd4_", t_val)
+  sympt_col <- paste0("sympt_", t_val)
+
+  formula_vars <- c(cd4_col, sympt_col, "depress", "age", "male")
+  if (t_val > 1) formula_vars <- c(formula_vars, paste0("A_", t_val - 1))
+
+  g_check <- glm(
+    as.formula(paste(A_col, "~", paste(formula_vars, collapse = " + "))),
+    family = binomial, data = dat_analysis
+  )
+
+  ps_check <- predict(g_check, type = "response")
+  overlap_checks[[t_val]] <- tibble(
+    time = t_val,
+    ps = ps_check,
+    A = dat_analysis[[A_col]]
+  )
+}
+
+overlap_df <- bind_rows(overlap_checks)
+
+ggplot(overlap_df, aes(x = ps, fill = factor(A, labels = c("Low adherence", "High adherence")))) +
+  geom_density(alpha = 0.4) +
+  facet_wrap(~paste("Time", time), ncol = 3) +
+  labs(
+    x = "P(A_t = 1 | history)",
+    fill = "Adherence",
+    title = "Propensity Score Overlap by Time Point"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("#EE6677", "#228833"))
+```
+
+## 11.2 Cumulative weight distribution
+
+```{r}
+cat("Cumulative IPTW weight summary:\n")
+cat("Before truncation:\n")
+summary(weight_df$sw)
+cat("\nAfter truncation:\n")
+summary(weight_df$sw_trunc)
+cat("\nFraction > 10:", round(mean(weight_df$sw > 10), 3), "\n")
+cat("Fraction > 50:", round(mean(weight_df$sw > 50), 3), "\n")
+```
+
+Large fractions of extreme weights indicate that the longitudinal treatment mechanism is poorly estimated or that positivity is violated. This motivates using LTMLE over IPTW.
+
+## 11.3 Adherence patterns over time
+
+```{r}
+# Visualize adherence trajectories
+adh_summary <- dat_long %>%
+  filter(!is.na(A)) %>%
+  group_by(time) %>%
+  summarise(
+    pct_adherent = mean(A),
+    n = n(),
+    .groups = "drop"
+  )
+
+ggplot(adh_summary, aes(x = time, y = pct_adherent)) +
+  geom_line(color = "#4477AA", linewidth = 1) +
+  geom_point(size = 3, color = "#4477AA") +
+  ylim(0, 1) +
+  labs(
+    x = "Time point",
+    y = "Proportion with high adherence",
+    title = "Adherence Over Time"
+  ) +
+  theme_minimal()
+```
+
+---
+
+# 12. Imperfect Adherence as an Intercurrent Event
+
+In the ICH E9(R1) framework for clinical trials, adherence departures are **intercurrent events** that affect the interpretation of treatment effects.
+
+:::{.callout-note}
+## Estimand Strategies for Adherence
+
+The ICH E9(R1) framework provides four strategies for handling intercurrent events like imperfect adherence. Each answers a different scientific question:
+
+| Strategy | Interpretation | Method |
+|----------|---------------|--------|
+| Treatment policy | Effect of being assigned treatment, regardless of adherence | ITT / standard comparison |
+| Hypothetical | Effect if adherence had been maintained | Longitudinal TMLE / LMTP |
+| While on treatment | Effect among the period of actual adherence | Censoring-based methods |
+| Composite | Adherence departure is part of the outcome | Modified outcome |
+
+**Longitudinal TMLE and LMTP directly estimate the hypothetical strategy** --- they estimate what would have happened under a counterfactual adherence pattern. This is the most relevant estimand for evaluating whether a treatment works when taken properly.
+
+**Why does this matter?** Choosing the wrong estimand strategy leads to answering the wrong question. If a drug works when taken but patients stop taking it due to side effects, the treatment policy estimand (ITT) will understate efficacy. The hypothetical estimand answers "does the drug work?" while the treatment policy estimand answers "does prescribing the drug work?" --- both are valid but serve different decisions.
+:::
+
+---
+
+# 13. Interpretation
+
+## What would we tell the public health agency?
+
+Based on our analysis:
+
+- Under the naturally observed adherence pattern, approximately `r round(mean(Y_supp[alive])*100)`% of patients achieve virologic suppression at 12 months
+- Under a hypothetical always-high-adherence intervention, the estimated suppression rate is approximately `r round(psi_hat*100)`%
+- The estimated benefit of ensuring high adherence is approximately `r round((psi_hat - mean(Y_supp[alive]))*100, 1)` percentage points of additional suppression
+
+## Implications for adherence support programs
+
+If increasing adherence from observed levels to near-perfect could improve suppression by this magnitude, investments in adherence support (pill organizers, SMS reminders, peer support, reduced pill burden) may be cost-effective.
+
+## Fragile assumptions
+
+1. **Sequential exchangeability:** If unmeasured factors (e.g., substance use severity, housing instability) affect both adherence and outcomes, our estimates are biased
+2. **Positivity:** If some patient types never achieve high adherence, we cannot estimate the effect of forcing them to adhere --- stochastic interventions are more appropriate
+3. **Independent censoring:** If loss to follow-up is driven by unmeasured factors related to both adherence and outcome, even after conditioning on observed covariates, our censoring adjustment is biased
+
+---
+
+# Key Takeaways
+
+1. **Never condition on time-varying adherence in a regression model** when adherence is affected by time-varying confounders. This introduces collider bias through a feedback loop.
+
+2. **GEE models that adjust for time-varying covariates are biased** for causal questions about treatment effects under different adherence patterns.
+
+3. **Longitudinal IPTW (marginal structural models)** correctly handles time-varying confounding but produces unstable estimates when cumulative weights are extreme.
+
+4. **Longitudinal TMLE (LTMLE)** avoids the extreme weight problem by targeting the sequential outcome regressions directly. It is doubly robust at each time step and provides influence-curve inference.
+
+5. **LMTP extends this framework** to stochastic and modified treatment policies, which are more realistic than static "always treat" interventions and mitigate positivity violations.
+
+6. **Imperfect adherence is an intercurrent event.** The ICH E9(R1) framework helps clarify which estimand (treatment policy, hypothetical, etc.) matches the decision at hand. Longitudinal TMLE directly estimates the hypothetical strategy.
+
+7. **Diagnostics in longitudinal settings** require checking propensity score overlap at each time point and inspecting cumulative weight distributions. Extreme cumulative weights are a clear signal to prefer TMLE over IPTW.
+
+```{r}
+sessionInfo()
+```
