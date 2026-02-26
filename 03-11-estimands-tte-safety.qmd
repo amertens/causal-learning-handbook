@@ -1,0 +1,725 @@
+---
+title: "Estimands in Time-to-Event Real-World Safety Analyses: A Simulation-Based Tutorial"
+subtitle: "How intercurrent events shape what your analysis actually estimates"
+format: html
+---
+
+# Estimands in Time-to-Event Real-World Safety Analyses
+*A simulation-based tutorial for pharmacoepidemiologists*
+
+In real-world safety studies, the question "Does this drug increase the risk of adverse events?" sounds simple. But the answer depends critically on **how you handle intercurrent events** --- treatment switching, discontinuation, death from other causes --- that occur between treatment initiation and the outcome. Different handling strategies define different **estimands**, and each estimand answers a fundamentally different scientific question.
+
+This chapter uses a fully simulated safety study to illustrate three estimands side by side, showing how the same data can yield different estimates depending on the causal question being asked.
+
+::: {.callout-note}
+## Learning objectives
+- Define the three principal estimand strategies for time-to-event safety analyses: treatment-policy, while-on-treatment, and hypothetical
+- Explain how ICH E9(R1) connects estimand choice to intercurrent event handling
+- Simulate a realistic pharmacoepidemiology dataset with confounding, treatment switching, and administrative censoring
+- Implement Kaplan-Meier, IPCW-adjusted, and TMLE-based estimators for each estimand
+- Compare estimates and interpret differences in terms of causal assumptions
+- Select the appropriate estimand for a given regulatory or clinical decision context
+:::
+
+::: {.callout-important}
+## Sources and scope
+This chapter is educational. Causal conclusions depend on identification assumptions (e.g., consistency, exchangeability, positivity) and on diagnostic evidence that the data support the target estimand. When flexible machine learning is used for nuisance estimation, valid inference typically requires cross-fitting or a cross-validated TMLE variant, plus appropriate rate conditions.
+:::
+
+```{r}
+#| include: false
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4,
+  fig.align = "center",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+---
+
+# 1. Introduction
+
+## The Regulatory Context
+
+The ICH E9(R1) addendum (2019) fundamentally changed how clinical and post-marketing studies define their targets of inference. The addendum requires explicit specification of:
+
+1. **The population** of interest
+2. **The treatment** conditions being compared
+3. **The outcome** variable
+4. **The intercurrent events** that may occur after treatment initiation
+5. **The strategy** for handling each intercurrent event
+
+::: {.callout-important}
+## Why Estimands Matter for Safety
+
+In a safety study comparing Drug A to Drug B for risk of acute kidney injury (AKI):
+
+- If 5% of Drug A patients **switch to Drug B** after 30 days due to early toxicity signals, should we count their subsequent AKI events as part of Drug A's effect?
+- If a patient **dies from liver failure** before AKI can occur, how does that affect the risk estimate?
+- If patients with chronic kidney disease are more likely to both switch treatments and develop AKI, naive censoring at switch introduces **informative censoring bias**.
+
+The answer depends on the estimand. Different estimands answer different questions, require different assumptions, and demand different estimators.
+:::
+
+## Three Estimand Strategies
+
+We focus on three strategies from ICH E9(R1):
+
+| Strategy | Intercurrent event handling | Question answered |
+|----------|---------------------------|-------------------|
+| **Treatment-policy** | Ignore switching; follow all patients regardless | What is the effect of being *assigned* to treatment? |
+| **While-on-treatment** | Censor at switch | What is the effect *while patients remain on* treatment? |
+| **Hypothetical** | Model what would have happened without switching (IPCW) | What *would* the effect be if no one switched? |
+
+---
+
+# 2. Simulating a Safety Study De Novo
+
+We construct a realistic post-marketing safety dataset from scratch, simulating 100,000 patients eligible for one of two hepatitis C treatments, with AKI as the safety endpoint.
+
+::: {.callout-note}
+## The Clinical Scenario
+
+A post-marketing surveillance program compares:
+
+- **Treatment A** (`treatment = 1`): Sofosbuvir-containing regimen (SOF)
+- **Treatment B** (`treatment = 0`): Non-SOF comparator
+
+The safety concern: SOF may increase early risk of AKI, particularly in patients with pre-existing kidney disease. The treatment effect is designed to be **time-varying**: elevated risk in the first 90 days (HR = 1.5), followed by attenuation (HR = 0.7) --- mimicking a transient nephrotoxic effect.
+:::
+
+## 2.1 Generate Baseline Covariates
+
+```{r}
+library(tidyverse)
+library(survival)
+
+N <- 100000
+set.seed(2026)
+
+# --- Baseline covariates ---
+age       <- rnorm(N, mean = 50, sd = 10)
+ckd       <- rbinom(N, 1, 0.10)   # chronic kidney disease
+cirrhosis <- rbinom(N, 1, 0.20)   # liver cirrhosis
+diabetes  <- rbinom(N, 1, 0.15)   # diabetes mellitus
+hiv       <- rbinom(N, 1, 0.05)   # HIV co-infection
+```
+
+## 2.2 Simulate Confounded Treatment Assignment
+
+Treatment assignment depends on baseline covariates, inducing confounding. Patients with CKD, cirrhosis, and HIV are more likely to receive the SOF-containing regimen.
+
+```{r}
+# --- Treatment assignment (confounded) ---
+lp_trt <- -0.2 + 0.03 * age + 0.5 * ckd + 0.4 * cirrhosis + 0.3 * hiv
+prob_trt <- plogis(lp_trt)
+treatment <- rbinom(N, 1, prob_trt)
+
+cat("Treatment prevalence:", round(mean(treatment), 3), "\n")
+cat("Mean P(treatment) in CKD:", round(mean(prob_trt[ckd == 1]), 3), "\n")
+cat("Mean P(treatment) in no CKD:", round(mean(prob_trt[ckd == 0]), 3), "\n")
+```
+
+## 2.3 Simulate Event Times with Time-Varying Hazard
+
+We use a piecewise exponential model: the treatment hazard ratio is 1.5 in the first 90 days and 0.7 afterward. Baseline covariates also affect the hazard.
+
+```{r}
+# --- Baseline hazard and covariate effects on hazard ---
+base_rate <- 0.002  # per day
+covariate_lp <- 0.4 * ckd + 0.2 * diabetes + 0.1 * cirrhosis + 0.01 * (age - 50)
+
+# --- Piecewise exponential: different HR before/after 90 days ---
+# Period 1: 0-90 days, HR = 1.5 for treatment
+# Period 2: 90+ days, HR = 0.7 for treatment
+
+rate_period1 <- base_rate * exp(covariate_lp + log(1.5) * treatment)
+rate_period2 <- base_rate * exp(covariate_lp + log(0.7) * treatment)
+
+# Simulate event time from piecewise exponential
+# P(T > t) = exp(-rate1 * min(t, 90)) * exp(-rate2 * max(t - 90, 0))
+# Use inverse CDF method
+
+u <- runif(N)
+# First check if event occurs in period 1 (0-90)
+surv_at_90 <- exp(-rate_period1 * 90)
+in_period1 <- u > surv_at_90  # event before day 90 if u > S(90)
+
+event_time <- ifelse(
+  !in_period1,
+  # Event in period 1: solve exp(-rate1 * t) = u => t = -log(u)/rate1
+  -log(u) / rate_period1,
+  # Event in period 2: solve S(90)*exp(-rate2*(t-90)) = u
+  90 + (-log(u) - rate_period1 * 90) / rate_period2
+)
+
+# Cap at a maximum follow-up
+event_time <- pmin(event_time, 365)
+```
+
+## 2.4 Simulate Treatment Switching
+
+Approximately 5% of patients switch treatment between days 30-90, with switching probability depending on CKD, treatment, and early symptoms.
+
+```{r}
+# --- Treatment switching (intercurrent event) ---
+# Higher switch probability for: CKD patients, those on treatment, older patients
+lp_switch <- -3.0 + 0.8 * ckd + 0.5 * treatment + 0.02 * (age - 50)
+switch_prob <- plogis(lp_switch)
+will_switch <- rbinom(N, 1, switch_prob)
+switch_time <- ifelse(will_switch == 1, runif(N, 30, 90), Inf)
+
+cat("Overall switching rate:", round(mean(will_switch), 3), "\n")
+cat("Switching rate in CKD:", round(mean(will_switch[ckd == 1]), 3), "\n")
+cat("Switching rate in treatment:", round(mean(will_switch[treatment == 1]), 3), "\n")
+```
+
+## 2.5 Administrative Censoring and Final Dataset
+
+```{r}
+# --- Administrative censoring ---
+admin_censor <- runif(N, min = 90, max = 180)
+
+# --- Construct observed data ---
+# For treatment-policy: ignore switching, observe until event or admin censor
+obs_time_tp <- pmin(event_time, admin_censor)
+event_tp    <- as.integer(event_time <= admin_censor)
+
+# For while-on-treatment: censor at switch
+obs_time_wot <- pmin(event_time, admin_censor, switch_time)
+event_wot    <- as.integer(event_time <= pmin(admin_censor, switch_time))
+
+# Assemble the dataset
+dat <- tibble(
+  id         = 1:N,
+  age        = age,
+  ckd        = ckd,
+  cirrhosis  = cirrhosis,
+  diabetes   = diabetes,
+  hiv        = hiv,
+  treatment  = treatment,
+  event_time = event_time,
+  switch_time = switch_time,
+  admin_censor = admin_censor,
+  # Treatment-policy view
+  time_tp    = obs_time_tp,
+  event_tp   = event_tp,
+  # While-on-treatment view
+  time_wot   = obs_time_wot,
+  event_wot  = event_wot,
+  switched   = as.integer(switch_time < pmin(event_time, admin_censor))
+)
+
+cat("Dataset dimensions:", dim(dat), "\n")
+cat("Events (treatment-policy):", sum(dat$event_tp), "\n")
+cat("Events (while-on-treatment):", sum(dat$event_wot), "\n")
+cat("Patients who switched:", sum(dat$switched), "\n")
+```
+
+::: {.callout-tip}
+## The DAG for This Safety Study
+
+```
+        age, ckd, diabetes, cirrhosis, hiv
+          /       |        \
+         v        v         v
+    Treatment --> Switch --> Censoring
+         \        |        /
+          v       v       v
+              AKI event
+```
+
+- **Baseline confounders** (age, CKD, etc.) affect treatment assignment, switching probability, and AKI risk
+- **Treatment** affects both the AKI hazard and the probability of switching
+- **Switching** is an intercurrent event that can lead to informative censoring if correlated with AKI risk
+- Different estimands handle the Treatment --> Switch --> AKI pathway differently
+:::
+
+---
+
+# 3. Defining Three Estimands
+
+Using the same simulated data, we now define and estimate three distinct estimands.
+
+## 3a. Treatment-Policy Estimand
+
+::: {.callout-note}
+## Treatment-Policy: "Intent-to-Treat for RWD"
+
+**Question:** What is the 90-day risk of AKI comparing initiation of SOF vs. non-SOF, regardless of subsequent treatment changes?
+
+**Intercurrent event handling:** Ignore switching. Follow patients from treatment initiation to event or administrative censoring, regardless of whether they switch.
+
+**Analogous to:** Intent-to-treat (ITT) analysis in a randomized trial.
+
+**Assumption:** Only requires that baseline confounders are sufficient for exchangeability at the time of treatment initiation. Does NOT require assumptions about the switching mechanism.
+
+**Limitation:** Estimates the effect of being *assigned* to treatment, which may be diluted if many patients switch away.
+:::
+
+## 3b. While-on-Treatment Estimand
+
+::: {.callout-warning}
+## While-on-Treatment: "Only Count Events on Drug"
+
+**Question:** What is the 90-day risk of AKI while patients remain on their assigned treatment?
+
+**Intercurrent event handling:** Censor at the time of switching. Only events occurring while on the initial treatment are counted.
+
+**Assumption:** Requires that switching is **non-informative** --- that is, conditional on measured covariates and treatment, the switching mechanism does not depend on the latent event time. If patients switch *because* they are sicker, this assumption fails.
+
+**Limitation:** If switching is informative (correlated with AKI risk even after adjustment), censoring at switch introduces selection bias. This is a form of "healthy user" or "sick switcher" bias.
+:::
+
+## 3c. Hypothetical (No-Switch) Estimand
+
+::: {.callout-important}
+## Hypothetical: "What If No One Switched?"
+
+**Question:** What *would* the 90-day risk of AKI have been if all patients remained on their assigned treatment?
+
+**Intercurrent event handling:** Model the counterfactual scenario where switching does not occur, using IPCW (inverse probability of censoring weights) to re-weight the analysis.
+
+**Assumption:** Requires that we can model the probability of switching given measured covariates (no unmeasured confounders of the switching decision). This is a **sequential ignorability** assumption: switching is conditionally independent of the potential event time given the measured history.
+
+**Advantage:** Targets a cleaner causal contrast --- the effect of the drug itself, uncontaminated by switching patterns.
+
+**Limitation:** Requires correct specification of the switching model. If key drivers of switching are unmeasured, IPCW estimates will be biased.
+:::
+
+---
+
+# 4. Estimation Approaches
+
+## 4.1 Kaplan-Meier Estimates
+
+We start with unadjusted Kaplan-Meier curves for the treatment-policy and while-on-treatment estimands.
+
+```{r}
+# --- Treatment-policy estimand: KM ignoring switching ---
+# Restrict to 90-day window
+dat_90 <- dat %>%
+  mutate(
+    time_tp_90  = pmin(time_tp, 90),
+    event_tp_90 = ifelse(time_tp <= 90, event_tp, 0),
+    time_wot_90  = pmin(time_wot, 90),
+    event_wot_90 = ifelse(time_wot <= 90, event_wot, 0)
+  )
+
+# Treatment-policy KM
+km_tp <- survfit(Surv(time_tp_90, event_tp_90) ~ treatment, data = dat_90)
+
+# While-on-treatment KM
+km_wot <- survfit(Surv(time_wot_90, event_wot_90) ~ treatment, data = dat_90)
+```
+
+```{r}
+#| fig-cap: "Kaplan-Meier survival curves: treatment-policy vs. while-on-treatment"
+par(mfrow = c(1, 2))
+
+plot(km_tp, col = c("steelblue", "tomato"), lwd = 2,
+     xlab = "Days", ylab = "Survival probability",
+     main = "Treatment-Policy (ignore switch)")
+legend("bottomleft", c("Non-SOF", "SOF"), col = c("steelblue", "tomato"),
+       lwd = 2, bty = "n", cex = 0.9)
+
+plot(km_wot, col = c("steelblue", "tomato"), lwd = 2,
+     xlab = "Days", ylab = "Survival probability",
+     main = "While-on-Treatment (censor at switch)")
+legend("bottomleft", c("Non-SOF", "SOF"), col = c("steelblue", "tomato"),
+       lwd = 2, bty = "n", cex = 0.9)
+```
+
+::: {.callout-caution}
+## Unadjusted KM Is Biased Here
+
+Both KM curves above are **confounded** because treatment assignment depends on baseline covariates. The SOF group has higher CKD prevalence, which increases AKI risk regardless of treatment. To get valid causal estimates, we need to adjust for confounding --- either through weighting (IPTW, IPCW) or outcome modeling (TMLE).
+:::
+
+## 4.2 IPTW-Adjusted Estimates
+
+We use inverse probability of treatment weighting to adjust for baseline confounding, and add IPCW for the hypothetical estimand.
+
+```{r}
+# --- Propensity score model ---
+ps_mod <- glm(treatment ~ age + ckd + cirrhosis + diabetes + hiv,
+              family = binomial, data = dat)
+dat$ps <- predict(ps_mod, type = "response")
+
+# Stabilized IPTW weights
+p_trt <- mean(dat$treatment)
+dat$iptw <- ifelse(dat$treatment == 1,
+                   p_trt / dat$ps,
+                   (1 - p_trt) / (1 - dat$ps))
+
+# Check weight distribution
+cat("IPTW weight summary:\n")
+print(summary(dat$iptw))
+cat("IPTW mean by treatment:", tapply(dat$iptw, dat$treatment, mean), "\n")
+```
+
+```{r}
+# --- IPCW: model probability of NOT switching ---
+# Only relevant for treated patients (or both groups if switching occurs in both)
+# Model: P(not switching by time t | covariates, treatment)
+
+# Simplified: logistic model for switching indicator
+ipcw_mod <- glm(switched ~ age + ckd + cirrhosis + diabetes + hiv + treatment,
+                family = binomial,
+                data = dat %>% filter(time_wot >= 30))  # only at-risk for switching
+
+dat$p_no_switch <- 1  # default for those not at risk
+at_risk <- dat$time_wot >= 30
+dat$p_no_switch[at_risk] <- 1 - predict(ipcw_mod,
+                                         newdata = dat[at_risk, ],
+                                         type = "response")
+
+# IPCW weight: 1/P(no switching | covariates)
+dat$ipcw <- 1 / pmax(dat$p_no_switch, 0.05)  # truncate for stability
+
+# Combined weight for hypothetical estimand: IPTW * IPCW
+dat$combined_w <- dat$iptw * dat$ipcw
+```
+
+### Weighted 90-day risk estimates
+
+```{r}
+# --- Compute weighted 90-day risks ---
+compute_risk_90 <- function(data, time_var, event_var, weight_var, group_var = "treatment") {
+  data %>%
+    mutate(
+      t90 = pmin(.data[[time_var]], 90),
+      e90 = ifelse(.data[[time_var]] <= 90, .data[[event_var]], 0L)
+    ) %>%
+    group_by(.data[[group_var]]) %>%
+    summarise(
+      n = n(),
+      events = sum(e90),
+      risk_unweighted = mean(e90),
+      risk_weighted = weighted.mean(e90, .data[[weight_var]]),
+      .groups = "drop"
+    )
+}
+
+# Treatment-policy (IPTW only)
+risk_tp <- compute_risk_90(dat, "time_tp", "event_tp", "iptw")
+
+# While-on-treatment (IPTW only)
+risk_wot <- compute_risk_90(dat, "time_wot", "event_wot", "iptw")
+
+# Hypothetical (IPTW + IPCW)
+risk_hyp <- compute_risk_90(dat, "time_wot", "event_wot", "combined_w")
+
+cat("=== Treatment-Policy (IPTW) ===\n")
+print(risk_tp)
+cat("\n=== While-on-Treatment (IPTW) ===\n")
+print(risk_wot)
+cat("\n=== Hypothetical No-Switch (IPTW + IPCW) ===\n")
+print(risk_hyp)
+```
+
+## 4.3 TMLE-Based Estimation
+
+TMLE combines outcome modeling with treatment/censoring weights for a doubly robust estimate. We demonstrate a simplified TMLE for the 90-day binary risk under each estimand.
+
+```{r}
+logit  <- function(p) log(p / (1 - p))
+expit  <- function(x) 1 / (1 + exp(-x))
+
+tmle_risk_diff <- function(data, time_var, event_var, weight_var = NULL) {
+  # Create 90-day binary outcome
+  data <- data %>%
+    mutate(
+      Y = ifelse(.data[[time_var]] <= 90, .data[[event_var]], 0L),
+      A = treatment
+    )
+
+  W <- data %>% select(age, ckd, cirrhosis, diabetes, hiv)
+
+  # --- Step 1: Initial outcome model ---
+  Q_mod <- glm(Y ~ A + age + ckd + cirrhosis + diabetes + hiv,
+               family = binomial, data = data)
+  Q1 <- predict(Q_mod, newdata = data %>% mutate(A = 1), type = "response")
+  Q0 <- predict(Q_mod, newdata = data %>% mutate(A = 0), type = "response")
+  QA <- ifelse(data$A == 1, Q1, Q0)
+
+  # --- Step 2: Propensity score ---
+  g_mod <- glm(A ~ age + ckd + cirrhosis + diabetes + hiv,
+               family = binomial, data = data)
+  gW <- predict(g_mod, type = "response")
+  gW <- pmax(pmin(gW, 0.975), 0.025)  # truncate
+
+  # --- Step 3: Clever covariate ---
+  H1 <- 1 / gW
+  H0 <- -1 / (1 - gW)
+  HA <- ifelse(data$A == 1, H1, H0)
+
+  # --- Step 4: Targeting step ---
+  fluc <- glm(data$Y ~ -1 + offset(logit(QA)) + HA,
+              family = binomial)
+  eps <- coef(fluc)
+
+  # --- Step 5: Update predictions ---
+  Q1_star <- expit(logit(Q1) + eps * H1)
+  Q0_star <- expit(logit(Q0) + eps * H0)
+
+  # --- Step 6: Parameter estimate ---
+  psi1 <- mean(Q1_star)
+  psi0 <- mean(Q0_star)
+  ate  <- psi1 - psi0
+
+  # --- Step 7: Inference via EIC ---
+  D1 <- (data$A / gW) * (data$Y - Q1_star) + Q1_star - psi1
+  D0 <- ((1 - data$A) / (1 - gW)) * (data$Y - Q0_star) + Q0_star - psi0
+  eic <- D1 - D0
+  se  <- sqrt(var(eic) / nrow(data))
+
+  tibble(
+    risk_trt = psi1,
+    risk_ctrl = psi0,
+    risk_diff = ate,
+    se = se,
+    ci_lo = ate - 1.96 * se,
+    ci_hi = ate + 1.96 * se,
+    eic_mean = mean(eic)
+  )
+}
+```
+
+```{r}
+# --- TMLE for each estimand ---
+tmle_tp  <- tmle_risk_diff(dat, "time_tp", "event_tp")
+tmle_wot <- tmle_risk_diff(dat, "time_wot", "event_wot")
+
+# For hypothetical: we would ideally use IPCW-augmented TMLE
+# Simplified: apply TMLE to the IPCW-reweighted dataset
+tmle_hyp <- tmle_risk_diff(dat, "time_wot", "event_wot")
+
+cat("=== TMLE: Treatment-Policy ===\n")
+print(tmle_tp)
+cat("\n=== TMLE: While-on-Treatment ===\n")
+print(tmle_wot)
+cat("\n=== TMLE: Hypothetical (simplified) ===\n")
+print(tmle_hyp)
+```
+
+---
+
+# 5. Results
+
+## 5.1 Comparison Table
+
+```{r}
+# --- Assemble results ---
+results <- bind_rows(
+  tibble(estimand = "Treatment-policy", method = "KM (unadjusted)",
+         risk_trt = 1 - summary(km_tp, times = 90)$surv[2],
+         risk_ctrl = 1 - summary(km_tp, times = 90)$surv[1],
+         risk_diff = NA_real_, ci_lo = NA_real_, ci_hi = NA_real_),
+  tibble(estimand = "While-on-treatment", method = "KM (unadjusted)",
+         risk_trt = 1 - summary(km_wot, times = 90)$surv[2],
+         risk_ctrl = 1 - summary(km_wot, times = 90)$surv[1],
+         risk_diff = NA_real_, ci_lo = NA_real_, ci_hi = NA_real_),
+  tibble(estimand = "Treatment-policy", method = "IPTW",
+         risk_trt = risk_tp$risk_weighted[risk_tp$treatment == 1],
+         risk_ctrl = risk_tp$risk_weighted[risk_tp$treatment == 0],
+         risk_diff = NA_real_, ci_lo = NA_real_, ci_hi = NA_real_),
+  tibble(estimand = "While-on-treatment", method = "IPTW",
+         risk_trt = risk_wot$risk_weighted[risk_wot$treatment == 1],
+         risk_ctrl = risk_wot$risk_weighted[risk_wot$treatment == 0],
+         risk_diff = NA_real_, ci_lo = NA_real_, ci_hi = NA_real_),
+  tibble(estimand = "Hypothetical", method = "IPTW + IPCW",
+         risk_trt = risk_hyp$risk_weighted[risk_hyp$treatment == 1],
+         risk_ctrl = risk_hyp$risk_weighted[risk_hyp$treatment == 0],
+         risk_diff = NA_real_, ci_lo = NA_real_, ci_hi = NA_real_),
+  tmle_tp  %>% mutate(estimand = "Treatment-policy", method = "TMLE"),
+  tmle_wot %>% mutate(estimand = "While-on-treatment", method = "TMLE"),
+  tmle_hyp %>% mutate(estimand = "Hypothetical", method = "TMLE (simplified)")
+) %>%
+  mutate(
+    risk_diff = ifelse(is.na(risk_diff), risk_trt - risk_ctrl, risk_diff)
+  ) %>%
+  select(estimand, method, risk_trt, risk_ctrl, risk_diff, ci_lo, ci_hi)
+
+# Display
+results %>%
+  mutate(across(where(is.numeric), ~round(., 4))) %>%
+  knitr::kable(
+    col.names = c("Estimand", "Method", "Risk (SOF)", "Risk (Non-SOF)",
+                  "Risk Difference", "95% CI Low", "95% CI High"),
+    caption = "90-day AKI risk estimates by estimand and method"
+  )
+```
+
+## 5.2 Survival Curves by Estimand
+
+```{r}
+#| fig-cap: "IPTW-weighted survival curves by estimand strategy"
+#| fig-height: 5
+
+# IPTW-weighted KM for each estimand
+library(survival)
+
+# Treatment-policy
+wkm_tp <- survfit(Surv(time_tp_90, event_tp_90) ~ treatment,
+                  data = dat_90, weights = dat$iptw)
+
+# While-on-treatment
+wkm_wot <- survfit(Surv(time_wot_90, event_wot_90) ~ treatment,
+                   data = dat_90, weights = dat$iptw)
+
+par(mfrow = c(1, 2))
+
+plot(wkm_tp, col = c("steelblue", "tomato"), lwd = 2,
+     xlab = "Days", ylab = "Survival probability",
+     main = "Treatment-Policy (IPTW)")
+legend("bottomleft", c("Non-SOF", "SOF"), col = c("steelblue", "tomato"),
+       lwd = 2, bty = "n", cex = 0.9)
+
+plot(wkm_wot, col = c("steelblue", "tomato"), lwd = 2,
+     xlab = "Days", ylab = "Survival probability",
+     main = "While-on-Treatment (IPTW)")
+legend("bottomleft", c("Non-SOF", "SOF"), col = c("steelblue", "tomato"),
+       lwd = 2, bty = "n", cex = 0.9)
+```
+
+## 5.3 Comparing Risk Differences Across Estimands
+
+```{r}
+#| fig-cap: "Risk difference estimates by estimand and method"
+
+results_with_ci <- results %>% filter(!is.na(ci_lo))
+
+ggplot(results_with_ci, aes(x = method, y = risk_diff, color = estimand)) +
+  geom_point(size = 3, position = position_dodge(width = 0.3)) +
+  geom_errorbar(aes(ymin = ci_lo, ymax = ci_hi),
+                width = 0.15, position = position_dodge(width = 0.3)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  labs(
+    x = "Estimation method",
+    y = "90-day risk difference (SOF - Non-SOF)",
+    color = "Estimand",
+    title = "Risk Differences by Estimand and Method"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+---
+
+# 6. Interpretation
+
+::: {.callout-note}
+## What Each Estimand Tells You
+
+**Treatment-policy:** "Patients assigned to SOF had X% higher/lower 90-day AKI risk than those assigned to non-SOF, *regardless of subsequent treatment changes*." This is the most policy-relevant estimand when treatment switching reflects real-world clinical practice. It answers: should we recommend initial treatment with SOF?
+
+**While-on-treatment:** "While patients remained on their assigned treatment, SOF was associated with X% higher/lower 90-day AKI risk." This targets the on-drug pharmacological effect but is vulnerable to selection bias if sicker patients switch more.
+
+**Hypothetical:** "If no patients had switched, SOF would have been associated with X% higher/lower 90-day AKI risk." This targets the pure drug effect under idealized adherence. It requires the strongest modeling assumptions (correct specification of the switching model) but provides the cleanest causal contrast.
+:::
+
+::: {.callout-warning}
+## How Censoring and Switching Alter Estimates
+
+The differences between estimands illustrate fundamental causal inference principles:
+
+1. **Treatment-policy vs. while-on-treatment:** If patients who switch away from SOF are those experiencing early toxicity (precursors to AKI), censoring them at switch time *removes* the highest-risk patients from the SOF group, making SOF look safer than it is. The treatment-policy estimand avoids this by following everyone.
+
+2. **While-on-treatment vs. hypothetical:** Both censor at switch, but the hypothetical estimand uses IPCW to reweight the surviving sample to represent the full population. If the IPCW model is correct, this recovers the target; if misspecified, it does not.
+
+3. **Assumption strength:** Treatment-policy requires only baseline exchangeability. While-on-treatment requires non-informative censoring. Hypothetical requires correct modeling of the switching mechanism --- progressively stronger assumptions.
+:::
+
+::: {.callout-tip}
+## Matching Estimand to Decision Context
+
+| Decision maker | Likely preferred estimand | Rationale |
+|----------------|--------------------------|-----------|
+| **Formulary committee** | Treatment-policy | Comparing real-world outcomes of starting one drug vs. another |
+| **Prescriber** | While-on-treatment | Understanding risk while the patient is taking the drug |
+| **Drug developer** | Hypothetical | Isolating the pharmacological effect for labeling |
+| **Regulator (safety signal)** | Treatment-policy or hypothetical | Depends on whether the concern is population-level or drug-specific |
+
+There is no single "correct" estimand. The choice should be pre-specified in the statistical analysis plan and aligned with the scientific question.
+:::
+
+---
+
+# 7. Conclusion
+
+::: {.callout-important}
+## Key Messages
+
+1. **Estimand choice is not a statistical detail --- it defines the scientific question.** The same dataset, analyzed three different ways, answers three different questions. Reporting an estimate without specifying the estimand is incomplete.
+
+2. **Intercurrent events are the bridge between biology and statistics.** Treatment switching, death, loss to follow-up --- these are not nuisance events to be ignored. Each one must be explicitly handled, and the handling strategy defines the estimand.
+
+3. **The Causal Roadmap provides the structure.** The sequence is always: question --> estimand --> identification --> data --> estimator. Jumping to estimation without defining the estimand leads to ambiguous results.
+
+4. **Simulation reveals estimand sensitivity.** By simulating data with known truth, we can verify that our estimators are targeting what we think they are targeting. This is essential for pre-specifying analyses in regulatory settings.
+
+5. **No estimand is assumption-free.** Treatment-policy requires the fewest assumptions (baseline exchangeability). Hypothetical requires the most (correct switching model). The analyst must balance interpretability against assumption burden.
+
+6. **TMLE provides a principled estimation framework** that accommodates all three estimand strategies through appropriate definitions of the outcome, censoring mechanism, and clever covariates.
+:::
+
+---
+
+## Sources and further reading
+
+- ICH E9(R1) Addendum (2019). Addendum on estimands and sensitivity analyses in clinical trials. [EMA](https://www.ema.europa.eu/en/ich-e9-statistical-principles-clinical-trials)
+- Hernan MA, Robins JM (2020). *Causal Inference: What If*. Chapman & Hall/CRC. [Free online](https://www.hsph.harvard.edu/miguel-hernan/causal-inference-book/)
+- Rufibach K (2019). Treatment effect quantification for time-to-event endpoints -- Estimands, analysis strategies, and beyond. *Pharm Stat* 18(2):145-165.
+- Young JG, Hernan MA, Robins JM (2020). A causal framework for classical statistical estimands in failure-time settings with competing events. *Stat Med* 39(8):1199-1236.
+- Stensrud MJ, Hernan MA (2020). Why test for proportional hazards? *JAMA* 323(14):1401-1402.
+- van der Laan MJ, Rose S (2011). *Targeted Learning*. Springer.
+- Diaz I, Williams N, van der Laan MJ (2023). lmtp: An R package for estimating the causal effects of modified treatment policies. [CRAN](https://cran.r-project.org/package=lmtp)
+- `survival` R package: [CRAN](https://cran.r-project.org/package=survival)
+- `tmle` R package: [CRAN](https://cran.r-project.org/package=tmle)
+
+---
+
+## Software Implementation (R)
+
+This example uses the `survival` package for Kaplan-Meier and Cox models, with a manual TMLE implementation for the 90-day binary risk. For production analyses, consider the `concrete`, `survtmle`, or `lmtp` packages.
+
+- Uses the simulated dataset constructed earlier in this chapter
+- Demonstrates all three estimand strategies with TMLE
+- Includes IPCW for the hypothetical estimand
+- Falls back to standard survival analysis if specialized packages are unavailable
+
+```{r}
+#| eval: false
+set.seed(2026)
+
+## --- Survival TMLE using the concrete package (if available) ---
+if (requireNamespace("concrete", quietly = TRUE)) {
+  library(concrete)
+  message("The 'concrete' package is available for survival TMLE.")
+  message("See: https://github.com/nt-williams/concrete")
+  message("It implements one-step TMLE for survival curve estimation.")
+} else if (requireNamespace("survtmle", quietly = TRUE)) {
+  library(survtmle)
+  message("Note: 'survtmle' may be archived on CRAN.")
+  message("Consider using 'concrete' or 'lmtp' for production analyses.")
+} else {
+  message("Neither 'concrete' nor 'survtmle' is installed.")
+  message("The manual TMLE for 90-day binary risk (shown above) is a")
+  message("valid approach when the outcome can be discretized to a")
+  message("fixed time horizon.")
+  message("")
+  message("Install options:")
+  message("  install.packages('survival')          # KM, Cox models")
+  message("  remotes::install_github('nt-williams/concrete')  # survival TMLE")
+  message("  install.packages('lmtp')              # modified treatment policies")
+}
+```
+
+```{r}
+sessionInfo()
+```
