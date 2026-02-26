@@ -1,13 +1,12 @@
 ---
-title: "Estimands in Time-to-Event Real-World Safety Analyses: A Simulation-Based Tutorial"
+title: "Estimands in Time-to-Event Real-World Safety Analyses"
 subtitle: "How intercurrent events shape what your analysis actually estimates"
 format: html
 ---
 
 # Estimands in Time-to-Event Real-World Safety Analyses
-*A simulation-based tutorial for pharmacoepidemiologists*
 
-In real-world safety studies, the question "Does this drug increase the risk of adverse events?" sounds simple. But the answer depends critically on **how you handle intercurrent events** --- treatment switching, discontinuation, death from other causes --- that occur between treatment initiation and the outcome. Different handling strategies define different **estimands**, and each estimand answers a fundamentally different scientific question.
+In real-world safety studies, the question "Does this drug increase the risk of adverse events?" sounds simple. But the answer depends critically on how you handle **intercurrent events** — treatment switching, discontinuation, death from other causes — that occur between treatment initiation and the outcome. Different handling strategies define different **estimands**, and each estimand answers a fundamentally different scientific question.
 
 This chapter uses a fully simulated safety study to illustrate all five ICH E9(R1) estimand strategies side by side, showing how the same data can yield strikingly different estimates depending on the causal question being asked.
 
@@ -39,10 +38,6 @@ knitr::opts_chunk$set(
 )
 ```
 
----
-
-# 1. Introduction
-
 ## The Regulatory Context
 
 The ICH E9(R1) addendum (2019) fundamentally changed how clinical and post-marketing studies define their targets of inference. The addendum requires explicit specification of:
@@ -53,17 +48,9 @@ The ICH E9(R1) addendum (2019) fundamentally changed how clinical and post-marke
 4. **The intercurrent events** that may occur after treatment initiation
 5. **The strategy** for handling each intercurrent event
 
-::: {.callout-important}
-## Why Estimands Matter for Safety
+In a safety study comparing Drug A to Drug B for risk of acute kidney injury (AKI), if 15% of Drug A patients switch to Drug B after 30 days due to early toxicity signals, should we count their subsequent AKI events as part of Drug A's effect? If a patient dies from liver failure before AKI can occur, how does that affect the risk estimate? If patients with chronic kidney disease are more likely to both switch treatments and develop AKI, naive censoring at switch introduces informative censoring bias.
 
-In a safety study comparing Drug A to Drug B for risk of acute kidney injury (AKI):
-
-- If 15% of Drug A patients **switch to Drug B** after 30 days due to early toxicity signals, should we count their subsequent AKI events as part of Drug A's effect?
-- If a patient **dies from liver failure** before AKI can occur, how does that affect the risk estimate?
-- If patients with chronic kidney disease are more likely to both switch treatments and develop AKI, naive censoring at switch introduces **informative censoring bias**.
-
-The answer depends on the estimand. Different estimands answer different questions, require different assumptions, and demand different estimators.
-:::
+The answer depends on the estimand.
 
 ## Five Estimand Strategies (ICH E9(R1))
 
@@ -75,24 +62,13 @@ The answer depends on the estimand. Different estimands answer different questio
 | **While-on-treatment** | Censor at switch | What is the effect *while patients remain on* treatment? |
 | **Principal stratum** | Restrict to patients who would not switch under either arm | What is the effect among "always-adherers"? |
 
----
+# Simulating a Safety Study
 
-# 2. Simulating a Safety Study De Novo
+We construct a realistic post-marketing safety dataset from scratch, simulating 100,000 patients eligible for one of two hepatitis C treatments, with AKI as the safety endpoint. The simulation is designed so that informative switching creates large, visible differences between estimand strategies.
 
-We construct a realistic post-marketing safety dataset from scratch, simulating 100,000 patients eligible for one of two hepatitis C treatments, with AKI as the safety endpoint. The simulation is designed so that informative switching creates **large, visible differences** between estimand strategies.
+A post-marketing surveillance program compares **Treatment A** (`treatment = 1`, sofosbuvir-containing regimen) to **Treatment B** (`treatment = 0`, non-SOF comparator). The safety concern is that SOF may increase early risk of AKI, particularly in patients with pre-existing kidney disease. The treatment effect is strongly time-varying: elevated risk in the first 90 days (HR = 3.0), followed by attenuation (HR = 0.6) — mimicking a transient nephrotoxic effect that is large enough to drive treatment switching.
 
-::: {.callout-note}
-## The Clinical Scenario
-
-A post-marketing surveillance program compares:
-
-- **Treatment A** (`treatment = 1`): Sofosbuvir-containing regimen (SOF)
-- **Treatment B** (`treatment = 0`): Non-SOF comparator
-
-The safety concern: SOF may increase early risk of AKI, particularly in patients with pre-existing kidney disease. The treatment effect is **strongly time-varying**: elevated risk in the first 90 days (HR = 3.0), followed by attenuation (HR = 0.6) --- mimicking a transient nephrotoxic effect that is large enough to drive treatment switching.
-:::
-
-## 2.1 Generate Baseline Covariates
+## Baseline Covariates
 
 ```{r}
 library(tidyverse)
@@ -109,9 +85,9 @@ diabetes  <- rbinom(N, 1, 0.15)   # diabetes mellitus
 hiv       <- rbinom(N, 1, 0.05)   # HIV co-infection
 ```
 
-## 2.2 Simulate Confounded Treatment Assignment
+## Confounded Treatment Assignment
 
-Treatment assignment depends on baseline covariates, inducing **strong confounding**. Patients with CKD, cirrhosis, and HIV are substantially more likely to receive the SOF-containing regimen.
+Treatment assignment depends on baseline covariates, inducing strong confounding. Patients with CKD, cirrhosis, and HIV are substantially more likely to receive the SOF-containing regimen.
 
 ```{r}
 # --- Treatment assignment (strongly confounded) ---
@@ -124,9 +100,9 @@ cat("Mean P(trt) in CKD:", round(mean(prob_trt[ckd == 1]), 3), "\n")
 cat("Mean P(trt) no CKD:", round(mean(prob_trt[ckd == 0]), 3), "\n")
 ```
 
-## 2.3 Simulate Event Times with Time-Varying Hazard
+## Event Times with Time-Varying Hazard
 
-We use a piecewise exponential model with a **large early treatment hazard ratio (HR = 3.0)** that reverses after 90 days (HR = 0.6). This creates a strong early safety signal that drives switching.
+We use a piecewise exponential model with a large early treatment hazard ratio (HR = 3.0) that reverses after 90 days (HR = 0.6). This creates a strong early safety signal that drives switching.
 
 ```{r}
 # --- Baseline hazard and covariate effects on hazard ---
@@ -150,9 +126,9 @@ event_time <- ifelse(
 event_time <- pmin(event_time, 365)
 ```
 
-## 2.4 Simulate Competing Risk: Death Before AKI
+## Competing Risk: Death Before AKI
 
-Some patients die from non-renal causes (liver failure, cardiovascular events) before AKI can occur. This creates a competing risk needed for the **composite** estimand strategy.
+Some patients die from non-renal causes (liver failure, cardiovascular events) before AKI can occur. This creates a competing risk needed for the composite estimand strategy.
 
 ```{r}
 # --- Competing risk: non-AKI death ---
@@ -167,9 +143,9 @@ cat("Patients who die before AKI:", sum(died_before_aki), "(",
     round(100 * mean(died_before_aki), 1), "%)\n")
 ```
 
-## 2.5 Simulate Informative Treatment Switching
+## Informative Treatment Switching
 
-**Key design choice:** Approximately 15-20% of SOF patients switch treatment between days 15-75, with switching **strongly driven by CKD and early renal symptoms** --- the same factors that increase AKI risk. This makes switching *highly informative*, creating large differences between estimand strategies.
+Approximately 15–20% of SOF patients switch treatment between days 15–75, with switching strongly driven by CKD and early renal symptoms — the same factors that increase AKI risk. This makes switching highly informative, creating large differences between estimand strategies.
 
 ```{r}
 # --- Treatment switching (strongly informative) ---
@@ -191,7 +167,7 @@ cat("Switch rate (SOF, no CKD):", round(mean(will_switch[treatment == 1 & ckd ==
 cat("Switch rate (non-SOF):", round(mean(will_switch[treatment == 0]), 3), "\n")
 ```
 
-## 2.6 Administrative Censoring and Final Dataset
+## Administrative Censoring and Final Dataset
 
 ```{r}
 # --- Administrative censoring ---
@@ -247,8 +223,7 @@ cat("Patients who switched:", sum(dat$switched), "\n")
 cat("Patients who died before AKI:", sum(dat$died_first), "\n")
 ```
 
-::: {.callout-tip}
-## The DAG for This Safety Study
+The DAG below summarizes the causal structure. Baseline confounders affect treatment, switching, death, and AKI. Treatment affects AKI hazard (HR = 3.0 early) and switching probability. Switching is strongly informative (driven by CKD, which also drives AKI). Death competes with AKI. Each estimand strategy handles these relationships differently.
 
 ```
         age, ckd, diabetes, cirrhosis, hiv
@@ -260,107 +235,31 @@ cat("Patients who died before AKI:", sum(dat$died_first), "\n")
               AKI event  <----------
 ```
 
-- **Baseline confounders** affect treatment, switching, death, and AKI
-- **Treatment** affects AKI hazard (HR = 3.0 early) AND switching probability
-- **Switching** is strongly informative: driven by CKD (also drives AKI)
-- **Death** competes with AKI (relevant for composite strategy)
-- Each estimand strategy handles these arrows differently
-:::
+# Defining Five Estimand Strategies
 
----
+Using the same simulated data, we define and estimate five distinct estimands.
 
-# 3. Defining Five Estimand Strategies
+**Treatment-policy** ignores switching and follows all patients from initiation to AKI, death, or administrative censoring. It asks: what is the 90-day risk of AKI comparing initiation of SOF vs. non-SOF, regardless of subsequent treatment changes? This is analogous to intent-to-treat in a trial and requires only baseline exchangeability. Its limitation is that the effect is diluted when many patients switch.
 
-Using the same simulated data, we define and estimate five distinct estimands from ICH E9(R1).
+**Composite** folds switching and death into the endpoint. Any of AKI, death, or switching counts as an "event." This avoids censoring at intercurrent events entirely but combines clinically distinct outcomes — a safety signal driven mainly by switching (not AKI) could be misleading.
 
-## 3a. Treatment-Policy Estimand
+**Hypothetical** models the counterfactual via IPCW: what would the 90-day AKI risk have been if no patients switched? This targets the pure pharmacological effect but requires correct modeling of the switching mechanism (sequential ignorability). If unmeasured factors drive switching, IPCW is biased.
 
-::: {.callout-note}
-## Treatment-Policy: "Intent-to-Treat for RWD"
-
-**Question:** What is the 90-day risk of AKI comparing initiation of SOF vs. non-SOF, regardless of subsequent treatment changes or death?
-
-**Intercurrent event handling:** Ignore switching. Follow all patients from initiation to AKI, death, or administrative censoring.
-
-**Analogous to:** Intent-to-treat (ITT) analysis in a randomized trial.
-
-**Assumption:** Only requires baseline exchangeability. Does NOT require assumptions about the switching mechanism.
-
-**Limitation:** Effect is diluted if many patients switch away from SOF early.
-:::
-
-## 3b. Composite Estimand
-
-::: {.callout-note}
-## Composite: "Any Bad Outcome"
-
-**Question:** What is the 90-day risk of AKI *or death or treatment failure (switching)* comparing SOF vs. non-SOF?
-
-**Intercurrent event handling:** Fold switching and death INTO the endpoint. Any of these events counts as an "event."
-
-**Assumption:** Same as treatment-policy (baseline exchangeability only).
-
-**Advantage:** Avoids censoring at intercurrent events entirely --- no informative censoring concern.
-
-**Limitation:** Combines clinically distinct outcomes. A safety signal driven mainly by switching (not AKI) could be misleading. Harder to interpret mechanistically.
-:::
-
-## 3c. Hypothetical (No-Switch) Estimand
-
-::: {.callout-important}
-## Hypothetical: "What If No One Switched?"
-
-**Question:** What *would* the 90-day AKI risk have been if no patients switched, i.e., all remained on their assigned treatment?
-
-**Intercurrent event handling:** Model the counterfactual via IPCW: re-weight the analysis to represent a world where switching does not occur.
-
-**Assumption:** Requires correct modeling of the switching mechanism conditional on measured covariates (**sequential ignorability**).
-
-**Advantage:** Targets the pure pharmacological effect, uncontaminated by switching patterns.
-
-**Limitation:** Strongest modeling assumptions. If unmeasured factors drive switching, IPCW is biased.
-:::
-
-## 3d. While-on-Treatment Estimand
+**While-on-treatment** censors patients at the time of switching and counts only events occurring before any switch. This requires switching to be non-informative conditional on covariates. In our simulation, switching is highly informative — CKD patients on SOF switch the most and are at highest AKI risk. Censoring them removes the highest-risk patients from the SOF arm, making SOF look artificially safer.
 
 ::: {.callout-warning}
-## While-on-Treatment: "Only Count Events on Drug"
-
-**Question:** What is the 90-day AKI risk while patients remain on their initially assigned treatment?
-
-**Intercurrent event handling:** Censor at the time of switching. Only events occurring before any switch are counted.
-
-**Assumption:** Requires switching to be **non-informative** conditional on covariates. If sicker patients switch more, this fails.
-
-**Critical danger:** In our simulation, switching is *highly informative* --- CKD patients on SOF switch the most, and these same patients are at highest AKI risk. Censoring them removes the highest-risk patients from the SOF arm, making SOF look **artificially safer**. This is precisely the bias this strategy is vulnerable to.
+The while-on-treatment strategy is particularly dangerous in safety studies when switching is informative. It can mask a true safety signal by selectively removing the highest-risk patients from the treatment arm.
 :::
 
-## 3e. Principal Stratum Estimand
+**Principal stratum** restricts to the subpopulation of patients who would not switch under either treatment assignment (always-adherers). This requires monotonicity and that this subpopulation is identifiable from observed data. In practice we can only approximate it by excluding observed switchers, which introduces bias and limits generalizability to a subgroup.
 
-::: {.callout-caution}
-## Principal Stratum: "Effect Among Always-Adherers"
+# Estimation
 
-**Question:** What is the 90-day AKI risk *among the subpopulation of patients who would not switch under either treatment assignment*?
-
-**Intercurrent event handling:** Restrict to the "principal stratum" of patients who are always-adherers --- those who would stay on treatment regardless of which drug they were assigned.
-
-**Assumption:** Requires **monotonicity** (if you would not switch under Drug A, you would not switch under Drug B) and that this subpopulation is identifiable from observed data. Often requires a sensitivity analysis framework.
-
-**Advantage:** Targets a well-defined subpopulation, avoiding issues with informative censoring.
-
-**Limitation:** The always-adherer population is latent (not directly observable). In practice, we can only approximate it by excluding observed switchers from one arm, which introduces bias. The effect applies only to this subgroup, not the full population.
-:::
-
----
-
-# 4. Estimation Approaches
-
-## 4.1 Create 90-Day Binary Outcomes for Each Strategy
+## 90-Day Binary Outcomes
 
 We discretize all outcomes to the 90-day time horizon to enable TMLE via the `tmle` package.
 
 ```{r}
-# --- 90-day binary outcomes for each estimand ---
 dat <- dat %>%
   mutate(
     # Treatment-policy: AKI within 90 days (ignoring switch)
@@ -372,12 +271,10 @@ dat <- dat %>%
     # While-on-treatment: AKI within 90 days while on treatment
     Y_wot = as.integer(time_wot <= 90 & event_wot == 1),
 
-    # For while-on-treatment, patients censored before 90 days
-    # (due to switch) are NOT counted; we mark them for exclusion
+    # Patients censored before 90 days (due to switch) are excluded
     censored_wot = as.integer(time_wot < 90 & event_wot == 0),
 
-    # Hypothetical: same underlying events as WOT, but we will
-    # reweight with IPCW
+    # Hypothetical: same underlying events as WOT, reweighted with IPCW
     Y_hyp = Y_wot
   )
 
@@ -388,10 +285,9 @@ cat("While-on-treatment (AKI, naive):", round(mean(dat$Y_wot), 4), "\n")
 cat("Censored before 90d in WOT:", round(mean(dat$censored_wot), 4), "\n")
 ```
 
-## 4.2 Kaplan-Meier (Unadjusted) Estimates
+## Kaplan-Meier (Unadjusted)
 
 ```{r}
-# --- KM curves for 3 key strategies ---
 dat_km <- dat %>%
   mutate(
     time_tp_90  = pmin(time_tp, 90),
@@ -433,19 +329,9 @@ legend("bottomleft", c("Non-SOF", "SOF"), col = c("steelblue", "tomato"),
        lwd = 2, bty = "n", cex = 0.9)
 ```
 
-::: {.callout-caution}
-## Notice the Differences Already
+Even with unadjusted KM curves, the three strategies produce visibly different separation between the SOF and non-SOF curves. Treatment-policy shows a moderate gap (diluted because some SOF patients switched away). Composite shows the largest gap (switching itself counts as an event, inflating SOF's "risk"). While-on-treatment shows the smallest gap (the highest-risk SOF patients were censored at switch, making SOF look artificially safer).
 
-Even with unadjusted KM curves, the three strategies produce visibly different separation between the SOF and non-SOF curves:
-
-- **Treatment-policy** shows a moderate gap (diluted because some SOF patients switched away)
-- **Composite** shows the largest gap (switching itself counts as an event, inflating SOF's "risk")
-- **While-on-treatment** shows the *smallest* gap (the highest-risk SOF patients were censored at switch, making SOF look artificially safer)
-
-These are not subtle differences --- and they get even more dramatic after confounding adjustment.
-:::
-
-## 4.3 IPTW and IPCW Weights
+## IPTW and IPCW Weights
 
 ```{r}
 # --- Propensity score for treatment ---
@@ -470,7 +356,6 @@ print(summary(dat$iptw_trunc))
 
 ```{r}
 # --- IPCW: model probability of NOT switching by day 90 ---
-# Among patients who survived and were event-free long enough to be at risk
 at_risk_for_switch <- dat$time_wot >= 15  # must survive to day 15
 
 ipcw_mod <- glm(
@@ -496,13 +381,12 @@ cat("\nCombined weight summary:\n")
 print(summary(dat$combined_w))
 ```
 
-## 4.4 TMLE Using the `tmle` Package
+## TMLE Using the `tmle` Package
 
 We use the `tmle` package to estimate the average treatment effect (risk difference) for each estimand strategy. The package handles the outcome model, propensity score, targeting step, and EIC-based inference automatically.
 
 ```{r}
 #| eval: false
-# --- Install tmle if needed ---
 # install.packages("tmle")
 # install.packages("SuperLearner")
 ```
@@ -584,34 +468,13 @@ if (!is.null(tmle_results) && nrow(tmle_results) > 0) {
 }
 ```
 
-::: {.callout-note}
-## Why Use the `tmle` Package?
+The `tmle` package (Gruber & van der Laan) automates the full TMLE pipeline: initial outcome model via Super Learner, propensity score via Super Learner, targeting step with logistic fluctuation, and plug-in estimate with EIC-based standard errors. For production time-to-event analyses (rather than the discretized 90-day binary used here), consider the `concrete` or `lmtp` packages.
 
-The `tmle` package (Gruber & van der Laan) automates the full TMLE pipeline:
+# Results
 
-1. **Initial outcome model** ($\hat{Q}$) via Super Learner
-2. **Propensity score** ($\hat{g}$) via Super Learner
-3. **Targeting step** (logistic fluctuation with clever covariate)
-4. **Plug-in estimate** with EIC-based standard errors and confidence intervals
-
-This is preferable to hand-coded TMLE because:
-
-- Super Learner automatically selects the best combination of algorithms
-- Standard errors and CIs are computed correctly from the influence curve
-- The implementation is validated and peer-reviewed
-- It handles positivity truncation internally
-
-For production analyses with time-to-event outcomes (rather than the discretized 90-day binary we use here), consider the `concrete` or `lmtp` packages.
-:::
-
----
-
-# 5. Results
-
-## 5.1 IPTW Risk Estimates by Strategy
+## IPTW Risk Estimates
 
 ```{r}
-# --- IPTW-weighted 90-day risks ---
 compute_risk_90 <- function(data, y_col, weight_col, label) {
   data %>%
     group_by(treatment) %>%
@@ -650,10 +513,9 @@ iptw_results %>%
   print()
 ```
 
-## 5.2 Combined Comparison Table
+## Combined Comparison Table
 
 ```{r}
-# --- KM unadjusted risks at 90 days ---
 get_km_risk <- function(km_fit, label) {
   s <- summary(km_fit, times = 90)
   tibble(
@@ -672,7 +534,6 @@ km_results <- bind_rows(
   get_km_risk(km_wot, "While-on-treatment")
 )
 
-# --- Combine all results ---
 all_results <- bind_rows(
   km_results,
   iptw_results,
@@ -691,7 +552,7 @@ all_results %>%
   )
 ```
 
-## 5.3 Forest Plot: Risk Differences Across All Strategies
+## Forest Plot
 
 ```{r}
 #| fig-cap: "Risk difference estimates by estimand strategy and estimation method"
@@ -728,14 +589,13 @@ ggplot(plot_data, aes(x = risk_diff, y = estimand, color = method, shape = metho
   theme(legend.position = "bottom")
 ```
 
-## 5.4 Bias Comparison (Using Known Truth)
+## Bias Comparison (Known Truth)
 
-Since we simulated the data, we know the **true** treatment-policy risk difference from the data-generating mechanism. We can compute it via Monte Carlo.
+Since we simulated the data, we know the true treatment-policy risk difference from the data-generating mechanism.
 
 ```{r}
 # --- True causal risks under the DGP ---
-# Compute what the 90-day risk would be for each person under A=1 and A=0
-set.seed(2026)  # same seed for counterfactual draws
+set.seed(2026)
 
 # Under A=1
 rate_cf1 <- base_rate * exp(covariate_lp + log(3.0) * 1)
@@ -779,75 +639,49 @@ ggplot(bias_data, aes(x = reorder(estimand_method, bias), y = bias,
   theme(legend.position = "bottom")
 ```
 
----
+# Interpretation
 
-# 6. Interpretation
+Each estimand tells a different story:
 
-::: {.callout-note}
-## What Each Estimand Tells You
-
-**Treatment-policy:** "Patients assigned to SOF had X% higher 90-day AKI risk than those assigned to non-SOF, *regardless of subsequent treatment changes*." This is the most policy-relevant estimand when switching reflects real-world practice. It answers: should we recommend initial SOF treatment?
-
-**Composite:** "SOF patients had X% higher 90-day risk of AKI, death, or treatment failure (switching)." This captures the full burden of starting SOF, including the clinical decision to switch away. The risk difference is the *largest* because switching itself counts as an event and is far more common in the SOF arm.
-
-**Hypothetical:** "If no patients had switched, SOF would have been associated with X% higher 90-day AKI risk." This targets the pure drug effect under idealized adherence. It typically shows a *larger* risk difference than treatment-policy because it does not benefit from the dilution caused by switching.
-
-**While-on-treatment:** "While patients remained on SOF, the 90-day AKI risk difference was X%." This appears *smallest* because the highest-risk patients (CKD, early symptoms) were censored when they switched. This is classic informative censoring bias making the drug look artificially safer.
-
-**Principal stratum:** "Among patients who would never switch regardless of treatment assignment, the risk difference was X%." This applies to a compliant subpopulation that may not be representative of all patients.
-:::
+- **Treatment-policy:** "Patients assigned to SOF had higher 90-day AKI risk regardless of subsequent treatment changes." This is the most policy-relevant estimand when switching reflects real-world practice.
+- **Composite:** "SOF patients had higher 90-day risk of AKI, death, or treatment failure." The risk difference is largest because switching itself counts as an event and is far more common in the SOF arm.
+- **Hypothetical:** "If no patients had switched, SOF would have been associated with higher 90-day AKI risk." This targets the pure drug effect and typically shows a larger risk difference than treatment-policy because it does not benefit from dilution.
+- **While-on-treatment:** "While patients remained on SOF, the AKI risk difference was smallest." This is classic informative censoring bias — the highest-risk patients (CKD, early symptoms) were censored when they switched, making SOF look artificially safer.
+- **Principal stratum:** "Among always-adherers, the risk difference was intermediate." This applies to a compliant subpopulation that may not be representative.
 
 ::: {.callout-warning}
-## How Informative Switching Creates Divergent Estimates
+## Informative switching creates divergent estimates
 
-The key finding of this simulation:
-
-1. **While-on-treatment underestimates risk** because censoring at switch removes the sickest SOF patients (CKD, early renal symptoms). This is dangerous in a safety context --- it can hide a true safety signal.
-
-2. **Composite overestimates risk** because switching itself (a clinical decision, not an adverse event) is counted as an event. A large composite risk difference could be driven entirely by switching patterns, not by AKI.
-
-3. **Treatment-policy and hypothetical bracket the truth** from different directions. Treatment-policy includes the diluting effect of switching (patients who switch away from SOF avoid some late AKI risk). Hypothetical shows what would happen without that escape valve.
-
-4. **The spread between strategies grows with switching rate and informativeness.** In our simulation with ~15-20% informative switching, the risk difference can vary by a factor of 2x or more across strategies.
+While-on-treatment **underestimates** risk because censoring at switch removes the sickest SOF patients. Composite **overestimates** risk because switching (a clinical decision) is counted as an event. Treatment-policy and hypothetical bracket the truth from different directions. The spread between strategies grows with switching rate and informativeness — in this simulation with ~15–20% informative switching, risk differences vary by a factor of 2x or more.
 :::
 
-::: {.callout-tip}
-## Matching Estimand to Decision Context
+**Matching estimand to decision context:**
 
 | Decision maker | Preferred estimand | Rationale |
 |----------------|-------------------|-----------|
-| **Formulary committee** | Treatment-policy | Compares real-world outcomes of starting one drug vs. another |
-| **Safety reviewer (broad)** | Composite | Captures full burden including treatment failure |
-| **Drug developer (labeling)** | Hypothetical | Isolates pharmacological effect for drug-specific labeling |
-| **Prescriber** | While-on-treatment | Risk while patient is actually taking the drug (if switching is non-informative) |
-| **Regulator (subgroup)** | Principal stratum | Effect in the compliant subpopulation |
+| Formulary committee | Treatment-policy | Real-world outcomes of starting one drug vs. another |
+| Safety reviewer (broad) | Composite | Full burden including treatment failure |
+| Drug developer (labeling) | Hypothetical | Pharmacological effect for drug-specific labeling |
+| Prescriber | While-on-treatment | Risk while on drug (if switching is non-informative) |
+| Regulator (subgroup) | Principal stratum | Effect in the compliant subpopulation |
 
-There is no single "correct" estimand. The choice must be pre-specified in the statistical analysis plan and aligned with the scientific question. **Reporting multiple estimands side by side** (as we do here) is best practice for transparency.
-:::
+There is no single "correct" estimand. The choice must be pre-specified in the statistical analysis plan and aligned with the scientific question. Reporting multiple estimands side by side is best practice for transparency.
 
----
+# Key Messages
 
-# 7. Conclusion
+1. **Estimand choice defines the scientific question.** The same dataset yields five different answers. In this simulation, the risk difference ranged from near-zero (while-on-treatment, biased by informative censoring) to strongly positive (composite, inflated by switching events).
 
-::: {.callout-important}
-## Key Messages
+2. **Intercurrent events are the bridge between biology and statistics.** Treatment switching, death, loss to follow-up — each must be explicitly handled, and the handling strategy defines the estimand.
 
-1. **Estimand choice is not a statistical detail --- it defines the scientific question.** The same dataset, analyzed five different ways, yields five different answers. In our simulation, the risk difference ranged from near-zero (while-on-treatment, biased by informative censoring) to strongly positive (composite, inflated by switching events).
+3. **Informative switching is the critical threat.** When factors driving switching also drive the outcome (CKD in our simulation), the while-on-treatment estimand becomes dangerously biased.
 
-2. **Intercurrent events are the bridge between biology and statistics.** Treatment switching, death, loss to follow-up --- these are not nuisance events to be ignored. Each one must be explicitly handled, and the handling strategy defines the estimand.
+4. **The Causal Roadmap provides the structure:** question, estimand, identification, data, estimator. Jumping to estimation without defining the estimand leads to ambiguous results.
 
-3. **Informative switching is the critical threat.** When the factors driving switching also drive the outcome (as with CKD in our simulation), the while-on-treatment estimand becomes dangerously biased. This is not a theoretical concern --- it is common in pharmacoepidemiology.
+5. **Simulation reveals estimand sensitivity.** By simulating data with known truth, we verified that our estimators target what we think they target.
 
-4. **The Causal Roadmap provides the structure.** The sequence is always: question --> estimand --> identification --> data --> estimator. Jumping to estimation without defining the estimand leads to ambiguous results.
+6. **The `tmle` package provides a principled estimation framework** with valid inference. For production time-to-event analyses, consider `concrete` or `lmtp`.
 
-5. **Simulation reveals estimand sensitivity.** By simulating data with known truth, we verified that our estimators target what we think they target. This is essential for pre-specifying analyses in regulatory settings.
-
-6. **The `tmle` package provides a principled estimation framework** that handles outcome modeling, propensity scores, and targeting automatically with valid inference. For production time-to-event analyses, consider `concrete` or `lmtp`.
-
-7. **Report multiple estimands.** When stakeholders disagree about the right question, the transparent approach is to report all relevant estimands and let the divergence inform the discussion.
-:::
-
----
+7. **Report multiple estimands** when stakeholders disagree. Let the divergence inform the discussion.
 
 ## Sources and further reading
 
@@ -861,8 +695,6 @@ There is no single "correct" estimand. The choice must be pre-specified in the s
 - Diaz I, Williams N, van der Laan MJ (2023). lmtp: An R package for estimating the causal effects of modified treatment policies. [CRAN](https://cran.r-project.org/package=lmtp)
 - `survival` R package: [CRAN](https://cran.r-project.org/package=survival)
 - `tmle` R package: [CRAN](https://cran.r-project.org/package=tmle)
-
----
 
 ```{r}
 sessionInfo()
