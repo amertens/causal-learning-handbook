@@ -272,4 +272,42 @@ In this chapter you learned:
 Next: **IPTW**, another way to estimate causal effects by reweighting the data instead of modeling the outcome.
 :::
 
+---
 
+## Software Implementation (R)
+
+This example implements **g-computation** (parametric standardization) by hand, then shows how the `tmle` package automates and improves on this approach with targeting.
+
+- Simulate a confounded point-treatment dataset
+- Fit an outcome model $\hat{Q}(A,W) = E[Y \mid A, W]$
+- Predict under $A=1$ and $A=0$ for everyone, then average (g-computation)
+- Compare with the TMLE estimate, which adds a targeting step for bias correction
+
+```{r}
+#| eval: false
+set.seed(1)
+n <- 500
+W <- rnorm(n)
+A <- rbinom(n, 1, plogis(0.5 * W))
+Y <- rbinom(n, 1, plogis(-1 + 0.8 * A + 1.0 * W))  # true RD ≈ 0.16
+
+## ── Manual g-computation ──
+Q_mod <- glm(Y ~ A + W, family = binomial, data = data.frame(Y, A, W))
+
+Q1 <- predict(Q_mod, newdata = data.frame(A = 1, W = W), type = "response")
+Q0 <- predict(Q_mod, newdata = data.frame(A = 0, W = W), type = "response")
+gcomp_ate <- mean(Q1) - mean(Q0)
+cat("G-computation ATE:", round(gcomp_ate, 3), "\n")
+
+## ── TMLE (adds targeting to g-computation) ──
+if (requireNamespace("tmle", quietly = TRUE)) {
+  library(tmle)
+  fit <- tmle(Y = Y, A = A, W = data.frame(W = W),
+              family = "binomial",
+              Q.SL.library = "SL.glm", g.SL.library = "SL.glm")
+  cat("TMLE ATE:", round(fit$estimates$ATE$psi, 3), "\n")
+  cat("95% CI: ", round(fit$estimates$ATE$CI, 3), "\n")
+} else {
+  message("Install the 'tmle' package:  install.packages('tmle')")
+}
+```

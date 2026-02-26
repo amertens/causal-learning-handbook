@@ -1179,3 +1179,82 @@ ggplot(forest_df, aes(x = ate, y = site)) +
 ```{r}
 sessionInfo()
 ```
+
+---
+
+## Software Implementation (R)
+
+This **clean-room analysis script** demonstrates a fully prespecified TMLE workflow: every modeling choice is locked before running, a fixed seed and library are declared, and the analysis is self-documenting. This is the discipline advocated in this chapter.
+
+- All choices documented before execution: estimand, learner library, positivity bounds
+- Uses a fixed Super Learner library (no data-peeking)
+- Captures `sessionInfo()` for full reproducibility
+- Single `tmle()` call with prespecified parameters
+
+```{r}
+#| eval: false
+## ═══════════════════════════════════════════════════════
+## CLEAN-ROOM TMLE ANALYSIS SCRIPT
+## Prespecified analysis — no data-adaptive choices below
+## ═══════════════════════════════════════════════════════
+
+## ── 0. Lock random seed and declare estimand ──
+set.seed(1)
+ESTIMAND   <- "ATE (risk difference)"
+POPULATION <- "Adults with simulated cardiovascular risk factors"
+TREATMENT  <- "Drug A vs Drug B"
+
+## ── 1. Prespecified learner libraries ──
+Q_LIBRARY  <- c("SL.glm")   # outcome model
+G_LIBRARY  <- c("SL.glm")   # treatment model
+G_BOUNDS   <- c(0.025, 0.975)  # positivity truncation
+
+## ── 2. Simulate data (replace with real data read) ──
+n <- 600
+W1 <- rnorm(n)
+W2 <- rbinom(n, 1, 0.35)
+W3 <- rnorm(n, mean = 0.3 * W1)
+A  <- rbinom(n, 1, plogis(-0.2 + 0.5 * W1 + 0.4 * W2))
+Y  <- rbinom(n, 1, plogis(-1.5 + 0.5 * A + 0.6 * W1 + 0.7 * W2 + 0.2 * W3))
+
+W <- data.frame(W1 = W1, W2 = W2, W3 = W3)
+
+## ── 3. Run prespecified analysis ──
+if (requireNamespace("tmle", quietly = TRUE)) {
+  library(tmle)
+
+  fit <- tmle(
+    Y = Y, A = A, W = W,
+    family = "binomial",
+    Q.SL.library = Q_LIBRARY,
+    g.SL.library = G_LIBRARY,
+    gbound = G_BOUNDS[1]
+  )
+
+  ## ── 4. Report results ──
+  cat("══════════════════════════════════════\n")
+  cat("CLEAN-ROOM TMLE RESULTS\n")
+  cat("══════════════════════════════════════\n")
+  cat("Estimand:", ESTIMAND, "\n")
+  cat("Population:", POPULATION, "\n")
+  cat("Treatment:", TREATMENT, "\n")
+  cat("──────────────────────────────────────\n")
+  cat("ATE:    ", round(fit$estimates$ATE$psi, 4), "\n")
+  cat("95% CI:", round(fit$estimates$ATE$CI, 4), "\n")
+  cat("p-value:", format.pval(fit$estimates$ATE$pvalue, digits = 3), "\n")
+  cat("──────────────────────────────────────\n")
+  cat("Q library:", paste(Q_LIBRARY, collapse = ", "), "\n")
+  cat("g library:", paste(G_LIBRARY, collapse = ", "), "\n")
+  cat("g-bounds: [", G_BOUNDS[1], ",", G_BOUNDS[2], "]\n")
+  cat("══════════════════════════════════════\n")
+
+  ## EIC diagnostic
+  cat("EIC mean:", round(mean(fit$estimates$ATE$IC), 6), "\n")
+} else {
+  message("Install the 'tmle' package:  install.packages('tmle')")
+}
+
+## ── 5. Session info for reproducibility ──
+cat("\n── Session info ──\n")
+sessionInfo()
+```

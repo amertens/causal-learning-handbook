@@ -243,3 +243,54 @@ In this chapter, we connected the causal estimand to observable data using the i
 
 Next, we turn to **estimation strategies** -- how to choose and implement methods like IPTW, TMLE, or outcome regression to actually estimate the identified effect.
 :::
+
+---
+
+## Software Implementation (R)
+
+This example estimates the effect of a **modified treatment policy** (a stochastic intervention that shifts treatment probability) using the `lmtp` package. This connects directly to the identification results in this chapter: rather than asking "what if everyone were treated?", we ask "what if each person's probability of treatment increased?"
+
+- Simulate panel data with a single time point
+- Use `lmtp_tmle()` to estimate the effect of shifting the treatment mechanism
+- Falls back to `tmle` for a standard ATE if `lmtp` is unavailable
+
+```{r}
+#| eval: false
+set.seed(1)
+n <- 500
+W1 <- rnorm(n)
+W2 <- rbinom(n, 1, 0.5)
+A  <- rbinom(n, 1, plogis(-0.3 + 0.5 * W1))
+Y  <- as.numeric(rbinom(n, 1, plogis(-1 + 0.8 * A + 0.6 * W1 + 0.3 * W2)))
+
+if (requireNamespace("lmtp", quietly = TRUE)) {
+  library(lmtp)
+
+  dat <- data.frame(W1 = W1, W2 = W2, A = A, Y = Y)
+
+  ## Modified treatment policy: shift everyone to A = 1
+  result <- lmtp_tmle(
+    data = dat,
+    trt = "A",
+    outcome = "Y",
+    baseline = c("W1", "W2"),
+    shift = function(data, trt) rep(1, nrow(data)),
+    outcome_type = "binomial",
+    learners_outcome = "SL.glm",
+    learners_trt = "SL.glm",
+    folds = 5
+  )
+  print(result)
+} else if (requireNamespace("tmle", quietly = TRUE)) {
+  message("lmtp not available; falling back to tmle for a standard ATE.")
+  library(tmle)
+  fit <- tmle(Y = Y, A = A, W = data.frame(W1, W2),
+              Q.SL.library = "SL.glm", g.SL.library = "SL.glm")
+  cat("ATE:", round(fit$estimates$ATE$psi, 3), "\n")
+  cat("95% CI:", round(fit$estimates$ATE$CI, 3), "\n")
+} else {
+  message("Install 'lmtp' or 'tmle':
+    install.packages('lmtp')
+    install.packages('tmle')")
+}
+```

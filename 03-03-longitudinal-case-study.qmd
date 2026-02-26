@@ -364,3 +364,53 @@ In this chapter, you learned how to:
 ```{r}
 sessionInfo()
 ```
+
+---
+
+## Software Implementation (R)
+
+This example uses the `ltmle` package to estimate the effect of a **time-varying treatment** on a binary outcome, mirroring the longitudinal case study structure (denosumab vs. zoledronic acid).
+
+- Simulate 2-time-point data: baseline $W$, time-varying confounder $L_1$, treatment at two times $A_0, A_1$, and outcome $Y$
+- $L_1$ is affected by $A_0$ (treatment-confounder feedback)
+- Use `ltmle()` to estimate the ATE of "always treat" vs. "never treat"
+- Falls back to a manual sequential regression if `ltmle` is unavailable
+
+```{r}
+#| eval: false
+set.seed(1)
+n <- 500
+W     <- rnorm(n)
+A_0   <- rbinom(n, 1, plogis(0.3 * W))
+L_1   <- rnorm(n, mean = 0.5 * A_0 + 0.3 * W)  # affected by A_0
+A_1   <- rbinom(n, 1, plogis(0.2 * L_1 + 0.3 * W))
+Y     <- rbinom(n, 1, plogis(-1.5 + 0.5 * A_0 + 0.5 * A_1 + 0.4 * L_1 + 0.3 * W))
+
+dat <- data.frame(W = W, A_0 = A_0, L_1 = L_1, A_1 = A_1, Y = Y)
+
+if (requireNamespace("ltmle", quietly = TRUE)) {
+  library(ltmle)
+
+  result <- ltmle(
+    data = dat,
+    Anodes  = c("A_0", "A_1"),
+    Lnodes  = "L_1",
+    Ynodes  = "Y",
+    abar = list(treatment = c(1, 1), control = c(0, 0)),
+    SL.library = "glm"
+  )
+  cat("LTMLE estimate (always treat vs never treat):\n")
+  print(summary(result))
+} else {
+  message("Install the 'ltmle' package:  install.packages('ltmle')")
+  message("Falling back to manual sequential regression...\n")
+
+  ## Manual sequential g-computation (no targeting)
+  Q_mod <- glm(Y ~ A_0 + A_1 + L_1 + W, family = binomial, data = dat)
+  dat1 <- dat; dat1$A_0 <- 1; dat1$A_1 <- 1
+  dat0 <- dat; dat0$A_0 <- 0; dat0$A_1 <- 0
+  gcomp <- mean(predict(Q_mod, dat1, type = "response")) -
+           mean(predict(Q_mod, dat0, type = "response"))
+  cat("G-computation ATE (no targeting):", round(gcomp, 3), "\n")
+}
+```

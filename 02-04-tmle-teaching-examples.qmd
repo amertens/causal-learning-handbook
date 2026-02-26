@@ -1102,3 +1102,48 @@ Each extension follows the same causal roadmap: define the question, specify the
 ```{r}
 sessionInfo()
 ```
+
+---
+
+## Software Implementation (R)
+
+This example brings together the progressive estimation sequence from this chapter (naive → g-computation → IPTW → TMLE) using the `tmle` package with Super Learner.
+
+- Simulate a pharmacoepi-style dataset with multiple confounders
+- Run the `tmle()` function with a diverse Super Learner library
+- Extract and interpret: ATE, risk difference, confidence interval, and influence curve diagnostics
+
+```{r}
+#| eval: false
+set.seed(1)
+n <- 800
+W1 <- rnorm(n)                                      # age (standardized)
+W2 <- rbinom(n, 1, 0.3)                             # diabetes indicator
+W3 <- rnorm(n, mean = 0.5 * W1)                     # BMI (standardized)
+A  <- rbinom(n, 1, plogis(-0.3 + 0.4 * W1 + 0.5 * W2 - 0.2 * W3))
+Y  <- rbinom(n, 1, plogis(-2 + 0.6 * A + 0.5 * W1 + 0.8 * W2 + 0.3 * W3))
+
+if (requireNamespace("tmle", quietly = TRUE)) {
+  library(tmle)
+  W <- data.frame(W1 = W1, W2 = W2, W3 = W3)
+
+  tmle_fit <- tmle(
+    Y = Y, A = A, W = W,
+    family = "binomial",
+    Q.SL.library = c("SL.glm", "SL.step", "SL.mean"),
+    g.SL.library  = c("SL.glm", "SL.step", "SL.mean")
+  )
+
+  cat("── TMLE results ─────────────────────\n")
+  cat("ATE (risk difference):", round(tmle_fit$estimates$ATE$psi, 4), "\n")
+  cat("95% CI:", round(tmle_fit$estimates$ATE$CI, 4), "\n")
+  cat("p-value:", format.pval(tmle_fit$estimates$ATE$pvalue, digits = 3), "\n")
+
+  ## Influence curve diagnostic (mean should be ≈ 0)
+  ic <- tmle_fit$estimates$ATE$IC
+  cat("\nInfluence curve mean:", round(mean(ic), 6),
+      " (should be ≈ 0)\n")
+} else {
+  message("Install the 'tmle' package:  install.packages('tmle')")
+}
+```

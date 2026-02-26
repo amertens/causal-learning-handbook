@@ -356,3 +356,78 @@ With these tools, analysts can judge the **credibility**, **robustness**, and **
 ```{r}
 sessionInfo()
 ```
+
+---
+
+## Software Implementation (R)
+
+This example demonstrates key **diagnostic checks** for a TMLE analysis: positivity assessment, clever covariate summaries, weight truncation sensitivity, and E-value computation.
+
+- Simulate a dataset with a near-positivity violation in one confounder stratum
+- Run TMLE, then inspect propensity score overlap and clever covariate distribution
+- Show truncation sensitivity: compare ATE estimates across different truncation levels
+- Compute an E-value for robustness to unmeasured confounding
+
+```{r}
+#| eval: false
+set.seed(1)
+n <- 800
+W1 <- rnorm(n)
+W2 <- rbinom(n, 1, 0.3)
+## Near-positivity violation: W2 = 1 strongly predicts A = 1
+A  <- rbinom(n, 1, plogis(-0.5 + 0.4 * W1 + 2.5 * W2))
+Y  <- 0.5 * A + 0.8 * W1 - 0.3 * W2 + rnorm(n, sd = 0.5)
+
+W  <- data.frame(W1 = W1, W2 = W2)
+
+## ── 1. Propensity score overlap ──
+ps_mod <- glm(A ~ W1 + W2, family = binomial)
+ps <- predict(ps_mod, type = "response")
+cat("Propensity score summary:\n")
+print(summary(ps))
+cat("\nMin ps:", round(min(ps), 4),
+    "  Max ps:", round(max(ps), 4), "\n")
+
+## ── 2. TMLE with diagnostics ──
+if (requireNamespace("tmle", quietly = TRUE)) {
+  library(tmle)
+  fit <- tmle(Y = Y, A = A, W = W,
+              Q.SL.library = "SL.glm", g.SL.library = "SL.glm")
+
+  ## Clever covariate summary
+  H1 <- A / ps
+  H0 <- (1 - A) / (1 - ps)
+  cat("\nClever covariate (treated) — max:", round(max(H1), 1),
+      " 99th pctile:", round(quantile(H1, 0.99), 1), "\n")
+
+  ## Influence curve check
+  cat("EIC mean:", round(mean(fit$estimates$ATE$IC), 6),
+      " (should ≈ 0)\n")
+
+  ## ── 3. Truncation sensitivity ──
+  cat("\n── Truncation sensitivity ──\n")
+  for (g_bound in c(0.01, 0.025, 0.05, 0.10)) {
+    fit_trunc <- tmle(Y = Y, A = A, W = W,
+                      Q.SL.library = "SL.glm",
+                      g.SL.library = "SL.glm",
+                      gbound = g_bound)
+    cat(sprintf("  g-bound = %.3f → ATE = %.3f  (SE = %.3f)\n",
+                g_bound,
+                fit_trunc$estimates$ATE$psi,
+                sqrt(fit_trunc$estimates$ATE$var.psi)))
+  }
+} else {
+  message("Install the 'tmle' package:  install.packages('tmle')")
+}
+
+## ── 4. E-value (no package needed) ──
+## For a risk ratio of 1.5, the E-value formula is:
+##   E = RR + sqrt(RR * (RR - 1))
+RR <- 1.5
+E_val <- RR + sqrt(RR * (RR - 1))
+cat("\n── E-value ──\n")
+cat("Point estimate RR:", RR, "\n")
+cat("E-value:", round(E_val, 2),
+    "\n(An unmeasured confounder would need RR ≥",
+    round(E_val, 2), "with both A and Y to explain away the effect)\n")
+```
