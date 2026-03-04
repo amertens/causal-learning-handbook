@@ -465,121 +465,993 @@ In longitudinal settings, alignment diagnostics require verifying the temporal o
 
 ---
 
-## 3. Nuisance Model Diagnostics {#sec-nuisance-outline}
+## 3. Nuisance Model Diagnostics {#sec-nuisance}
 
-*[The following sections are outlined for subsequent expansion into full prose.]*
+The nuisance functions---the outcome regression $\bar{Q}(A, W) = E[Y \mid A, W]$ and the treatment mechanism $g(A \mid W) = P(A \mid W)$---are the workhorses of semiparametric causal inference. They are called "nuisance" functions not because they are unimportant but because they are not the parameters of primary scientific interest; rather, they are intermediate quantities that must be estimated on the way to estimating the causal parameter. Their quality directly determines the finite-sample performance of TMLE, AIPW, and IPTW estimators. Poor nuisance estimation can produce biased causal estimates, inflated variance, invalid confidence intervals, and misleading conclusions, even when the identification assumptions hold perfectly.
 
-The nuisance functions---the outcome regression $\bar{Q}(A, W) = E[Y \mid A, W]$ and the treatment mechanism $g(A \mid W) = P(A \mid W)$---are the workhorses of semiparametric causal inference. Their quality directly determines the finite-sample performance of TMLE, AIPW, and IPTW estimators. This section will provide comprehensive diagnostics for both functions.
+The relationship between nuisance function quality and causal estimator performance depends on the specific estimator. For IPTW, only the treatment mechanism $g$ matters: if $g$ is consistently estimated, IPTW is consistent for the causal parameter regardless of how the outcome regression is specified (or whether it is specified at all). For parametric g-computation, only the outcome regression $\bar{Q}$ matters. For doubly robust estimators---TMLE and AIPW---consistency requires that at least one of $g$ or $\bar{Q}$ be consistently estimated, and efficiency is achieved when both are estimated at sufficiently fast rates. This double robustness property does not, however, eliminate the need for nuisance function diagnostics. In finite samples, the quality of both nuisance functions affects the bias, variance, and coverage of doubly robust estimators, and diagnostics provide the evidence needed to assess whether the asymptotic theory is a reliable guide to finite-sample performance.
+
+When machine learning methods are used for nuisance estimation---as is increasingly standard---valid inference typically requires either cross-fitting (sample splitting where different folds are used to estimate nuisance functions and to construct the final estimator) or a cross-validated TMLE variant. Without cross-fitting, the overfitting behavior of flexible learners can invalidate the asymptotic linearity of the causal estimator, producing confidence intervals with incorrect coverage even when the nuisance functions are estimated consistently. The diagnostics described in this section address both the quality of the nuisance function estimates and the conditions under which the cross-fitting or cross-validation procedure is functioning as intended.
 
 ### 3.1 Super Learner Diagnostics
 
-This subsection will cover:
+The Super Learner is an ensemble machine learning method that combines predictions from a library of candidate algorithms using cross-validation to select the optimal convex combination. It is the recommended approach for nuisance function estimation in the targeted learning framework because it provides an asymptotic optimality guarantee: the cross-validated risk of the Super Learner converges to the oracle risk (the risk of the best possible convex combination of the candidate learners) as the sample size grows. However, this asymptotic guarantee does not eliminate the need for diagnostics in finite samples. The Super Learner's performance depends critically on the composition of the candidate library, the cross-validation scheme, and the properties of the data.
 
-- **Cross-validated risk comparisons**: Examining the cross-validated loss (negative log-likelihood for binary outcomes, mean squared error for continuous outcomes) for each candidate learner in the Super Learner library, and for the ensemble. The discrete Super Learner (best single learner) versus the continuous Super Learner (convex combination) should be compared. Substantially better performance by the ensemble indicates that the library captures complementary patterns.
+#### 3.1.1 Cross-Validated Risk Comparisons
 
-- **Learner weight distributions**: Reporting the Super Learner coefficients (metalearner weights) for each candidate algorithm. A library in which a single learner receives all or nearly all the weight may indicate an insufficiently diverse library or a problem that is well-captured by a simple model. Conversely, a library where weights are spread across many learners suggests genuine model uncertainty.
+The most fundamental Super Learner diagnostic is the comparison of cross-validated risk across candidate learners and the ensemble. For each candidate algorithm $k$ in the library, the cross-validated risk $\hat{R}_{CV}^{(k)}$ is the average loss computed on held-out validation folds. For continuous outcomes, the loss is typically mean squared error; for binary outcomes, it is the negative log-likelihood (cross-entropy). The Super Learner ensemble risk $\hat{R}_{CV}^{SL}$ should be reported alongside the individual learner risks.
 
-- **Learner dominance and library sensitivity**: Assessing whether the causal estimate changes when the Super Learner library is varied---for example, when tree-based learners are removed, or when highly adaptive lasso is added. If the estimate is sensitive to library composition, this indicates that the nuisance function estimate is uncertain in ways that affect the causal conclusion.
+```r
+## Super Learner diagnostics for the outcome regression
+library(SuperLearner)
 
-- **Overfitting detection**: Comparing training loss to cross-validated loss. A large gap signals overfitting, particularly for flexible learners. The analyst should also examine whether the Super Learner performance degrades when the number of cross-validation folds is increased, which can indicate instability.
+## Define a diverse library
+SL.library <- c("SL.glm", "SL.glmnet", "SL.ranger",
+                 "SL.xgboost", "SL.earth", "SL.nnet")
 
-- **Screening procedures and fold choice**: Discussing the impact of variable screening within the Super Learner on bias and variance, and providing guidance on the number of cross-validation folds (typically 10, but fewer may be needed for computational reasons or more for small samples).
+## Fit Super Learner for Q(A,W) = E[Y | A, W]
+sl_Q <- SuperLearner(
+  Y = dat$Y,
+  X = dat[, c("A", "W1", "W2", "W3")],
+  SL.library = SL.library,
+  family = gaussian(),
+  cvControl = list(V = 10)
+)
+
+## Cross-validated risk for each learner
+cat("== Cross-Validated Risk (MSE) ==\n")
+cv_risks <- data.frame(
+  Learner = c(SL.library, "SuperLearner"),
+  CV_Risk = c(sl_Q$cvRisk, min(sl_Q$cvRisk)),
+  Coefficient = c(sl_Q$coef, NA)
+)
+cv_risks <- cv_risks[order(cv_risks$CV_Risk), ]
+print(cv_risks, row.names = FALSE, digits = 4)
+
+## Ratio of ensemble risk to best single learner risk
+discrete_SL_risk <- min(sl_Q$cvRisk)
+cat("\nDiscrete SL risk:", round(discrete_SL_risk, 4), "\n")
+cat("Ensemble improvement:",
+    round((1 - sl_Q$cvRisk[which.min(sl_Q$cvRisk)] / discrete_SL_risk) * 100, 1),
+    "%\n")
+```
+
+Several patterns in the cross-validated risk comparison are diagnostically informative. When the ensemble risk is substantially lower than that of any individual learner, this indicates that the library captures complementary aspects of the data-generating process---different learners are performing well in different regions of the covariate space, and the ensemble benefits from combining them. When a single learner dominates (receiving nearly all the weight in the convex combination), the ensemble reduces to approximately the discrete Super Learner, which may indicate either that the dominant learner is clearly superior or that the library lacks sufficient diversity. When all learners have similar cross-validated risk, the outcome surface may be relatively simple and well-captured by any reasonable model, or the sample size may be too small to discriminate among learners.
+
+The analyst should also compare the continuous Super Learner (the convex combination with optimized weights) to the discrete Super Learner (the single best learner selected by cross-validation). When the continuous Super Learner offers a meaningful improvement over the discrete Super Learner, this provides evidence that the ensemble is achieving genuine gains from combining predictions. When the two are essentially equivalent, the analyst may choose to report results using the simpler discrete Super Learner for transparency.
+
+#### 3.1.2 Learner Weight Distributions
+
+The Super Learner coefficients---the weights assigned to each candidate algorithm in the convex combination---provide a window into which modeling strategies are contributing to the ensemble. Reporting these coefficients is a minimum diagnostic requirement for any analysis that uses the Super Learner for nuisance estimation.
+
+```r
+## Learner weight diagnostics
+cat("== Super Learner Coefficients (Q model) ==\n")
+coef_df <- data.frame(
+  Learner = SL.library,
+  Weight = round(sl_Q$coef, 4)
+)
+coef_df <- coef_df[order(-coef_df$Weight), ]
+print(coef_df, row.names = FALSE)
+
+## Effective number of learners (analogous to effective sample size)
+weights <- sl_Q$coef
+eff_n_learners <- sum(weights)^2 / sum(weights^2)
+cat("\nEffective number of learners:", round(eff_n_learners, 1),
+    "out of", length(SL.library), "\n")
+```
+
+An effective number of learners close to 1 indicates that the ensemble is dominated by a single algorithm. This is not necessarily problematic---it may simply mean that one learner is clearly best for this problem---but it warrants attention. If the dominant learner is a highly flexible algorithm (such as a deep neural network or a heavily tuned gradient boosting model), the analyst should verify that the cross-validated risk is not overly optimistic due to information leakage or insufficient regularization. If the dominant learner is a simple algorithm (such as a main-terms logistic regression), this may indicate that the outcome surface is genuinely simple, or that the sample size is too small for more flexible learners to outperform simpler ones.
+
+The coefficient distribution should be examined separately for the outcome regression $\bar{Q}$ and the treatment mechanism $g$, as the two functions may have different complexity. It is common for the propensity score model to be well-captured by relatively simple learners (because treatment assignment mechanisms in many studies are driven by a moderate number of strong predictors), while the outcome regression requires more flexible modeling (because the relationship between covariates and outcomes is often more complex).
+
+#### 3.1.3 Library Sensitivity Analysis
+
+A library sensitivity analysis assesses whether the causal estimate is robust to changes in the Super Learner library composition. The analyst fits the full causal estimator (TMLE or AIPW) using several different library specifications---for example, a library with only parametric learners, a library with only tree-based learners, the full library, and the full library with the addition of highly adaptive lasso---and compares the resulting causal estimates. If the estimates agree closely across library specifications, this provides evidence that the nuisance function estimates are sufficiently accurate across a range of modeling strategies. If the estimates diverge, this indicates that the causal conclusion depends on modeling choices for the nuisance functions, which undermines confidence in any single estimate.
+
+```r
+## Library sensitivity analysis
+libraries <- list(
+  "Parametric only" = c("SL.glm", "SL.glmnet"),
+  "Tree-based only" = c("SL.ranger", "SL.xgboost"),
+  "Full library"    = c("SL.glm", "SL.glmnet", "SL.ranger",
+                         "SL.xgboost", "SL.earth", "SL.nnet"),
+  "Full + HAL"      = c("SL.glm", "SL.glmnet", "SL.ranger",
+                         "SL.xgboost", "SL.earth", "SL.nnet", "SL.hal9001")
+)
+
+lib_results <- data.frame(
+  Library = names(libraries),
+  ATE = NA_real_,
+  SE = NA_real_,
+  CI_lower = NA_real_,
+  CI_upper = NA_real_
+)
+
+for (i in seq_along(libraries)) {
+  fit_lib <- tmle::tmle(
+    Y = dat$Y, A = dat$A, W = dat[, c("W1", "W2", "W3")],
+    Q.SL.library = libraries[[i]],
+    g.SL.library = libraries[[i]]
+  )
+  lib_results$ATE[i]      <- fit_lib$estimates$ATE$psi
+  lib_results$SE[i]       <- sqrt(fit_lib$estimates$ATE$var.psi)
+  lib_results$CI_lower[i] <- fit_lib$estimates$ATE$CI[1]
+  lib_results$CI_upper[i] <- fit_lib$estimates$ATE$CI[2]
+}
+
+cat("== Library Sensitivity Analysis ==\n")
+print(lib_results, row.names = FALSE, digits = 4)
+cat("\nRange of ATE estimates:",
+    round(diff(range(lib_results$ATE)), 4), "\n")
+```
+
+The library sensitivity analysis serves a fundamentally different purpose from the cross-validated risk comparison. The cross-validated risk comparison identifies which learners fit the data best. The library sensitivity analysis identifies whether the causal estimate is sensitive to the choice of learners. It is possible for the cross-validated risk to be similar across libraries (because all libraries fit the data reasonably well) while the causal estimates diverge (because the libraries differ in their extrapolation behavior in regions of the covariate space that are important for the causal contrast). It is also possible for the cross-validated risks to differ substantially while the causal estimates agree (because the differences in model fit occur in regions that are irrelevant to the causal parameter).
+
+#### 3.1.4 Overfitting Detection
+
+Overfitting occurs when a learner captures noise in the training data rather than the true underlying function, producing predictions that perform well on the training set but poorly on new data. In the Super Learner framework, cross-validation provides a natural safeguard against overfitting, but it does not eliminate the risk entirely, particularly when the sample size is small relative to the complexity of the learners.
+
+The primary diagnostic for overfitting is the gap between training risk and cross-validated risk for each candidate learner. A large gap indicates that the learner is fitting noise in the training data. For parametric models such as logistic regression, this gap is typically small. For highly flexible learners such as random forests with very deep trees or neural networks with many hidden units, the gap can be substantial.
+
+```r
+## Overfitting diagnostic: training risk vs CV risk
+## Requires refitting each learner on the full training set
+train_risks <- numeric(length(SL.library))
+for (k in seq_along(SL.library)) {
+  pred_train <- predict(sl_Q$fitLibrary[[k]],
+                        newdata = dat[, c("A", "W1", "W2", "W3")])
+  if (is.list(pred_train)) pred_train <- pred_train$pred
+  train_risks[k] <- mean((dat$Y - pred_train)^2)
+}
+
+overfit_df <- data.frame(
+  Learner = SL.library,
+  Train_Risk = round(train_risks, 4),
+  CV_Risk = round(sl_Q$cvRisk, 4),
+  Ratio = round(sl_Q$cvRisk / train_risks, 2)
+)
+cat("== Overfitting Diagnostics ==\n")
+print(overfit_df, row.names = FALSE)
+cat("\nRatio >> 1 indicates substantial overfitting.\n")
+```
+
+When overfitting is detected, the analyst has several options. The most direct is to add regularized variants of the offending learner to the library (e.g., replacing a random forest with default settings by a random forest with a minimum node size constraint). Another option is to remove the overfitting learner from the library, though this may reduce the library's capacity to capture complex patterns. The Super Learner's cross-validation procedure will naturally downweight overfitting learners in the ensemble, but the analyst should verify that this is occurring by examining the learner coefficients.
+
+#### 3.1.5 Cross-Validation Scheme and Screening
+
+The number of cross-validation folds $V$ affects both the bias and variance of the Super Learner. With $V = 10$ (the default), each learner is trained on 90\% of the data and evaluated on 10\%, providing a reasonably unbiased estimate of out-of-sample risk. Smaller values of $V$ (e.g., $V = 5$) reduce computational cost but may produce more biased risk estimates, because each learner is trained on a smaller fraction of the data. Larger values (e.g., $V = 20$ or leave-one-out) reduce bias but increase variance and computational burden.
+
+For small samples (e.g., $n < 200$), the analyst should consider whether $V = 10$ leaves too few observations in each validation fold for stable risk estimation. In such cases, $V = 5$ or even $V = 3$ may be more appropriate, with the understanding that the cross-validated risk estimates will be noisier. Conversely, for very large samples, increasing $V$ beyond 10 provides minimal benefit and is rarely necessary.
+
+Variable screening within the Super Learner---using a data-adaptive procedure to select a subset of covariates before fitting each candidate learner---can improve performance when the covariate space is high-dimensional. However, screening introduces an additional source of variability that the cross-validation procedure must account for. The screening step should be performed within each cross-validation fold (not on the full dataset before cross-validation), or else the cross-validated risk estimate will be optimistically biased. The `SuperLearner` package supports this through the `method` argument, which allows screening wrappers to be applied within the cross-validation loop.
 
 ### 3.2 Outcome Regression Diagnostics
 
-This subsection will cover:
+The outcome regression $\bar{Q}(A, W) = E[Y \mid A, W]$ is used directly by TMLE (as the initial estimate that is subsequently targeted) and by AIPW (as the augmentation term). Even for IPTW, which does not use the outcome regression in its estimating equation, the outcome regression plays an implicit role: when the propensity score model is correct but the outcome regression is misspecified, IPTW remains consistent, but augmenting IPTW with the outcome regression (yielding AIPW) can improve efficiency. Diagnostics for the outcome regression therefore matter for all the major causal estimators, albeit in different ways.
 
-- **Calibration plots**: Plotting predicted values $\hat{\bar{Q}}(A_i, W_i)$ against observed outcomes $Y_i$, with assessment of calibration slope and intercept. For binary outcomes, calibration should be assessed within deciles of predicted risk.
+#### 3.2.1 Calibration
 
-- **Residual analysis**: Examining residuals $Y_i - \hat{\bar{Q}}(A_i, W_i)$ for patterns that suggest model misspecification---systematic trends with covariates, heteroscedasticity, or non-normality for continuous outcomes.
+Calibration measures whether the predicted values from the outcome model align with the observed outcomes. A well-calibrated model satisfies $E[Y \mid \hat{\bar{Q}}(A, W) = q] = q$ for all values of $q$ in the range of the predictions. Calibration is a weaker requirement than overall model fit (a well-calibrated model can still have high variance), but miscalibration is a particularly concerning form of misspecification because it indicates systematic bias in the predicted values.
 
-- **Cross-validated loss**: Reporting the cross-validated MSE or log-likelihood as a global measure of outcome model fit, with comparison across candidate models.
+For binary outcomes, calibration is assessed by dividing the predicted probabilities into deciles, computing the observed event rate within each decile, and plotting the observed rates against the predicted rates. A perfectly calibrated model produces points along the 45-degree line. Systematic departure from this line indicates miscalibration: predictions that are too high (overconfident) or too low (underconfident) in specific risk strata.
 
-- **Subgroup predictive performance**: Evaluating whether the outcome model performs equally well across clinically relevant subgroups. Poor performance in a subgroup that is important for the causal question can indicate that the outcome model is misspecified in a way that biases the causal estimate.
+```r
+## Calibration plot for binary outcome
+## Assumes Q_pred contains predicted probabilities E[Y|A,W]
+calibration_diagnostic <- function(Y, Q_pred, n_bins = 10) {
+  bins <- cut(Q_pred, breaks = quantile(Q_pred, probs = seq(0, 1, 1/n_bins)),
+              include.lowest = TRUE)
+  cal_df <- data.frame(
+    bin = levels(bins),
+    predicted = tapply(Q_pred, bins, mean),
+    observed  = tapply(Y, bins, mean),
+    n         = tapply(Y, bins, length)
+  )
 
-- **Model instability across folds**: Assessing whether the predicted values change substantially across cross-validation folds, which can indicate overfitting or sensitivity to specific observations.
+  ## Calibration slope and intercept
+  cal_model <- glm(Y ~ Q_pred, family = binomial(link = "logit"),
+                   data = data.frame(Y = Y, Q_pred = Q_pred))
+  cal_intercept <- coef(cal_model)[1]
+  cal_slope     <- coef(cal_model)[2]
 
-### 3.3 Propensity Score / Treatment Model Diagnostics
+  cat("Calibration intercept:", round(cal_intercept, 3),
+      "(ideal = 0)\n")
+  cat("Calibration slope:", round(cal_slope, 3),
+      "(ideal = 1)\n")
 
-This subsection will cover:
+  library(ggplot2)
+  ggplot(cal_df, aes(x = predicted, y = observed)) +
+    geom_point(aes(size = n)) +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+    labs(x = "Predicted probability",
+         y = "Observed proportion",
+         title = "Calibration Plot for Outcome Model") +
+    theme_minimal()
+}
+```
 
-- **Distribution and tail behavior**: Examination of the full propensity score distribution with emphasis on tail behavior, including the fraction of observations with $\hat{g} < 0.05$ or $\hat{g} > 0.95$.
+For continuous outcomes, calibration is assessed by plotting predicted values against observed values, with a smoothed regression line. The slope of the calibration line should be approximately 1, and the intercept should be approximately 0. Substantial departure from these values indicates that the outcome model is systematically over- or under-predicting in certain regions.
 
-- **Covariate balance pre- and post-weighting**: Computing standardized mean differences (SMDs) for all covariates before and after weighting. An SMD threshold of 0.1 is commonly used, though this is a convention rather than a principled cutoff. Balance should be assessed for both first moments and higher-order terms (squares, interactions) when relevant.
+Calibration diagnostics are particularly important for TMLE because the TMLE targeting step corrects for bias in the initial outcome regression estimate, but only along the direction of the efficient influence function. Miscalibration that is orthogonal to the EIF direction will not be corrected by the targeting step and will persist in the final causal estimate. While the double robustness property provides protection against misspecification of $\bar{Q}$ when $g$ is correctly specified, the finite-sample performance of the estimator improves substantially when $\bar{Q}$ is well-calibrated.
 
-- **Balance in high dimensions**: When $W$ is high-dimensional, individual SMDs become unwieldy. Summary measures such as the average absolute SMD, the maximum absolute SMD, and the post-weighting C-statistic (which should be near 0.5 if balance is achieved) provide useful summaries.
+#### 3.2.2 Residual Analysis
 
-- **Balance versus predictive accuracy tradeoffs**: A key conceptual discussion distinguishing between good prediction (high AUC for the propensity score model) and good confounding control (achieved covariate balance after weighting). A propensity score model with perfect prediction may produce extreme weights and poor balance; a simpler model with lower AUC may produce more stable weights and better balance. The goal is balance, not prediction.
+Residual analysis for the outcome regression follows the same principles as residual analysis for any regression model, with the important caveat that the goal is not to improve the prediction of $Y$ per se but to ensure that the outcome model is sufficiently well-specified to support the causal estimator. The residuals $e_i = Y_i - \hat{\bar{Q}}(A_i, W_i)$ should be examined for systematic patterns that indicate misspecification.
+
+The analyst should plot the residuals against each covariate $W_j$, against the treatment variable $A$, and against the predicted values $\hat{\bar{Q}}(A_i, W_i)$. Systematic trends in these plots indicate that the outcome model is missing important features of the data-generating process. Of particular concern for causal inference are residual patterns that differ between treatment groups: if the residuals show a different relationship with a covariate $W_j$ in the treated group than in the control group, this suggests that the outcome model is misspecified in a way that directly affects the estimated treatment effect.
+
+```r
+## Residual diagnostics for outcome regression
+residuals <- dat$Y - Q_pred
+dat$resid <- residuals
+
+## Residuals by treatment group
+cat("== Residual Summary by Treatment Group ==\n")
+cat("Treated:  mean =", round(mean(residuals[dat$A == 1]), 4),
+    " SD =", round(sd(residuals[dat$A == 1]), 4), "\n")
+cat("Control:  mean =", round(mean(residuals[dat$A == 0]), 4),
+    " SD =", round(sd(residuals[dat$A == 0]), 4), "\n")
+
+## Residuals vs each covariate, faceted by treatment
+library(ggplot2)
+p_resid <- ggplot(dat, aes(x = W1, y = resid, color = factor(A))) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", se = FALSE) +
+  facet_wrap(~ A, labeller = labeller(A = c("0" = "Control", "1" = "Treated"))) +
+  labs(x = "W1", y = "Residual", title = "Residuals vs W1 by Treatment Group") +
+  theme_minimal() +
+  theme(legend.position = "none")
+print(p_resid)
+```
+
+For continuous outcomes, the analyst should also examine the residual distribution for non-normality and heteroscedasticity. While the asymptotic theory for TMLE and AIPW does not require normally distributed residuals, heavy-tailed residuals can degrade finite-sample performance by inflating the variance of the efficient influence function. Heteroscedasticity---variance that depends on the covariates---is less concerning for the point estimate (which is not affected by heteroscedasticity under correct mean specification) but can affect the efficiency of the estimator and the accuracy of variance estimates.
+
+#### 3.2.3 Cross-Validated Prediction Performance
+
+The cross-validated risk of the outcome regression provides a global summary of model fit that accounts for overfitting. For continuous outcomes, the cross-validated mean squared error $\hat{R}_{CV} = n^{-1} \sum_{i=1}^{n} (Y_i - \hat{\bar{Q}}_{-i}(A_i, W_i))^2$---where $\hat{\bar{Q}}_{-i}$ denotes the fit obtained from the training fold that excludes observation $i$---should be compared to the variance of the outcome $\text{Var}(Y)$. The ratio $R^2_{CV} = 1 - \hat{R}_{CV} / \text{Var}(Y)$ provides a cross-validated $R^2$ that summarizes the proportion of outcome variance explained by the model. For the causal estimator, a higher cross-validated $R^2$ generally translates to a more efficient estimate, because the outcome model explains more of the variation in $Y$ and leaves less to be captured by the weighting term.
+
+However, a low cross-validated $R^2$ does not necessarily indicate a problem for the causal analysis. If the outcome is inherently noisy (high residual variance), the outcome model may be well-specified but unable to explain much of the total variation. In such cases, the causal estimator will have higher variance but need not be biased. The analyst should distinguish between a low $R^2$ due to irreducible noise and a low $R^2$ due to model misspecification by examining whether more flexible learners can achieve a substantially higher $R^2$ than simpler learners. If they cannot, the residual variance is likely irreducible; if they can, the simpler model is misspecified.
+
+#### 3.2.4 Subgroup Predictive Performance
+
+The global cross-validated risk may mask important heterogeneity in model performance across subgroups. The outcome model may fit well on average but poorly in a subgroup that is critical for the causal question---for example, a subgroup with low propensity scores where the weighting terms in the EIF are large. Poor outcome model performance in high-weight subgroups will disproportionately affect the causal estimate.
+
+The analyst should compute the cross-validated risk separately for clinically relevant subgroups, for treatment groups, and---most importantly---for strata defined by the propensity score. If the outcome model performs substantially worse in the tails of the propensity score distribution (where weights are largest), this indicates that the outcome model's misspecification is concentrated precisely where it matters most for the causal estimate.
+
+```r
+## Subgroup prediction performance
+## Assess outcome model fit across propensity score strata
+dat$ps_quintile <- cut(dat$ps, breaks = quantile(dat$ps, probs = 0:5/5),
+                        include.lowest = TRUE, labels = 1:5)
+
+subgroup_perf <- do.call(rbind, lapply(1:5, function(q) {
+  idx <- dat$ps_quintile == q
+  data.frame(
+    PS_quintile = q,
+    n = sum(idx),
+    MSE = round(mean(residuals[idx]^2), 4),
+    Mean_abs_resid = round(mean(abs(residuals[idx])), 4),
+    Mean_PS = round(mean(dat$ps[idx]), 3)
+  )
+}))
+
+cat("== Outcome Model Performance by PS Quintile ==\n")
+print(subgroup_perf, row.names = FALSE)
+cat("\nLarger MSE in extreme PS quintiles suggests misspecification\n")
+cat("where weights are largest and the causal estimate is most sensitive.\n")
+```
+
+#### 3.2.5 Prediction Stability Across Cross-Validation Folds
+
+A final outcome regression diagnostic concerns the stability of predictions across cross-validation folds. In cross-fitted estimation, the predicted values $\hat{\bar{Q}}_{-k}(A_i, W_i)$ for observations in fold $k$ are produced by a model trained on all folds except $k$. If the model is stable, these predictions should be similar regardless of which fold is held out. If the predictions vary substantially across folds---that is, if $\hat{\bar{Q}}_{-k}(A_i, W_i)$ for a fixed observation $i$ changes appreciably depending on $k$---this indicates that the outcome model is sensitive to the specific training sample, which is a form of instability that can degrade the performance of the causal estimator.
+
+This diagnostic can be implemented by computing, for each observation, the standard deviation of its predicted values across leave-one-fold-out fits, and examining the distribution of these standard deviations. Large prediction variability, particularly for observations with extreme propensity scores, signals potential instability in the causal estimate.
+
+### 3.3 Treatment Mechanism Diagnostics
+
+The treatment mechanism $g(A \mid W) = P(A \mid W)$ enters the causal estimator through the inverse probability weights (in IPTW), the clever covariate (in TMLE), and the augmentation term (in AIPW). Diagnostics for the treatment mechanism are fundamentally different from diagnostics for the outcome regression, because the goal of the treatment model is not prediction per se but confounding control. A treatment model that predicts treatment assignment with high accuracy may produce extreme weights that destabilize the estimator. A treatment model that sacrifices some predictive accuracy for smoother weights may produce a more reliable causal estimate. The diagnostics in this section reflect this distinction.
+
+#### 3.3.1 Propensity Score Distribution and Tail Behavior
+
+The distribution of estimated propensity scores has already been discussed in the context of positivity diagnostics (Section 2.2). Here, the focus shifts from positivity as an identification assumption to the practical implications of propensity score distributions for nuisance function estimation quality. Specifically, the analyst should examine whether the estimated propensity scores are well-separated from the boundaries (0 and 1), whether the distribution is smooth and unimodal, and whether there are systematic differences in the distribution across subgroups defined by key covariates.
+
+A multimodal propensity score distribution---with distinct clusters of high and low propensity scores and few observations in between---suggests that the treatment assignment mechanism is driven by a small number of strong predictors that effectively partition the population into groups with very different treatment probabilities. While this pattern does not necessarily indicate a problem with the propensity score model (the model may be correctly capturing the true treatment mechanism), it signals a challenging estimation environment where the causal estimate will depend heavily on a few observations with moderate propensity scores.
+
+```r
+## Detailed propensity score distribution diagnostics
+cat("== Propensity Score Distribution ==\n")
+ps <- dat$ps
+
+## Boundary proximity
+cat("\nBoundary proximity:\n")
+for (threshold in c(0.01, 0.025, 0.05, 0.10)) {
+  n_low  <- sum(ps < threshold)
+  n_high <- sum(ps > (1 - threshold))
+  cat(sprintf("  PS < %.3f: %d obs (%.1f%%)  |  PS > %.3f: %d obs (%.1f%%)\n",
+              threshold, n_low, 100 * n_low / length(ps),
+              1 - threshold, n_high, 100 * n_high / length(ps)))
+}
+
+## Weight diagnostics
+wt <- ifelse(dat$A == 1, 1/ps, 1/(1-ps))
+cat("\nInverse probability weight summary:\n")
+cat("  Mean:", round(mean(wt), 2), "\n")
+cat("  SD:", round(sd(wt), 2), "\n")
+cat("  Max:", round(max(wt), 1), "\n")
+cat("  Coefficient of variation:", round(sd(wt)/mean(wt), 2), "\n")
+cat("  Top 1% of weights account for",
+    round(100 * sum(sort(wt, decreasing = TRUE)[1:ceiling(0.01*length(wt))]) /
+            sum(wt), 1),
+    "% of total weight\n")
+```
+
+#### 3.3.2 Covariate Balance Diagnostics
+
+Covariate balance is the most practically relevant diagnostic for the treatment model, because it directly measures whether the weighting or adjustment procedure has succeeded in making the treatment groups comparable with respect to measured confounders. The standardized mean difference (SMD) for each covariate $W_j$ is defined as:
+
+$$
+\text{SMD}_j = \frac{\bar{W}_{j,1} - \bar{W}_{j,0}}{\sqrt{(s_{j,1}^2 + s_{j,0}^2)/2}}
+$$
+
+where $\bar{W}_{j,a}$ and $s_{j,a}^2$ are the mean and variance of $W_j$ in treatment group $a$. After weighting by the inverse probability weights, the weighted SMD should be computed using the weighted means and variances. A common threshold for adequate balance is $|\text{SMD}| < 0.1$, though this is a convention rather than a principled cutoff, and the appropriate threshold depends on the context.
+
+```r
+## Covariate balance diagnostics (Love plot)
+compute_smd <- function(W, A, weights = NULL) {
+  if (is.null(weights)) weights <- rep(1, length(A))
+
+  smds <- sapply(1:ncol(W), function(j) {
+    w1 <- weights[A == 1]
+    w0 <- weights[A == 0]
+    x1 <- W[A == 1, j]
+    x0 <- W[A == 0, j]
+
+    mean1 <- weighted.mean(x1, w1)
+    mean0 <- weighted.mean(x0, w0)
+    var1  <- sum(w1 * (x1 - mean1)^2) / sum(w1)
+    var0  <- sum(w0 * (x0 - mean0)^2) / sum(w0)
+
+    (mean1 - mean0) / sqrt((var1 + var0) / 2)
+  })
+  names(smds) <- colnames(W)
+  return(smds)
+}
+
+W <- dat[, c("W1", "W2", "W3")]
+ipw <- ifelse(dat$A == 1, 1/dat$ps, 1/(1 - dat$ps))
+
+smd_unadj <- compute_smd(W, dat$A)
+smd_weighted <- compute_smd(W, dat$A, weights = ipw)
+
+balance_df <- data.frame(
+  Covariate = rep(colnames(W), 2),
+  SMD = c(smd_unadj, smd_weighted),
+  Method = rep(c("Unadjusted", "IPW-Weighted"), each = ncol(W))
+)
+
+library(ggplot2)
+ggplot(balance_df, aes(x = abs(SMD), y = Covariate,
+                        color = Method, shape = Method)) +
+  geom_point(size = 3) +
+  geom_vline(xintercept = 0.1, linetype = "dashed", color = "gray50") +
+  labs(x = "Absolute Standardized Mean Difference",
+       title = "Covariate Balance (Love Plot)") +
+  theme_minimal()
+
+cat("== Covariate Balance Summary ==\n")
+cat("Unadjusted max |SMD|:", round(max(abs(smd_unadj)), 3), "\n")
+cat("Weighted max |SMD|:", round(max(abs(smd_weighted)), 3), "\n")
+cat("Unadjusted mean |SMD|:", round(mean(abs(smd_unadj)), 3), "\n")
+cat("Weighted mean |SMD|:", round(mean(abs(smd_weighted)), 3), "\n")
+```
+
+Covariate balance should be assessed not only for the first moments (means) of each covariate but also for higher-order terms---squares, interactions, and quantiles---when these are relevant to the outcome. A treatment model may achieve balance on the marginal means of each covariate while leaving substantial imbalance in their joint distribution or in their nonlinear transformations. For high-dimensional covariate sets, examining balance for all pairwise interactions may be impractical, but the analyst should at a minimum assess balance for squares of continuous covariates and for interactions between the strongest confounders.
+
+#### 3.3.3 Balance in High Dimensions
+
+When the covariate set $W$ is high-dimensional, individual SMDs for each covariate become unwieldy to examine, and it becomes necessary to use summary measures of overall balance. Several such measures are available.
+
+The maximum absolute SMD across all covariates provides a worst-case measure. If the maximum SMD is below the threshold, all individual SMDs are also below the threshold. The average absolute SMD provides a central tendency measure. The post-weighting C-statistic (the area under the ROC curve for predicting treatment from covariates, using the weighted sample) provides a global measure of residual imbalance: a C-statistic near 0.5 indicates that the covariates no longer discriminate between treatment groups after weighting, suggesting adequate balance. A C-statistic substantially above 0.5 indicates residual imbalance.
+
+```r
+## Post-weighting C-statistic
+## Fit a logistic regression predicting A from W using weighted data
+post_wt_model <- glm(A ~ W1 + W2 + W3, data = dat,
+                      family = binomial, weights = ipw)
+post_wt_pred <- predict(post_wt_model, type = "response")
+
+## C-statistic (AUC)
+if (requireNamespace("pROC", quietly = TRUE)) {
+  auc_post <- pROC::auc(dat$A, post_wt_pred)
+  cat("Post-weighting C-statistic:", round(as.numeric(auc_post), 3),
+      "(ideal = 0.5)\n")
+}
+```
+
+#### 3.3.4 Balance Versus Predictive Accuracy
+
+A critical conceptual distinction in treatment model diagnostics is between predictive accuracy and confounding control. These are related but not identical objectives, and optimizing one does not necessarily optimize the other.
+
+Predictive accuracy---measured by the AUC, Brier score, or cross-validated log-likelihood---quantifies how well the propensity score model discriminates between treated and untreated individuals. High predictive accuracy is desirable insofar as it indicates that the model has captured the factors that drive treatment assignment. However, a highly predictive propensity score model can produce extreme weights (because it assigns very high or very low probabilities of treatment to many individuals), which increases the variance of the causal estimator and can produce practical positivity violations.
+
+Confounding control---measured by covariate balance after weighting---quantifies whether the treatment model has succeeded in making the treatment groups comparable. A simpler propensity score model that sacrifices some predictive accuracy may produce more stable weights and better balance, particularly when the true treatment mechanism involves interactions or nonlinearities that the simpler model does not capture. In such cases, the simpler model "smooths" the propensity scores toward the center of the distribution, reducing weight variability at the cost of potentially incomplete confounding control.
+
+The analyst should report both predictive accuracy and covariate balance, and should recognize that the two may conflict. When they do conflict, covariate balance is the more directly relevant diagnostic for the causal analysis, because the goal of the treatment model is not to predict treatment but to remove confounding. A treatment model that achieves perfect covariate balance with moderate predictive accuracy is preferable, for causal inference purposes, to a treatment model that achieves high predictive accuracy with poor balance and extreme weights.
+
+::: {.callout-important}
+## The Propensity Score Paradox
+
+An important subtlety in propensity score estimation has been called the "propensity score paradox": including more covariates in the propensity score model can worsen the performance of the causal estimator, even when all included covariates are genuine confounders. This occurs because each additional covariate increases the dimensionality of the propensity score model, which can produce more variable propensity score estimates and more extreme weights, particularly in small samples. The paradox is most acute when the additional covariates are strong predictors of treatment but weak predictors of the outcome (instruments or near-instruments), because these variables increase weight variability without substantially reducing confounding bias.
+
+The practical implication is that the propensity score model should not be constructed by including every available covariate. Variables that are strong predictors of the outcome but weak predictors of treatment should generally be included (they reduce variance without increasing weight instability). Variables that are strong predictors of treatment but weak predictors of the outcome should be included cautiously, as they may increase variance more than they reduce bias. Variables that predict neither treatment nor outcome should be excluded. The DAG provides the theoretical framework for these decisions; the diagnostics described in this section provide the empirical evidence needed to evaluate their consequences.
+:::
 
 ---
 
-## 4. Double Robust and EIF-Based Diagnostics {#sec-eif-outline}
+## 4. Double Robust and EIF-Based Diagnostics {#sec-eif}
 
-This section will provide a technically rigorous treatment of diagnostics derived from the efficient influence function, applicable to both TMLE and AIPW.
+The efficient influence function (EIF) occupies a central position in the theory of semiparametric causal inference. It defines the efficient estimator, characterizes the double robustness property, determines the semiparametric efficiency bound, and provides the basis for inference. Diagnostics derived from the EIF therefore provide a uniquely powerful lens for evaluating the performance of doubly robust estimators such as TMLE and AIPW. This section develops a comprehensive set of EIF-based diagnostics, beginning with the mathematical structure of the EIF and proceeding to its diagnostic implications.
 
 ### 4.1 Efficient Influence Function Structure
 
-- Formal presentation of the EIF for the ATE under the nonparametric model
-- Decomposition into components depending on $g$, $\bar{Q}$, and $\psi$
-- Explanation of how the EIF encodes the double robustness property: the estimator is consistent if either $g$ or $\bar{Q}$ (but not necessarily both) is consistently estimated
+For the average treatment effect $\psi_0 = E[E[Y \mid A=1, W] - E[Y \mid A=0, W]]$ under the nonparametric model, the efficient influence function at the true data-generating distribution $P_0$ is:
+
+$$
+D(O; \bar{Q}_0, g_0, \psi_0) = \frac{I(A=1)}{g_0(1 \mid W)}\left(Y - \bar{Q}_0(1, W)\right) - \frac{I(A=0)}{1 - g_0(1 \mid W)}\left(Y - \bar{Q}_0(0, W)\right) + \bar{Q}_0(1, W) - \bar{Q}_0(0, W) - \psi_0
+$$
+
+where $\bar{Q}_0(a, W) = E_0[Y \mid A=a, W]$ is the true outcome regression and $g_0(1 \mid W) = P_0(A=1 \mid W)$ is the true treatment mechanism. This function has mean zero under the true distribution: $E_{P_0}[D(O; \bar{Q}_0, g_0, \psi_0)] = 0$.
+
+The EIF can be decomposed into three functionally distinct components that have different diagnostic implications:
+
+**The $g$-dependent weighting component:** $\frac{I(A=a)}{g_0(a \mid W)}(Y - \bar{Q}_0(a, W))$ captures the contribution of the inverse probability weighting. When $g$ is misspecified, this component introduces bias. When $g$ is near zero, this component becomes large, introducing variance. The magnitude of this component is directly related to the clever covariate in TMLE and the weighting term in IPTW.
+
+**The outcome regression component:** $\bar{Q}_0(1, W) - \bar{Q}_0(0, W)$ captures the contribution of the outcome model to the causal contrast. When $\bar{Q}$ is well-specified, this component provides a consistent estimate of the conditional average treatment effect (CATE), and the weighting component serves only to improve efficiency. When $\bar{Q}$ is misspecified, the weighting component corrects for the bias, provided $g$ is correctly specified.
+
+**The centering constant:** $-\psi_0$ ensures that the EIF has mean zero. In practice, $\psi_0$ is replaced by the estimated causal parameter $\hat{\psi}$.
+
+The double robustness property is encoded in the structure of the EIF. The key identity is:
+
+$$
+E_{P_0}[D(O; \bar{Q}, g, \psi_0)] = E_{P_0}\left[\left(\frac{g_0(A \mid W)}{g(A \mid W)} - 1\right)\left(\bar{Q}_0(A, W) - \bar{Q}(A, W)\right)\right] \cdot (\text{terms})
+$$
+
+This expression equals zero whenever either $g = g_0$ (the treatment model is correct) or $\bar{Q} = \bar{Q}_0$ (the outcome model is correct). The bias of the estimator is therefore a product of the errors in both nuisance functions---a second-order term that converges to zero faster than either individual error, provided both are estimated at rates faster than $n^{-1/4}$. This rate condition is the formal requirement for the "doubly robust" estimator to achieve $\sqrt{n}$-consistency when both nuisance functions are estimated with machine learning.
 
 ### 4.2 Empirical Mean of the EIF as a Diagnostic
 
-- The empirical mean of the estimated EIF $n^{-1}\sum_i \hat{D}(O_i)$ should be approximately zero for TMLE (by construction, as TMLE solves the EIF estimating equation) and approximately zero for AIPW (asymptotically)
-- A nonzero mean indicates either poor nuisance estimation or numerical issues in the targeting step
-- Comparison of the empirical EIF mean between TMLE and AIPW as a cross-check
+The empirical mean of the estimated EIF, $P_n \hat{D} = n^{-1}\sum_{i=1}^{n} \hat{D}(O_i)$, is one of the most informative single diagnostic quantities for a doubly robust estimator.
+
+For TMLE, the empirical mean of the EIF is exactly zero by construction. TMLE works by updating the initial outcome regression estimate $\hat{\bar{Q}}^0$ through a fluctuation that solves the empirical EIF equation $P_n \hat{D} = 0$. If the TMLE implementation reports a nonzero empirical EIF mean, this indicates a numerical problem in the targeting step---typically a convergence failure in the logistic fluctuation regression, or a boundary condition that prevents the update from achieving the desired solution.
+
+For AIPW (the one-step estimator), the empirical mean of the EIF is not exactly zero but converges to zero at rate $o_P(n^{-1/2})$ under correct specification of at least one nuisance function. A nonzero empirical EIF mean for AIPW indicates either finite-sample bias or nuisance function misspecification. The magnitude of this mean, relative to the standard error of the estimate, provides a rough diagnostic: if $|P_n \hat{D}| / \text{SE}(\hat{\psi})$ is large (say, greater than 0.5), the finite-sample bias may be substantial relative to the sampling variability.
+
+```r
+## Empirical EIF mean diagnostic
+## For TMLE
+IC_tmle <- tmle_fit$estimates$ATE$IC
+cat("== Empirical EIF Mean ==\n")
+cat("TMLE:  mean(IC) =", format(mean(IC_tmle), digits = 6),
+    "(should be ~0 by construction)\n")
+cat("       |mean(IC)| / SE =",
+    round(abs(mean(IC_tmle)) / (sd(IC_tmle) / sqrt(length(IC_tmle))), 4), "\n")
+
+## For AIPW (one-step estimator)
+## Manually compute the one-step EIF
+Q1 <- predict(Q_model, newdata = transform(dat, A = 1))
+Q0 <- predict(Q_model, newdata = transform(dat, A = 0))
+ps <- dat$ps
+A  <- dat$A
+Y  <- dat$Y
+
+EIF_onestep <- A/ps * (Y - Q1) - (1-A)/(1-ps) * (Y - Q0) + Q1 - Q0
+psi_onestep <- mean(EIF_onestep)  ## one-step estimate
+
+## Center the EIF
+EIF_centered <- EIF_onestep - psi_onestep
+cat("\nAIPW:  mean(EIF) =", format(mean(EIF_centered), digits = 6), "\n")
+cat("       |mean(EIF)| / SE =",
+    round(abs(mean(EIF_centered)) / (sd(EIF_centered) / sqrt(length(EIF_centered))), 4), "\n")
+```
+
+Comparing the empirical EIF mean between TMLE and AIPW provides a useful cross-check. When both are near zero, this provides reassurance that the nuisance functions are adequate. When the AIPW empirical EIF mean is substantially nonzero while the TMLE empirical EIF mean is zero (by construction), the difference highlights the bias-correction role of the TMLE targeting step. If the TMLE targeting step is performing a large correction (moving the estimate substantially from the initial plug-in value to the targeted value), this is a signal that the initial outcome regression estimate was substantially biased along the EIF direction, and the analyst should investigate why.
 
 ### 4.3 Variance Decomposition and Outlier Influence
 
-- Decomposing the variance of the EIF into contributions from the $g$-dependent terms, the $\bar{Q}$-dependent terms, and the marginal term
-- Identifying observations with disproportionate influence on the variance
-- Using the EIF to construct leave-one-out influence diagnostics
+The variance of the estimated EIF, $\hat{\sigma}^2 = n^{-1}\sum_{i=1}^{n} \hat{D}(O_i)^2$, is the basis for the Wald-type confidence interval $\hat{\psi} \pm z_{1-\alpha/2} \hat{\sigma} / \sqrt{n}$. Examining the contributions of individual observations to this variance reveals whether the estimate is driven by a broad base of observations or dominated by a few outliers.
+
+The contribution of observation $i$ to the total EIF variance is proportional to $\hat{D}(O_i)^2$. The analyst should examine the distribution of $|\hat{D}(O_i)|$ and identify observations with disproportionately large contributions. A useful summary is the fraction of the total EIF variance attributable to the top 1\%, 5\%, and 10\% of observations by $|\hat{D}(O_i)|$. If a small fraction of observations accounts for a large fraction of the variance, the estimate is fragile: removing or perturbing these observations would substantially change the result.
+
+```r
+## Variance decomposition and outlier influence
+IC <- tmle_fit$estimates$ATE$IC
+IC_sq <- IC^2
+total_var <- sum(IC_sq)
+
+## Contribution of top observations
+IC_ranked <- sort(IC_sq, decreasing = TRUE)
+n <- length(IC)
+
+cat("== EIF Variance Decomposition ==\n")
+for (pct in c(0.01, 0.05, 0.10)) {
+  top_n <- ceiling(pct * n)
+  top_var <- sum(IC_ranked[1:top_n])
+  cat(sprintf("  Top %.0f%% of observations (n=%d): %.1f%% of total variance\n",
+              pct * 100, top_n, 100 * top_var / total_var))
+}
+
+## Leave-one-out influence on the point estimate
+## The change in psi_hat from removing observation i is approximately IC_i / n
+loo_influence <- IC / n
+cat("\n== Leave-One-Out Influence ==\n")
+cat("Max influence magnitude:", round(max(abs(loo_influence)), 6), "\n")
+cat("Point estimate:", round(mean(IC) + mean(Q1 - Q0), 4), "\n")
+cat("Max possible shift from removing one obs:",
+    round(max(abs(loo_influence)), 6), "\n")
+
+## Flag high-influence observations
+threshold <- 3 * sd(IC)
+high_influence_idx <- which(abs(IC) > threshold)
+cat("\nObservations with |IC| > 3*SD:", length(high_influence_idx), "\n")
+if (length(high_influence_idx) > 0 & length(high_influence_idx) <= 20) {
+  cat("\nHigh-influence observations:\n")
+  high_inf_df <- data.frame(
+    Index = high_influence_idx,
+    IC = round(IC[high_influence_idx], 3),
+    A = dat$A[high_influence_idx],
+    PS = round(dat$ps[high_influence_idx], 4),
+    Y = round(dat$Y[high_influence_idx], 3)
+  )
+  print(high_inf_df, row.names = FALSE)
+}
+```
+
+The source of large EIF values is diagnostically important. An observation can have a large $|\hat{D}(O_i)|$ for two distinct reasons. First, the inverse probability weighting component may be large because $g(A_i \mid W_i)$ is near zero, which indicates a positivity problem. Second, the residual $(Y_i - \hat{\bar{Q}}(A_i, W_i))$ may be large because the outcome model is poorly calibrated for observation $i$, which indicates a model fit problem. The analyst can decompose each large EIF value into its weighting and residual components to determine the source.
+
+```r
+## Decompose large EIF values into weighting and residual components
+## For treated observations
+weight_component <- ifelse(dat$A == 1, 1/dat$ps, 1/(1 - dat$ps))
+residual_component <- ifelse(dat$A == 1,
+                              abs(dat$Y - Q1),
+                              abs(dat$Y - Q0))
+
+## For high-influence observations
+if (length(high_influence_idx) > 0) {
+  decomp_df <- data.frame(
+    Index = high_influence_idx,
+    IC_magnitude = round(abs(IC[high_influence_idx]), 3),
+    Weight = round(weight_component[high_influence_idx], 2),
+    Residual = round(residual_component[high_influence_idx], 3),
+    Primary_source = ifelse(
+      weight_component[high_influence_idx] > 5, "Positivity",
+      ifelse(residual_component[high_influence_idx] > 2 * sd(dat$Y),
+             "Model fit", "Mixed"))
+  )
+  cat("\n== Source Decomposition of High-Influence Observations ==\n")
+  print(decomp_df, row.names = FALSE)
+}
+```
+
+This decomposition directly informs the appropriate remedial action. If high-influence observations are driven primarily by extreme weights (positivity problems), the analyst should consider truncation, estimand redefinition, or modified treatment policies. If they are driven primarily by large residuals (model fit problems), the analyst should consider expanding the Super Learner library, adding relevant covariates to the outcome model, or investigating whether the large residuals represent genuine outliers in the data.
 
 ### 4.4 Targeting Step Convergence in TMLE
 
-- Diagnostics for the logistic fluctuation step: convergence warnings, epsilon magnitude, change in log-likelihood
-- Comparison of the initial (plug-in) estimate $\hat{\psi}^0$ and the targeted (updated) estimate $\hat{\psi}^*$---a large difference indicates substantial bias correction, which may signal poor initial estimation
-- Iterative TMLE and C-TMLE convergence diagnostics
+The TMLE targeting step updates the initial outcome regression estimate $\hat{\bar{Q}}^0$ by fitting a univariate logistic regression (for bounded outcomes) or linear regression (for unbounded outcomes) of the outcome $Y$ on the clever covariate $H(A, W)$, using $\hat{\bar{Q}}^0$ as an offset. The coefficient $\epsilon$ from this regression determines the magnitude of the update: the targeted estimate is $\hat{\bar{Q}}^*(A, W) = \text{expit}(\text{logit}(\hat{\bar{Q}}^0(A, W)) + \epsilon H(A, W))$ for bounded outcomes. Several aspects of this targeting step admit diagnostic examination.
+
+**The magnitude of $\epsilon$.** The fluctuation parameter $\epsilon$ quantifies the correction applied by the targeting step. A small $\epsilon$ (close to zero) indicates that the initial outcome regression estimate was already nearly unbiased along the EIF direction---the plug-in estimate and the targeted estimate are nearly identical. A large $\epsilon$ indicates substantial bias correction, which may signal poor initial estimation of $\bar{Q}$ or $g$, or it may reflect a genuine difference between the plug-in and efficient estimators. As a rough heuristic, $|\epsilon| > 0.5$ warrants investigation.
+
+**Convergence of the targeting step.** The logistic fluctuation regression should converge without warnings. Convergence failures can occur when the clever covariate has extreme values (due to positivity violations) or when the initial outcome regression produces predicted values near the boundary of the parameter space (0 or 1 for probabilities). Convergence warnings from the `glm` call in the targeting step should be reported and investigated.
+
+**The plug-in versus targeted estimate.** The difference between the initial plug-in estimate $\hat{\psi}^0 = n^{-1}\sum_i (\hat{\bar{Q}}^0(1, W_i) - \hat{\bar{Q}}^0(0, W_i))$ and the targeted estimate $\hat{\psi}^* = n^{-1}\sum_i (\hat{\bar{Q}}^*(1, W_i) - \hat{\bar{Q}}^*(0, W_i))$ measures the impact of the targeting step. A large difference indicates that the initial estimate was substantially biased, and the targeting step is performing an important correction. While this correction is theoretically valid, a large correction in finite samples may indicate that the estimator is operating in a regime where the asymptotic theory is unreliable.
+
+```r
+## Targeting step diagnostics for TMLE
+## Access epsilon from TMLE fit
+cat("== TMLE Targeting Step Diagnostics ==\n")
+
+## Plug-in estimate (before targeting)
+Q1_init <- tmle_fit$Qinit$Q[, "Q1W"]
+Q0_init <- tmle_fit$Qinit$Q[, "Q0W"]
+psi_plugin <- mean(Q1_init - Q0_init)
+
+## Targeted estimate
+Q1_star <- tmle_fit$Qstar[, "Q1W"]
+Q0_star <- tmle_fit$Qstar[, "Q0W"]
+psi_targeted <- tmle_fit$estimates$ATE$psi
+
+cat("Plug-in estimate:", round(psi_plugin, 4), "\n")
+cat("Targeted estimate:", round(psi_targeted, 4), "\n")
+cat("Difference (targeting correction):",
+    round(psi_targeted - psi_plugin, 4), "\n")
+cat("Relative correction:",
+    round(abs(psi_targeted - psi_plugin) / abs(psi_targeted) * 100, 1), "%\n")
+
+## Fluctuation parameter
+cat("\nFluctuation epsilon:",
+    round(tmle_fit$epsilon, 6), "\n")
+cat("|epsilon| > 0.5:", abs(tmle_fit$epsilon) > 0.5,
+    "(large correction if TRUE)\n")
+```
+
+**Iterative TMLE.** Standard TMLE performs a single targeting step. Iterative TMLE repeats the targeting step---refitting the fluctuation regression using the updated outcome regression from the previous iteration---until the empirical EIF equation $P_n \hat{D} = 0$ is solved to within a specified tolerance. Iterative TMLE can improve finite-sample performance when a single targeting step is insufficient to solve the EIF equation, which can occur when the clever covariate distribution is highly skewed or when the initial estimate is far from the truth.
+
+**Collaborative TMLE (C-TMLE).** C-TMLE adaptively selects which components of the nuisance function to target, using a data-adaptive procedure that balances bias reduction and variance control. C-TMLE is particularly relevant when positivity violations are present, because it can choose to target the outcome regression more aggressively in regions where the propensity score is bounded away from zero and less aggressively in regions where positivity violations would introduce excessive variance. Diagnostics for C-TMLE include the sequence of selected targeting steps, the cross-validated risk at each step, and the comparison with standard TMLE. When C-TMLE and standard TMLE produce substantially different estimates, this is a signal that the standard TMLE is being influenced by observations in low-support regions, and C-TMLE's adaptive approach may be more appropriate.
 
 ### 4.5 Failure Modes of AIPW Versus TMLE
 
-- AIPW can produce estimates outside the parameter space for bounded outcomes; TMLE avoids this through its use of the logistic submodel
-- AIPW is a one-step estimator that does not iterate; TMLE iterates until the EIF equation is solved
-- When double robustness masks instability: both estimators can produce reasonable-looking point estimates even when both nuisance functions are moderately misspecified, with the bias manifesting as poor coverage of confidence intervals rather than as a visibly wrong point estimate
+AIPW and TMLE are both doubly robust estimators that target the same statistical estimand, but they differ in important ways that affect their diagnostic profiles and failure modes.
+
+**AIPW (one-step estimator).** The AIPW estimator is computed as:
+
+$$
+\hat{\psi}_{AIPW} = \frac{1}{n}\sum_{i=1}^{n}\left[\frac{A_i}{\hat{g}(1 \mid W_i)}(Y_i - \hat{\bar{Q}}(1, W_i)) - \frac{1-A_i}{1-\hat{g}(1 \mid W_i)}(Y_i - \hat{\bar{Q}}(0, W_i)) + \hat{\bar{Q}}(1, W_i) - \hat{\bar{Q}}(0, W_i)\right]
+$$
+
+AIPW is a closed-form estimator that does not iterate. It adds a single correction term to the plug-in estimate. For bounded outcomes (e.g., probabilities), AIPW can produce estimates outside the parameter space $[0, 1]$, because the correction term is not constrained. This boundary violation is a diagnostic red flag: it indicates that the correction term is so large that it overwhelms the plug-in estimate, which typically occurs when extreme weights coincide with large residuals.
+
+**TMLE (substitution estimator).** TMLE produces an updated estimate of the outcome regression that is then used to compute the plug-in causal parameter. Because the updated outcome regression is constrained to respect the parameter space (through the logistic submodel for bounded outcomes), TMLE cannot produce estimates outside $[0, 1]$ for probability-scale parameters. This substitution property provides a built-in safeguard against extreme estimates.
+
+The practical implications of these differences for diagnostics are as follows.
+
+First, if the AIPW estimate is outside the parameter space, this is a definitive signal of instability, and the analyst should prefer TMLE (which respects the bounds) or investigate the source of the instability. Second, if AIPW and TMLE produce similar estimates, this provides reassurance that both estimators are functioning adequately. Third, if they produce different estimates, the difference can be attributed to the targeting procedure (TMLE iterates to solve the EIF equation, while AIPW applies a single linear correction) and to the bounding behavior (TMLE constrains the outcome regression to the parameter space).
+
+```r
+## AIPW vs TMLE comparison
+## Compute AIPW estimate manually
+Q1_hat <- predict(Q_model, newdata = transform(dat, A = 1))
+Q0_hat <- predict(Q_model, newdata = transform(dat, A = 0))
+ps_hat <- dat$ps
+
+aipw_obs <- dat$A/ps_hat * (dat$Y - Q1_hat) -
+            (1-dat$A)/(1-ps_hat) * (dat$Y - Q0_hat) +
+            Q1_hat - Q0_hat
+psi_aipw <- mean(aipw_obs)
+se_aipw  <- sd(aipw_obs) / sqrt(nrow(dat))
+
+cat("== AIPW vs TMLE Comparison ==\n")
+cat("AIPW estimate:", round(psi_aipw, 4),
+    " SE:", round(se_aipw, 4), "\n")
+cat("TMLE estimate:", round(tmle_fit$estimates$ATE$psi, 4),
+    " SE:", round(sqrt(tmle_fit$estimates$ATE$var.psi), 4), "\n")
+cat("Difference:", round(psi_aipw - tmle_fit$estimates$ATE$psi, 4), "\n")
+
+## Check for parameter space violations (binary outcome)
+if (all(dat$Y %in% c(0, 1))) {
+  Q1_aipw <- mean(dat$A/ps_hat * dat$Y + (1 - dat$A/ps_hat) * Q1_hat)
+  Q0_aipw <- mean((1-dat$A)/(1-ps_hat) * dat$Y +
+                    (1 - (1-dat$A)/(1-ps_hat)) * Q0_hat)
+  cat("\nAIPW E[Y(1)]:", round(Q1_aipw, 4))
+  cat("  E[Y(0)]:", round(Q0_aipw, 4), "\n")
+  if (Q1_aipw < 0 | Q1_aipw > 1 | Q0_aipw < 0 | Q0_aipw > 1) {
+    cat("WARNING: AIPW counterfactual means outside [0,1].\n")
+    cat("This indicates instability. Prefer TMLE.\n")
+  }
+}
+```
+
+**When double robustness masks instability.** A subtle failure mode of both AIPW and TMLE occurs when both nuisance functions are moderately misspecified but their errors partially cancel, producing a point estimate that appears reasonable but confidence intervals with incorrect coverage. This failure mode is difficult to detect from the data alone, because the usual diagnostics (EIF mean near zero, reasonable variance) may all look acceptable. The most effective diagnostic for this failure mode is a simulation study using a data-generating process calibrated to the observed data: if the simulated coverage is substantially below nominal, the double robustness is not providing adequate protection in the finite sample at hand.
+
+Another manifestation of masked instability occurs when the EIF variance is dominated by a small number of observations. The point estimate may be stable (because the mean of the EIF is constrained to be near zero), but the variance estimate may be unreliable, leading to confidence intervals that are either too narrow (if the high-influence observations happen to have small EIF values in the particular sample) or too wide (if they happen to have large values). The variance decomposition diagnostics described in Section 4.3 are designed to detect this pattern.
 
 ---
 
-## 5. Estimator Performance Diagnostics {#sec-performance-outline}
+## 5. Estimator Performance Diagnostics {#sec-performance}
 
-This section will address diagnostics for the finite-sample behavior of causal estimators.
+The preceding sections addressed diagnostics for the identification assumptions (Section 2), the nuisance function estimates (Section 3), and the influence function structure (Section 4). This section turns to the performance of the causal estimator itself: given the fitted nuisance functions and the chosen estimation procedure, how reliable is the resulting causal estimate? Estimator performance diagnostics assess whether the finite-sample behavior of the estimator is consistent with its asymptotic theory, whether the variance estimates and confidence intervals are trustworthy, and whether alternative estimation strategies would produce substantially different conclusions.
 
-### 5.1 Finite Sample Bias and Monte Carlo Diagnostics
+### 5.1 Finite-Sample Bias and Monte Carlo Diagnostics
 
-- Using simulation under known DGPs to assess bias, variance, MSE, and coverage of each estimator
-- Designing simulations that stress-test specific aspects: near-positivity violations, outcome model misspecification, rare outcomes, small samples
-- Reporting conventions for simulation studies: tables of bias, RMSE, coverage, and average CI width
+The asymptotic theory for TMLE and AIPW guarantees $\sqrt{n}$-consistency and asymptotic normality under conditions on the nuisance function estimation rates. In finite samples, however, these guarantees may not hold. The most direct way to assess finite-sample performance is through Monte Carlo simulation: the analyst defines a data-generating process (DGP), draws many samples, applies the estimation procedure to each sample, and computes summary statistics that characterize the estimator's behavior.
+
+The key metrics for Monte Carlo diagnostics are:
+
+**Bias**: $\text{Bias} = E[\hat{\psi}] - \psi_0$, estimated by the mean of the estimates across simulations minus the true parameter value. Nonzero bias indicates that the estimator is not centered on the truth in finite samples, either because the nuisance functions are insufficiently well-estimated or because the sample size is too small for the asymptotic bias correction to be effective.
+
+**Root mean squared error (RMSE)**: $\text{RMSE} = \sqrt{E[(\hat{\psi} - \psi_0)^2]}$, which combines bias and variance into a single measure of estimation accuracy.
+
+**Empirical coverage**: The fraction of simulated confidence intervals that contain the true parameter value. Nominal 95\% coverage should be near 0.95. Coverage below nominal indicates that the confidence intervals are too narrow---the variance is underestimated or the estimator's sampling distribution departs from normality.
+
+**Average confidence interval width**: The mean width of the confidence intervals across simulations. Comparing the average width to the empirical standard deviation of the estimates provides a diagnostic for variance estimation: if the average width is substantially narrower than $2 \times 1.96 \times \text{SD}(\hat{\psi})$, the variance is underestimated.
+
+```r
+## Monte Carlo simulation for TMLE performance diagnostics
+run_simulation <- function(n, B = 500, true_ATE = 0.5) {
+  results <- data.frame(
+    ATE = numeric(B),
+    SE = numeric(B),
+    CI_lower = numeric(B),
+    CI_upper = numeric(B),
+    covers = logical(B)
+  )
+
+  for (b in 1:B) {
+    ## Generate data from known DGP
+    W1 <- rnorm(n)
+    W2 <- rbinom(n, 1, 0.3)
+    A  <- rbinom(n, 1, plogis(-0.5 + 0.4 * W1 + 1.5 * W2))
+    Y  <- true_ATE * A + 0.8 * W1 - 0.3 * W2 + rnorm(n, sd = 0.5)
+    W  <- data.frame(W1 = W1, W2 = W2)
+
+    fit <- tmle::tmle(Y = Y, A = A, W = W,
+                      Q.SL.library = "SL.glm",
+                      g.SL.library = "SL.glm")
+
+    results$ATE[b]      <- fit$estimates$ATE$psi
+    results$SE[b]       <- sqrt(fit$estimates$ATE$var.psi)
+    results$CI_lower[b] <- fit$estimates$ATE$CI[1]
+    results$CI_upper[b] <- fit$estimates$ATE$CI[2]
+    results$covers[b]   <- (fit$estimates$ATE$CI[1] <= true_ATE) &
+                           (fit$estimates$ATE$CI[2] >= true_ATE)
+  }
+
+  cat("== Monte Carlo Simulation Results ==\n")
+  cat("Sample size:", n, " | Simulations:", B, "\n")
+  cat("True ATE:", true_ATE, "\n\n")
+  cat("Bias:", round(mean(results$ATE) - true_ATE, 4), "\n")
+  cat("Empirical SD:", round(sd(results$ATE), 4), "\n")
+  cat("Mean estimated SE:", round(mean(results$SE), 4), "\n")
+  cat("SE ratio (mean SE / empirical SD):",
+      round(mean(results$SE) / sd(results$ATE), 3), "\n")
+  cat("RMSE:", round(sqrt(mean((results$ATE - true_ATE)^2)), 4), "\n")
+  cat("Coverage:", round(mean(results$covers), 3), "\n")
+  cat("Mean CI width:", round(mean(results$CI_upper - results$CI_lower), 4), "\n")
+
+  invisible(results)
+}
+
+## Run at different sample sizes to assess finite-sample behavior
+## sim_200 <- run_simulation(n = 200)
+## sim_500 <- run_simulation(n = 500)
+## sim_1000 <- run_simulation(n = 1000)
+```
+
+The design of the simulation DGP is as important as the summary statistics. The analyst should construct DGPs that stress-test the specific features of the problem at hand, rather than using generic simulations. Relevant stress tests include:
+
+**Near-positivity violations.** Setting the treatment mechanism to produce propensity scores near the boundaries (e.g., $P(A=1 \mid W) \in [0.02, 0.98]$) and examining how much the bias, RMSE, and coverage degrade relative to a well-separated DGP.
+
+**Outcome model misspecification.** Fitting the outcome regression with a simpler model (e.g., main-terms logistic regression) when the true outcome surface includes interactions or nonlinearities, and assessing whether the double robustness of TMLE/AIPW compensates for the misspecification.
+
+**Rare outcomes.** For binary outcomes with low event rates, the effective information about the treatment effect is limited, and the normal approximation may be poor. Simulations with event rates of 1\%--5\% can reveal whether the confidence intervals have adequate coverage.
+
+**Small samples.** Sample sizes below 200 are particularly challenging for semiparametric estimators that rely on cross-fitting, because the training folds may be too small for the nuisance function estimators to perform well. Simulations at $n = 50, 100, 200$ can identify the minimum sample size at which the estimator is reliable.
 
 ### 5.2 Bootstrap Diagnostics
 
-- Using the nonparametric bootstrap to assess the stability of point estimates and to compare bootstrap variance to influence-function-based variance
-- Diagnosing cases where bootstrap confidence intervals and Wald-type intervals disagree (suggesting non-normality of the estimator's sampling distribution)
-- Bootstrap as a diagnostic for the reliability of asymptotic inference
+The nonparametric bootstrap provides an independent assessment of the estimator's variability that can be compared to the influence-function-based variance estimate. For each bootstrap replicate $b = 1, \ldots, B$, the analyst draws a sample of size $n$ with replacement from the original data, applies the full estimation procedure (including nuisance function estimation), and records the resulting causal estimate $\hat{\psi}^{(b)}$. The bootstrap standard error is the standard deviation of $\hat{\psi}^{(b)}$ across replicates.
 
-### 5.3 Influence Curve Stability
+The bootstrap serves several diagnostic purposes in the context of causal inference.
 
-- Assessing the distribution of the estimated influence curve: normality (Q-Q plots, Shapiro-Wilk tests), skewness, kurtosis, and tail behavior
-- When the influence curve distribution is heavy-tailed, Wald-type confidence intervals may have poor coverage, and the analyst should consider alternative inference approaches (bootstrap, permutation tests, small-sample corrections)
+**Variance estimation validation.** The bootstrap standard error can be compared to the influence-function-based standard error $\hat{\sigma}/\sqrt{n}$. Agreement between the two provides reassurance that the influence-function-based inference is reliable. Disagreement---particularly when the bootstrap standard error is substantially larger than the influence-function-based standard error---indicates that the asymptotic variance is underestimated, which may occur when the influence curve distribution is heavy-tailed, when the sample size is small, or when the nuisance functions are estimated with high variability.
 
-### 5.4 Small Sample Corrections
+**Normality assessment.** The distribution of bootstrap estimates $\{\hat{\psi}^{(b)}\}_{b=1}^{B}$ should be approximately normal if the asymptotic theory is a good guide to finite-sample behavior. A histogram or Q-Q plot of the bootstrap estimates can reveal skewness, bimodality, or heavy tails that would invalidate Wald-type confidence intervals.
 
-- Methods for improving finite-sample performance: cross-validated TMLE (CV-TMLE), higher-order TMLE, and finite-sample variance estimators
-- When to use each correction and how to diagnose whether it is needed
+**Confidence interval comparison.** Bootstrap percentile intervals (using the 2.5th and 97.5th percentiles of the bootstrap distribution) and BCa intervals (bias-corrected and accelerated) can be compared to Wald-type intervals. When these interval types disagree, the Wald-type interval is likely unreliable, and the analyst should consider using the bootstrap intervals instead or investigating the source of the disagreement.
+
+```r
+## Bootstrap diagnostics for TMLE
+B_boot <- 500
+boot_estimates <- numeric(B_boot)
+
+for (b in 1:B_boot) {
+  idx <- sample(1:nrow(dat), nrow(dat), replace = TRUE)
+  dat_b <- dat[idx, ]
+
+  fit_b <- tmle::tmle(
+    Y = dat_b$Y, A = dat_b$A,
+    W = dat_b[, c("W1", "W2", "W3")],
+    Q.SL.library = "SL.glm",
+    g.SL.library = "SL.glm"
+  )
+  boot_estimates[b] <- fit_b$estimates$ATE$psi
+}
+
+## Compare bootstrap and influence-function-based inference
+IC_se <- sqrt(tmle_fit$estimates$ATE$var.psi)
+boot_se <- sd(boot_estimates)
+
+cat("== Bootstrap vs Influence Function Inference ==\n")
+cat("IF-based SE:", round(IC_se, 4), "\n")
+cat("Bootstrap SE:", round(boot_se, 4), "\n")
+cat("Ratio (boot/IF):", round(boot_se / IC_se, 3), "\n\n")
+
+## Wald interval
+psi_hat <- tmle_fit$estimates$ATE$psi
+wald_ci <- psi_hat + c(-1, 1) * 1.96 * IC_se
+
+## Bootstrap percentile interval
+boot_pctile_ci <- quantile(boot_estimates, c(0.025, 0.975))
+
+cat("Wald CI:", round(wald_ci, 4), "\n")
+cat("Boot percentile CI:", round(boot_pctile_ci, 4), "\n")
+cat("Width ratio (boot/Wald):",
+    round(diff(boot_pctile_ci) / diff(wald_ci), 3), "\n\n")
+
+## Normality of bootstrap distribution
+sw_test <- shapiro.test(boot_estimates)
+cat("Shapiro-Wilk test for normality of bootstrap dist:\n")
+cat("  W =", round(sw_test$statistic, 4),
+    "  p =", round(sw_test$p.value, 4), "\n")
+cat("  Skewness:", round(moments::skewness(boot_estimates), 3), "\n")
+cat("  Kurtosis:", round(moments::kurtosis(boot_estimates), 3),
+    "(normal = 3)\n")
+```
+
+An important caveat about bootstrap diagnostics for TMLE and AIPW is that the bootstrap may not be asymptotically valid for these estimators when highly adaptive machine learning methods are used for nuisance estimation. The bootstrap validity requires that the nuisance estimator behaves sufficiently smoothly as a function of the data, which may not hold for tree-based methods or other discontinuous learners. For this reason, the bootstrap is best used as a diagnostic tool (to check the plausibility of influence-function-based inference) rather than as the primary inference method. When the bootstrap and influence function approaches agree, the influence-function-based inference is likely reliable. When they disagree, the analyst should investigate the source of the disagreement rather than automatically defaulting to the bootstrap.
+
+### 5.3 Influence Curve Stability and Normality
+
+The Wald-type confidence interval for TMLE and AIPW relies on the central limit theorem applied to the estimated influence curve: $\sqrt{n}(\hat{\psi} - \psi_0) \approx n^{-1/2}\sum_{i=1}^{n} \hat{D}(O_i) \xrightarrow{d} N(0, \sigma^2)$. This approximation is valid when the influence curve distribution is sufficiently well-behaved---specifically, when it has finite variance and satisfies a Lindeberg-type condition. In practice, the approximation can fail when the influence curve distribution is heavy-tailed, highly skewed, or contains outliers that dominate the sum.
+
+The analyst should assess the distribution of the estimated influence curve using the following diagnostics.
+
+**Q-Q plots.** A normal Q-Q plot of the estimated influence curve values $\{\hat{D}(O_i)\}_{i=1}^{n}$ provides a visual assessment of normality. Systematic departures from the diagonal line indicate non-normality. Heavy tails (S-shaped departures) are the most common and most concerning pattern, as they indicate that a few observations exert disproportionate influence on the estimator.
+
+**Skewness and kurtosis.** The skewness and excess kurtosis of the influence curve distribution provide numerical summaries. For a normal distribution, the skewness is 0 and the kurtosis is 3 (excess kurtosis is 0). Positive skewness indicates that the right tail is heavier than the left; negative skewness indicates the opposite. Excess kurtosis greater than 3 indicates heavy tails relative to the normal distribution. As a rough guideline, $|\text{skewness}| > 1$ or excess kurtosis $> 5$ warrant concern about the normality approximation.
+
+**Formal normality tests.** The Shapiro-Wilk test provides a formal test of normality. However, its interpretation should be tempered by the fact that, in large samples, even trivial departures from normality will produce significant $p$-values. The test is most useful in moderate samples ($n = 100$--$500$) where the power is sufficient to detect meaningful departures but not so great as to reject normality for negligible reasons.
+
+```r
+## Influence curve stability diagnostics
+IC <- tmle_fit$estimates$ATE$IC
+n <- length(IC)
+
+cat("== Influence Curve Distribution ==\n")
+cat("Mean:", round(mean(IC), 6), "\n")
+cat("SD:", round(sd(IC), 4), "\n")
+cat("Skewness:", round(moments::skewness(IC), 3), "\n")
+cat("Kurtosis:", round(moments::kurtosis(IC), 3), "(normal = 3)\n")
+cat("Min:", round(min(IC), 3), "  Max:", round(max(IC), 3), "\n")
+
+## Q-Q plot
+qqnorm(IC, main = "Normal Q-Q Plot of Influence Curve")
+qqline(IC, col = "red")
+
+## Shapiro-Wilk test (on subsample if n > 5000)
+if (n <= 5000) {
+  sw <- shapiro.test(IC)
+  cat("\nShapiro-Wilk: W =", round(sw$statistic, 4),
+      " p =", round(sw$p.value, 4), "\n")
+} else {
+  sw <- shapiro.test(sample(IC, 5000))
+  cat("\nShapiro-Wilk (subsample of 5000): W =",
+      round(sw$statistic, 4),
+      " p =", round(sw$p.value, 4), "\n")
+}
+
+## Tail contribution
+cat("\nTail weight:\n")
+for (k in c(2, 3, 4, 5)) {
+  n_extreme <- sum(abs(IC) > k * sd(IC))
+  expected_normal <- round(n * 2 * pnorm(-k), 1)
+  cat(sprintf("  |IC| > %d*SD: %d observed vs %.1f expected under normality\n",
+              k, n_extreme, expected_normal))
+}
+```
+
+When the influence curve distribution is substantially non-normal, the analyst has several options. The bootstrap (Section 5.2) provides an alternative basis for confidence intervals that does not rely on the normal approximation. Small-sample corrections (Section 5.4) can improve the accuracy of Wald-type intervals. In some cases, the non-normality is driven by a small number of extreme observations associated with near-positivity violations, and truncation or estimand redefinition (Section 8) can address the root cause.
+
+### 5.4 Small-Sample Corrections
+
+When the sample size is small relative to the complexity of the estimation problem, several corrections can improve the finite-sample performance of TMLE and AIPW.
+
+**Cross-validated TMLE (CV-TMLE).** Standard TMLE estimates the nuisance functions on the full sample and then applies the targeting step on the same sample. This can produce a subtle form of overfitting: the targeting step may exploit information about the relationship between the nuisance function estimates and the outcome that is specific to the sample at hand, producing an estimate that is overly optimistic. CV-TMLE addresses this by using cross-fitting: the data are split into $V$ folds, nuisance functions are estimated on each training fold, and the targeting step is applied using the validation fold predictions. The final estimate averages across folds.
+
+CV-TMLE is recommended as the default approach when machine learning methods are used for nuisance estimation, because it ensures that the estimator's asymptotic linearity holds under weaker conditions on the nuisance function estimation rates. The diagnostic question is whether CV-TMLE and standard TMLE produce substantially different results. If they do, this indicates that the standard TMLE estimate is affected by overfitting, and the CV-TMLE estimate should be preferred.
+
+```r
+## CV-TMLE vs standard TMLE comparison
+## Standard TMLE
+fit_standard <- tmle::tmle(
+  Y = dat$Y, A = dat$A,
+  W = dat[, c("W1", "W2", "W3")],
+  Q.SL.library = c("SL.glm", "SL.glmnet", "SL.ranger"),
+  g.SL.library = c("SL.glm", "SL.glmnet", "SL.ranger")
+)
+
+## CV-TMLE (if available via drtmle or tmle3)
+if (requireNamespace("drtmle", quietly = TRUE)) {
+  fit_cvtmle <- drtmle::drtmle(
+    Y = dat$Y, A = dat$A,
+    W = dat[, c("W1", "W2", "W3")],
+    SL_Q = c("SL.glm", "SL.glmnet", "SL.ranger"),
+    SL_g = c("SL.glm", "SL.glmnet", "SL.ranger"),
+    cvFolds = 10
+  )
+
+  cat("== CV-TMLE vs Standard TMLE ==\n")
+  cat("Standard TMLE:", round(fit_standard$estimates$ATE$psi, 4), "\n")
+  cat("CV-TMLE:", round(fit_cvtmle$drtmle$ATE$est, 4), "\n")
+  cat("Difference:", round(fit_standard$estimates$ATE$psi -
+                            fit_cvtmle$drtmle$ATE$est, 4), "\n")
+}
+```
+
+**Finite-sample variance corrections.** The standard influence-function-based variance estimator $\hat{\sigma}^2/n$ can be anticonservative in small samples because it does not account for the variability in the nuisance function estimates. Several corrections have been proposed. The most straightforward is the degrees-of-freedom correction $\hat{\sigma}^2 / (n - p)$, where $p$ is the number of parameters estimated in the nuisance functions, but this is difficult to define precisely for nonparametric estimators. A more principled approach is the sandwich variance estimator that accounts for the estimation of $g$ and $\bar{Q}$, as implemented in the `drtmle` package.
+
+**Higher-order TMLE.** Higher-order TMLE extends the standard TMLE by solving not only the first-order EIF equation but also higher-order estimating equations that provide additional bias correction. This can improve coverage in moderate samples where the first-order bias correction is insufficient. The practical implementation of higher-order TMLE is more complex than standard TMLE and is currently available only in specialized software.
+
+The diagnostic question for all small-sample corrections is whether they make a meaningful difference. If the corrected and uncorrected estimates agree, the sample size is likely adequate for the standard approach. If they disagree, the corrected estimate should be preferred, and the analyst should report the disagreement as evidence that the sample size is marginal for the intended analysis.
 
 ### 5.5 Comparative Diagnostics Across Estimators
 
-- Comparing TMLE, AIPW, IPTW, and parametric g-computation on the same data
-- Agreement among estimators as an informal robustness check (though agreement does not prove correctness)
-- Diagnosing when specific estimators are likely to perform poorly given the data characteristics
+Running multiple estimators on the same data provides an informal but valuable robustness diagnostic. The logic is straightforward: if TMLE, AIPW, IPTW, and g-computation all produce similar estimates, the analyst can be more confident that the result is not an artifact of a particular estimation strategy. If the estimates diverge, the pattern of divergence can reveal which aspects of the estimation are driving the differences.
+
+```r
+## Comparative estimator diagnostics
+cat("== Multi-Estimator Comparison ==\n\n")
+
+## 1. TMLE
+fit_tmle <- tmle::tmle(
+  Y = dat$Y, A = dat$A, W = dat[, c("W1", "W2", "W3")],
+  Q.SL.library = c("SL.glm", "SL.ranger"),
+  g.SL.library = c("SL.glm", "SL.ranger")
+)
+cat("TMLE:       ATE =", round(fit_tmle$estimates$ATE$psi, 4),
+    " SE =", round(sqrt(fit_tmle$estimates$ATE$var.psi), 4),
+    " 95% CI:", round(fit_tmle$estimates$ATE$CI, 4), "\n")
+
+## 2. AIPW (one-step)
+Q1 <- predict(Q_model, newdata = transform(dat, A = 1))
+Q0 <- predict(Q_model, newdata = transform(dat, A = 0))
+ps <- dat$ps
+eif_vals <- dat$A/ps * (dat$Y - Q1) - (1-dat$A)/(1-ps) * (dat$Y - Q0) +
+            Q1 - Q0
+psi_aipw <- mean(eif_vals)
+se_aipw  <- sd(eif_vals) / sqrt(nrow(dat))
+cat("AIPW:       ATE =", round(psi_aipw, 4),
+    " SE =", round(se_aipw, 4),
+    " 95% CI:", round(psi_aipw + c(-1,1)*1.96*se_aipw, 4), "\n")
+
+## 3. IPTW (stabilized)
+sw <- ifelse(dat$A == 1,
+             mean(dat$A) / ps,
+             (1 - mean(dat$A)) / (1 - ps))
+psi_iptw <- weighted.mean(dat$Y[dat$A==1], sw[dat$A==1]) -
+            weighted.mean(dat$Y[dat$A==0], sw[dat$A==0])
+cat("IPTW (stab): ATE =", round(psi_iptw, 4), "\n")
+
+## 4. G-computation (parametric)
+Q_param <- glm(Y ~ A * (W1 + W2 + W3), data = dat)
+Q1_param <- predict(Q_param, newdata = transform(dat, A = 1))
+Q0_param <- predict(Q_param, newdata = transform(dat, A = 0))
+psi_gcomp <- mean(Q1_param - Q0_param)
+cat("G-comp:     ATE =", round(psi_gcomp, 4), "\n")
+
+## Summary
+estimates <- c(fit_tmle$estimates$ATE$psi, psi_aipw, psi_iptw, psi_gcomp)
+cat("\nRange of estimates:", round(diff(range(estimates)), 4), "\n")
+cat("Max pairwise difference:", round(max(dist(estimates)), 4), "\n")
+```
+
+The pattern of agreement and disagreement among estimators is diagnostically informative in specific ways.
+
+**TMLE and AIPW agree but IPTW disagrees.** This pattern suggests that the outcome model is contributing meaningful information. TMLE and AIPW both use the outcome model (through the augmentation term), which partially compensates for inaccuracies in the propensity score model. IPTW relies entirely on the propensity score model and is therefore more sensitive to propensity score misspecification and positivity violations.
+
+**All doubly robust estimators agree but differ from g-computation.** This pattern suggests that the outcome model is misspecified and the propensity score model is providing a useful correction. G-computation relies entirely on the outcome model, while the doubly robust estimators correct for outcome model bias using the propensity score.
+
+**All estimators agree.** This provides the strongest evidence (among the diagnostics available from a single dataset) that the result is robust to the choice of estimation strategy. However, agreement does not prove correctness: if all estimators are biased in the same direction (due to unmeasured confounding, for example), they will agree on a biased answer.
+
+**All estimators disagree.** This is the most concerning pattern. It indicates that the data do not strongly identify the causal parameter---small changes in the estimation approach lead to large changes in the estimate. The analyst should investigate the source of the disagreement (positivity violations, outcome model instability, small sample size) and consider whether the intended estimand is credibly supported by the data.
+
+::: {.callout-important}
+## When Asymptotic Normality Is Unreliable
+
+The Wald-type confidence interval $\hat{\psi} \pm z_{1-\alpha/2} \hat{\sigma}/\sqrt{n}$ relies on the approximation $\sqrt{n}(\hat{\psi} - \psi_0) \approx N(0, \sigma^2)$. This approximation can fail in several identifiable circumstances, each of which has diagnostic indicators:
+
+**Heavy-tailed influence curves.** When the kurtosis of the estimated influence curve exceeds 5--6, the normal approximation converges slowly, and the Wald interval may have poor coverage. Diagnostic: kurtosis of the influence curve, Q-Q plots, tail weight analysis.
+
+**Near-positivity violations.** When propensity scores are near the boundaries, the influence curve has a heavy right tail (for observations with large $1/g$ terms), and the sum $n^{-1/2}\sum_i D(O_i)$ may not be well-approximated by a normal distribution even for moderate $n$. Diagnostic: maximum $|H|$ or $|D|$, effective sample size, proportion of observations with extreme weights.
+
+**Small effective sample size.** When the effective sample size (Section 2.2.2) is much smaller than the nominal sample size, the central limit theorem is effectively applied to a smaller sample, requiring more observations for the approximation to be accurate. Diagnostic: ESS ratio, comparison of IF-based and bootstrap standard errors.
+
+**Rare outcomes.** For binary outcomes with event rates below 5\%, the influence curve distribution is highly skewed (because most observations contribute small positive values and a few contribute large negative values, or vice versa). Diagnostic: event rate, skewness of the influence curve.
+
+**Multiple testing.** When the analyst estimates effects for many subgroups or time points, the normal approximation errors accumulate. Diagnostic: number of comparisons, agreement between nominal and empirical coverage in simulation.
+
+When any of these indicators suggest that asymptotic normality is unreliable, the analyst should consider alternative inference approaches: bootstrap confidence intervals, permutation tests, small-sample TMLE corrections, or---most importantly---honest acknowledgment that the confidence intervals may have incorrect coverage.
+:::
 
 ---
 
