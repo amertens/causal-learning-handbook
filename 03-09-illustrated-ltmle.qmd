@@ -54,6 +54,13 @@ This works beautifully for a single treatment decision at one point in time. But
 
 ---
 
+```{r}
+#| include: false
+library(dagitty)
+library(ggdag)
+library(ggplot2)
+```
+
 # 2. The New Problem: Time-Varying Treatment and Confounding
 
 ## A simple scenario
@@ -62,24 +69,39 @@ Consider a patient followed over **two time periods**. At each period, they eith
 
 The data for one patient looks like:
 
-```
-Baseline → Treatment₁ → Health₁ → Treatment₂ → Health₂ → Outcome
-   W          A₁          L₁          A₂          L₂         Y
+```{r}
+#| label: fig-ltmle-timeline
+#| fig-cap: "Longitudinal data structure: baseline, two treatment-confounder cycles, and outcome"
+#| fig-width: 9
+#| fig-height: 2.5
+dag_timeline <- dagify(
+  A1 ~ W, L1 ~ A1 + W, A2 ~ L1 + W, L2 ~ A2 + L1, Y ~ L2 + A2,
+  coords = list(
+    x = c(W = 0, A1 = 1, L1 = 2, A2 = 3, L2 = 4, Y = 5),
+    y = c(W = 0, A1 = 0, L1 = 0, A2 = 0, L2 = 0, Y = 0)
+  )
+)
+ggdag(dag_timeline) + theme_dag()
 ```
 
 ## Why is this harder?
 
 The critical complication is a **feedback loop**:
 
-```
-                    ┌──────────────────────────────┐
-                    │                              │
-                    ▼                              │
-   W ──→ A₁ ──→ L₁ ──→ A₂ ──→ Y                  │
-         │              ▲                          │
-         │              │                          │
-         └──────────────┘                          │
-         (A₁ affects L₁, which affects A₂)        │
+```{r}
+#| label: fig-ltmle-feedback
+#| fig-cap: "Time-varying confounding with treatment-confounder feedback"
+#| fig-width: 8
+#| fig-height: 4
+dag_feedback <- dagify(
+  A1 ~ W, L1 ~ A1 + W, A2 ~ L1 + A1 + W, Y ~ A1 + A2 + L1 + W,
+  exposure = "A1", outcome = "Y",
+  coords = list(
+    x = c(W = 0, A1 = 1, L1 = 2, A2 = 3, Y = 4),
+    y = c(W = 1, A1 = 0, L1 = 0.8, A2 = 0, Y = 0)
+  )
+)
+ggdag(dag_feedback) + theme_dag()
 ```
 
 - $L_1$ is a **confounder** for the $A_2 \to Y$ relationship (it affects both $A_2$ and $Y$)

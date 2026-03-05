@@ -36,6 +36,9 @@ knitr::opts_chunk$set(
   message = FALSE,
   warning = FALSE
 )
+library(dagitty)
+library(ggdag)
+library(ggplot2)
 ```
 
 ## The Regulatory Context
@@ -225,14 +228,31 @@ cat("Patients who died before AKI:", sum(dat$died_first), "\n")
 
 The DAG below summarizes the causal structure. Baseline confounders affect treatment, switching, death, and AKI. Treatment affects AKI hazard (HR = 3.0 early) and switching probability. Switching is strongly informative (driven by CKD, which also drives AKI). Death competes with AKI. Each estimand strategy handles these relationships differently.
 
-```
-        age, ckd, diabetes, cirrhosis, hiv
-          /       |        \          \
-         v        v         v          v
-    Treatment --> Switch --> Censoring  Death
-         \        |        /          /
-          v       v       v          v
-              AKI event  <----------
+```{r}
+#| label: fig-safety-dag
+#| fig-cap: "Causal structure for time-to-event safety analysis with intercurrent events"
+#| fig-width: 8
+#| fig-height: 5
+dag_safety <- dagify(
+  Treatment ~ W,
+  Switch ~ Treatment + W,
+  Censoring ~ Switch + W,
+  Death ~ Treatment + W,
+  AKI ~ Treatment + Switch + Death + W,
+  exposure = "Treatment", outcome = "AKI",
+  labels = c(W = "Baseline\nconfounders",
+             Treatment = "Treatment",
+             Switch = "Switch",
+             Censoring = "Censoring",
+             Death = "Death",
+             AKI = "AKI event"),
+  coords = list(
+    x = c(W = 1, Treatment = 0, Switch = 1, Censoring = 2, Death = 2.5, AKI = 1.5),
+    y = c(W = 1, Treatment = 0, Switch = 0, Censoring = 0, Death = 0.5, AKI = -1)
+  )
+)
+ggdag(dag_safety, text = FALSE, use_labels = "label", text_size = 3) +
+  theme_dag()
 ```
 
 # Defining Five Estimand Strategies
