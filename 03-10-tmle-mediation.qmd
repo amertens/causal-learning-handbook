@@ -17,6 +17,9 @@ knitr::opts_chunk$set(
   message = FALSE,
   warning = FALSE
 )
+library(dagitty)
+library(ggdag)
+library(ggplot2)
 ```
 
 # Why This Matters
@@ -65,13 +68,32 @@ This matters for labeling, for understanding whether other glucose-lowering drug
 
 Before diving into estimation, it helps to be precise about what a mediator is --- and what it is not.
 
-```
-Confounder (W):         Moderator (V):          Mediator (M):           Collider (C):
-  W                       V                       A → M → Y               A → C ← Y
- / \                      |                       |       ↑               (conditioning
-A   Y                  A──┼──→ Y                  └───────┘                on C opens a
-                       (V modifies                 (direct)                spurious path)
-                        A→Y effect)
+```{r}
+#| label: fig-primer-dags
+#| fig-cap: "Four fundamental variable roles in causal diagrams"
+#| fig-width: 10
+#| fig-height: 3
+
+dag_confounder <- dagify(A ~ W, Y ~ W,
+  coords = list(x = c(W = 1, A = 0, Y = 2), y = c(W = 1, A = 0, Y = 0))
+)
+dag_moderator <- dagify(Y ~ A + V,
+  coords = list(x = c(A = 0, V = 1, Y = 2), y = c(A = 0, V = 1, Y = 0))
+)
+dag_mediator <- dagify(M ~ A, Y ~ A + M,
+  coords = list(x = c(A = 0, M = 1, Y = 2), y = c(A = 0, M = 0.5, Y = 0))
+)
+dag_collider <- dagify(C ~ A + Y,
+  coords = list(x = c(A = 0, C = 1, Y = 2), y = c(A = 0, C = 0.5, Y = 0))
+)
+
+p1 <- ggdag(dag_confounder) + theme_dag() + labs(title = "Confounder (W)")
+p2 <- ggdag(dag_moderator) + theme_dag() + labs(title = "Moderator (V)")
+p3 <- ggdag(dag_mediator) + theme_dag() + labs(title = "Mediator (M)")
+p4 <- ggdag(dag_collider) + theme_dag() + labs(title = "Collider (C)")
+
+library(patchwork)
+p1 + p2 + p3 + p4 + plot_layout(nrow = 1)
 ```
 
 - A **confounder** is a common cause of treatment and outcome. Adjusting for it removes bias.
@@ -86,10 +108,19 @@ A   Y                  A──┼──→ Y                  └─────
 
 A variable $Z$ that is affected by treatment and confounds the mediator-outcome relationship creates the hardest problem in mediation analysis. If $Z$ exists and you ignore it, your decomposition is biased. We return to this below when choosing the estimand.
 
-```
-     A ──→ Z ──→ M ──→ Y
-               ↗       ↑
-              Z ───────┘
+```{r}
+#| label: fig-intermediate-confounder
+#| fig-cap: "Intermediate confounder Z: affected by A, confounds M → Y"
+#| fig-width: 5
+#| fig-height: 3
+dag_ic <- dagify(
+  Z ~ A, M ~ A + Z, Y ~ A + M + Z,
+  coords = list(
+    x = c(A = 0, Z = 1, M = 2, Y = 3),
+    y = c(A = 0, Z = 0.5, M = 0, Y = 0)
+  )
+)
+ggdag(dag_ic) + theme_dag()
 ```
 :::
 
@@ -133,32 +164,40 @@ For this tutorial, we will estimate all three to compare.
 
 The mediation DAG for our example:
 
-```
-              W (baseline confounders)
-            / | \
-           /  |  \
-          v   v   v
-          A → M → Y
-          |       ↑
-          └───────┘
-            (direct)
+```{r}
+#| label: fig-mediation-dag-simple
+#| fig-cap: "Simple mediation DAG: W confounds all relationships, A affects Y directly and through M"
+#| fig-width: 6
+#| fig-height: 4
+dag_simple <- dagify(
+  A ~ W, M ~ A + W, Y ~ A + M + W,
+  exposure = "A", outcome = "Y", mediator = "M",
+  coords = list(
+    x = c(W = 1, A = 0, M = 1, Y = 2),
+    y = c(W = 1, A = 0, M = 0, Y = 0)
+  )
+)
+ggdag(dag_simple) + theme_dag()
 ```
 
 The time ordering must be: $W$ (baseline) $\to$ $A$ (treatment assignment) $\to$ $M$ (6-month HbA1c) $\to$ $Y$ (1-year MACE). This ordering is not negotiable --- if $M$ is measured after $Y$, or if $A$ and $M$ are measured simultaneously, the decomposition is not credible.
 
 When we add an intermediate confounder $Z$ (e.g., blood pressure change caused by treatment, affecting both mediator trajectory and outcome):
 
-```
-              W (baseline confounders)
-            / | \
-           /  |  \
-          v   v   v
-          A → Z → M → Y
-          |   |       ↑
-          |   └───────┘
-          |           ↑
-          └───────────┘
-            (direct)
+```{r}
+#| label: fig-mediation-dag-z
+#| fig-cap: "Mediation DAG with intermediate confounder Z (affected by A, confounds M → Y)"
+#| fig-width: 7
+#| fig-height: 4
+dag_with_z <- dagify(
+  A ~ W, Z ~ A + W, M ~ A + Z + W, Y ~ A + M + Z + W,
+  exposure = "A", outcome = "Y", mediator = "M",
+  coords = list(
+    x = c(W = 1.5, A = 0, Z = 1, M = 2, Y = 3),
+    y = c(W = 1, A = 0, Z = 0, M = 0, Y = 0)
+  )
+)
+ggdag(dag_with_z) + theme_dag()
 ```
 
 Now $Z$ is post-treatment and confounds $M \to Y$. Natural effects are not identified without the cross-world assumption. Recanting twins and randomized interventional effects can handle this.
@@ -329,16 +368,23 @@ dat |>
 
 The DAG for this simulation:
 
-```
-     W (age, bmi, hba1c_bl, cvd, egfr, statin)
-    /|\
-   / | \
-  v  v  v
-  A → Z → M → Y
-  |   |       ↑
-  |   └───────┘  (Z confounds M→Y)
-  |           ↑
-  └───────────┘  (direct A→Y)
+```{r}
+#| label: fig-simulation-dag
+#| fig-cap: "DAG for the simulated data-generating process"
+#| fig-width: 7
+#| fig-height: 4
+dag_sim <- dagify(
+  A ~ W, Z ~ A + W, M ~ A + Z + W, Y ~ A + M + Z + W,
+  exposure = "A", outcome = "Y",
+  labels = c(W = "W\n(age, bmi, hba1c_bl,\ncvd, egfr, statin)",
+             A = "A", Z = "Z", M = "M", Y = "Y"),
+  coords = list(
+    x = c(W = 1.5, A = 0, Z = 1, M = 2, Y = 3),
+    y = c(W = 1, A = 0, Z = 0, M = 0, Y = 0)
+  )
+)
+ggdag(dag_sim, text = TRUE, use_labels = "label", text_size = 2.8) +
+  theme_dag()
 ```
 
 Because $Z$ is affected by $A$ and confounds $M \to Y$, natural effects require the cross-world assumption. Recanting twins and randomized interventional effects handle $Z$ explicitly.
