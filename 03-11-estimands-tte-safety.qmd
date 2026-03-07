@@ -6,7 +6,9 @@ format: html
 
 # Estimands in Time-to-Event Real-World Safety Analyses
 
-In real-world safety studies, the question "Does this drug increase the risk of adverse events?" sounds simple. But the answer depends critically on how you handle **intercurrent events** — treatment switching, discontinuation, death from other causes — that occur between treatment initiation and the outcome. Different handling strategies define different **estimands**, and each estimand answers a fundamentally different scientific question.
+This is the final chapter of the handbook, and it returns to the most fundamental lesson: the answer you get depends on the question you ask. Every preceding chapter has built toward a common discipline of defining the estimand before choosing the estimator. Here, we see what happens when that discipline is neglected in time-to-event safety studies, where intercurrent events force analysts to make choices that silently redefine the scientific question.
+
+In real-world safety studies, the question "Does this drug increase the risk of adverse events?" sounds simple. But the answer depends critically on how you handle **intercurrent events** (treatment switching, discontinuation, death from other causes) that occur between treatment initiation and the outcome. Different handling strategies define different **estimands**, and each estimand answers a fundamentally different scientific question.
 
 This chapter uses a fully simulated safety study to illustrate all five ICH E9(R1) estimand strategies side by side, showing how the same data can yield strikingly different estimates depending on the causal question being asked.
 
@@ -22,7 +24,7 @@ This chapter uses a fully simulated safety study to illustrate all five ICH E9(R
 
 ::: {.callout-important}
 ## Sources and scope
-This chapter is educational. Causal conclusions depend on identification assumptions (e.g., consistency, exchangeability, positivity) and on diagnostic evidence that the data support the target estimand. When flexible machine learning is used for nuisance estimation, valid inference typically requires cross-fitting or a cross-validated TMLE variant, plus appropriate rate conditions.
+This chapter is educational. Causal conclusions depend on the identification assumptions introduced in Chapter 1.3 (consistency, exchangeability, positivity) and on diagnostic evidence that the data support the target estimand. When flexible machine learning is used for nuisance estimation, valid inference typically requires cross-fitting or a cross-validated TMLE variant, plus appropriate rate conditions.
 :::
 
 ```{r}
@@ -69,7 +71,7 @@ The answer depends on the estimand.
 
 We construct a realistic post-marketing safety dataset from scratch, simulating 100,000 patients eligible for one of two hepatitis C treatments, with AKI as the safety endpoint. The simulation is designed so that informative switching creates large, visible differences between estimand strategies.
 
-A post-marketing surveillance program compares **Treatment A** (`treatment = 1`, sofosbuvir-containing regimen) to **Treatment B** (`treatment = 0`, non-SOF comparator). The safety concern is that SOF may increase early risk of AKI, particularly in patients with pre-existing kidney disease. The treatment effect is strongly time-varying: elevated risk in the first 90 days (HR = 3.0), followed by attenuation (HR = 0.6) — mimicking a transient nephrotoxic effect that is large enough to drive treatment switching.
+A post-marketing surveillance program compares **Treatment A** (`treatment = 1`, sofosbuvir-containing regimen) to **Treatment B** (`treatment = 0`, non-SOF comparator). The safety concern is that SOF may increase early risk of AKI, particularly in patients with pre-existing kidney disease. The treatment effect is strongly time-varying: elevated risk in the first 90 days (HR = 3.0), followed by attenuation (HR = 0.6), mimicking a transient nephrotoxic effect that is large enough to drive treatment switching.
 
 ## Baseline Covariates
 
@@ -148,7 +150,7 @@ cat("Patients who die before AKI:", sum(died_before_aki), "(",
 
 ## Informative Treatment Switching
 
-Approximately 15–20% of SOF patients switch treatment between days 15–75, with switching strongly driven by CKD and early renal symptoms — the same factors that increase AKI risk. This makes switching highly informative, creating large differences between estimand strategies.
+Approximately 15–20% of SOF patients switch treatment between days 15–75, with switching strongly driven by CKD and early renal symptoms, the same factors that increase AKI risk. This makes switching highly informative, creating large differences between estimand strategies.
 
 ```{r}
 # --- Treatment switching (strongly informative) ---
@@ -261,11 +263,11 @@ Using the same simulated data, we define and estimate five distinct estimands.
 
 **Treatment-policy** ignores switching and follows all patients from initiation to AKI, death, or administrative censoring. It asks: what is the 90-day risk of AKI comparing initiation of SOF vs. non-SOF, regardless of subsequent treatment changes? This is analogous to intent-to-treat in a trial and requires only baseline exchangeability. Its limitation is that the effect is diluted when many patients switch.
 
-**Composite** folds switching and death into the endpoint. Any of AKI, death, or switching counts as an "event." This avoids censoring at intercurrent events entirely but combines clinically distinct outcomes — a safety signal driven mainly by switching (not AKI) could be misleading.
+**Composite** folds switching and death into the endpoint. Any of AKI, death, or switching counts as an "event." This avoids censoring at intercurrent events entirely but combines clinically distinct outcomes. A safety signal driven mainly by switching (not AKI) could be misleading.
 
 **Hypothetical** models the counterfactual via IPCW: what would the 90-day AKI risk have been if no patients switched? This targets the pure pharmacological effect but requires correct modeling of the switching mechanism (sequential ignorability). If unmeasured factors drive switching, IPCW is biased.
 
-**While-on-treatment** censors patients at the time of switching and counts only events occurring before any switch. This requires switching to be non-informative conditional on covariates. In our simulation, switching is highly informative — CKD patients on SOF switch the most and are at highest AKI risk. Censoring them removes the highest-risk patients from the SOF arm, making SOF look artificially safer.
+**While-on-treatment** censors patients at the time of switching and counts only events occurring before any switch. This requires switching to be non-informative conditional on covariates. In our simulation, switching is highly informative: CKD patients on SOF switch the most and are at highest AKI risk. Censoring them removes the highest-risk patients from the SOF arm, making SOF look artificially safer.
 
 ::: {.callout-warning}
 The while-on-treatment strategy is particularly dangerous in safety studies when switching is informative. It can mask a true safety signal by selectively removing the highest-risk patients from the treatment arm.
@@ -666,13 +668,13 @@ Each estimand tells a different story:
 - **Treatment-policy:** "Patients assigned to SOF had higher 90-day AKI risk regardless of subsequent treatment changes." This is the most policy-relevant estimand when switching reflects real-world practice.
 - **Composite:** "SOF patients had higher 90-day risk of AKI, death, or treatment failure." The risk difference is largest because switching itself counts as an event and is far more common in the SOF arm.
 - **Hypothetical:** "If no patients had switched, SOF would have been associated with higher 90-day AKI risk." This targets the pure drug effect and typically shows a larger risk difference than treatment-policy because it does not benefit from dilution.
-- **While-on-treatment:** "While patients remained on SOF, the AKI risk difference was smallest." This is classic informative censoring bias — the highest-risk patients (CKD, early symptoms) were censored when they switched, making SOF look artificially safer.
+- **While-on-treatment:** "While patients remained on SOF, the AKI risk difference was smallest." This is classic informative censoring bias: the highest-risk patients (CKD, early symptoms) were censored when they switched, making SOF look artificially safer.
 - **Principal stratum:** "Among always-adherers, the risk difference was intermediate." This applies to a compliant subpopulation that may not be representative.
 
 ::: {.callout-warning}
 ## Informative switching creates divergent estimates
 
-While-on-treatment **underestimates** risk because censoring at switch removes the sickest SOF patients. Composite **overestimates** risk because switching (a clinical decision) is counted as an event. Treatment-policy and hypothetical bracket the truth from different directions. The spread between strategies grows with switching rate and informativeness — in this simulation with ~15–20% informative switching, risk differences vary by a factor of 2x or more.
+While-on-treatment **underestimates** risk because censoring at switch removes the sickest SOF patients. Composite **overestimates** risk because switching (a clinical decision) is counted as an event. Treatment-policy and hypothetical bracket the truth from different directions. The spread between strategies grows with switching rate and informativeness. In this simulation with ~15–20% informative switching, risk differences vary by a factor of 2x or more.
 :::
 
 **Matching estimand to decision context:**
@@ -691,7 +693,7 @@ There is no single "correct" estimand. The choice must be pre-specified in the s
 
 1. **Estimand choice defines the scientific question.** The same dataset yields five different answers. In this simulation, the risk difference ranged from near-zero (while-on-treatment, biased by informative censoring) to strongly positive (composite, inflated by switching events).
 
-2. **Intercurrent events are the bridge between biology and statistics.** Treatment switching, death, loss to follow-up — each must be explicitly handled, and the handling strategy defines the estimand.
+2. **Intercurrent events are the bridge between biology and statistics.** Treatment switching, death, loss to follow-up: each must be explicitly handled, and the handling strategy defines the estimand.
 
 3. **Informative switching is the critical threat.** When factors driving switching also drive the outcome (CKD in our simulation), the while-on-treatment estimand becomes dangerously biased.
 
@@ -707,7 +709,7 @@ There is no single "correct" estimand. The choice must be pre-specified in the s
 
 - ICH E9(R1) Addendum (2019). Addendum on estimands and sensitivity analyses in clinical trials. [EMA](https://www.ema.europa.eu/en/ich-e9-statistical-principles-clinical-trials)
 - Hernan MA, Robins JM (2020). *Causal Inference: What If*. Chapman & Hall/CRC. [Free online](https://www.hsph.harvard.edu/miguel-hernan/causal-inference-book/)
-- Rufibach K (2019). Treatment effect quantification for time-to-event endpoints -- Estimands, analysis strategies, and beyond. *Pharm Stat* 18(2):145-165.
+- Rufibach K (2019). Treatment effect quantification for time-to-event endpoints: Estimands, analysis strategies, and beyond. *Pharm Stat* 18(2):145-165.
 - Young JG, Hernan MA, Robins JM (2020). A causal framework for classical statistical estimands in failure-time settings with competing events. *Stat Med* 39(8):1199-1236.
 - Stensrud MJ, Hernan MA (2020). Why test for proportional hazards? *JAMA* 323(14):1401-1402.
 - Gruber S, van der Laan MJ (2012). tmle: An R package for targeted maximum likelihood estimation. *J Stat Softw* 51(13):1-35.
@@ -719,3 +721,7 @@ There is no single "correct" estimand. The choice must be pre-specified in the s
 ```{r}
 sessionInfo()
 ```
+
+## Closing thoughts
+
+This chapter closes the handbook by returning to a fundamental lesson: the answer you get depends on the question you ask. The ICH E9(R1) framework makes this explicit for time-to-event safety studies, but the principle runs through every chapter of this book. Start with the causal question. Define the estimand. Check the assumptions. Choose a principled estimator. And always report what your analysis can and cannot tell you.

@@ -59,7 +59,7 @@ Osteoporosis treatments such as **denosumab** and **zoledronic acid** are widely
 - **Loss to follow-up**
 - Time-varying covariates (e.g., frailty, kidney function, fall risk)
 
-These complexities mean that a single baseline snapshot cannot capture the full causal story. Patients change treatments over time, their risk factors evolve, and those evolving risk factors influence both future treatment decisions and the outcome. **Key point.** Standard regression on baseline data alone will produce biased estimates when treatment and confounders co-evolve over time --- this is why longitudinal causal inference is necessary.
+These complexities mean that a single baseline snapshot cannot capture the full causal story. Patients change treatments over time, their risk factors evolve, and those evolving risk factors influence both future treatment decisions and the outcome. **Key point.** Standard regression on baseline data alone will produce biased estimates when treatment and confounders co-evolve over time. This is why longitudinal causal inference is necessary.
 
 :::{.callout-warning}
 ## Why a Naive Cox Model Fails Here
@@ -154,7 +154,7 @@ The code above creates **2,000 hypothetical patients** each observed over **6 ti
 
 1. **Baseline**: Each patient starts with an age (centered around 75) and a baseline CVD history that depends on age.
 2. **Initial treatment ($A_0$)**: Whether a patient starts on denosumab depends on age and CVD history (confounding by indication).
-3. **At each time point**: A time-varying comorbidity score ($L_t$) evolves based on age, CVD history, *and the prior treatment* --- the hallmark of **time-varying confounding affected by prior treatment**. Treatment can then switch based on the current comorbidity score.
+3. **At each time point**: A time-varying comorbidity score ($L_t$) evolves based on age, CVD history, *and the prior treatment*, the hallmark of **time-varying confounding affected by prior treatment**. Treatment can then switch based on the current comorbidity score.
 4. **Censoring**: Dropout probability depends on current comorbidity and treatment, making censoring **informative**.
 5. **Outcome**: The final cardiovascular event depends on the *entire treatment history* and the *entire covariate history*.
 
@@ -182,13 +182,13 @@ This is the longitudinal analogue of the per-protocol effect from RCTs, estimate
 # 5. Identification: Assumptions for Longitudinal Effects
 
 :::{.callout-warning}
-## Identification Assumptions --- Sequential Exchangeability
+## Identification Assumptions: Sequential Exchangeability
 
-To identify longitudinal causal effects, three assumptions must hold **at every time point**:
+As discussed in [Chapter 1.3](01-03-identification-estimands.qmd), identification requires consistency, exchangeability, and positivity. In the longitudinal setting, these assumptions must hold at every time point (sequential versions):
 
-- **Sequential exchangeability:** $Y^{\bar{a}} \perp A_t \mid \bar{L}_t, \bar{A}_{t-1}, W$ --- conditional on the full history, treatment is "as good as random." This requires measuring *every* variable that simultaneously affects treatment and outcome at *every* visit.
+- **Sequential exchangeability:** $Y^{\bar{a}} \perp A_t \mid \bar{L}_t, \bar{A}_{t-1}, W$ for all $t$. Conditional on the full history, treatment is "as good as random."
 - **Sequential positivity:** Each treatment must remain possible at every time point for every covariate history.
-- **Consistency:** The observed outcome under regime $\bar{a}$ equals the potential outcome under intervention $\bar{a}$, requiring a well-defined treatment.
+- **Consistency:** The observed outcome under regime $\bar{a}$ equals the potential outcome under intervention $\bar{a}$.
 
 **Practical guidance:** In your DAG and protocol, explicitly list which time-varying confounders you condition on and which might be unmeasured. Sensitivity analyses (Section 9) can help assess robustness.
 :::
@@ -200,7 +200,7 @@ To identify longitudinal causal effects, three assumptions must hold **at every 
 :::{.callout-tip}
 ## What LMTP Does in Plain Language
 
-**Key idea.** The **lmtp** R package estimates counterfactual outcomes under hypothetical treatment strategies that unfold over time. You specify a treatment rule (static, dynamic, or stochastic), and LMTP uses doubly robust estimation with SuperLearner to adjust for time-varying confounding, treatment switching, and informative censoring --- all in a single automated pipeline.
+**Key idea.** The **lmtp** R package estimates counterfactual outcomes under hypothetical treatment strategies that unfold over time. You specify a treatment rule (static, dynamic, or stochastic), and LMTP uses doubly robust estimation with SuperLearner to adjust for time-varying confounding, treatment switching, and informative censoring, all in a single automated pipeline.
 :::
 
 Here we implement:
@@ -237,7 +237,7 @@ This gives a TMLE estimate of:
 :::{.callout-tip}
 ## The Backward Regression Intuition
 
-**Key idea.** Longitudinal TMLE works **backward from the outcome**: at each time step it (1) estimates the expected outcome given the current history, (2) estimates the treatment/censoring probability, and (3) applies a targeting update that makes the final estimate doubly robust. This backward iteration is automated by LMTP --- but understanding the intuition helps you diagnose problems (e.g., propensity scores near 0 or 1 at a given step signal a positivity violation).
+**Key idea.** Longitudinal TMLE works **backward from the outcome**: at each time step it (1) estimates the expected outcome given the current history, (2) estimates the treatment/censoring probability, and (3) applies a targeting update that makes the final estimate doubly robust. This backward iteration is automated by LMTP, but understanding the intuition helps you diagnose problems (e.g., propensity scores near 0 or 1 at a given step signal a positivity violation).
 :::
 
 ---
@@ -254,7 +254,7 @@ Assume hypothetical results:
 | Always denosumab | 0.051 |
 | Always ZA        | 0.055 |
 
-**Key idea.** The 0.4 percentage-point risk difference is clinically small. These estimates reflect a **per-protocol effect** --- what would happen under perfect adherence --- not what is observed in practice. Subgroup and sensitivity analyses should explore heterogeneity and robustness to assumption violations.
+**Key idea.** The 0.4 percentage-point risk difference is clinically small. These estimates reflect a **per-protocol effect** (what would happen under perfect adherence), not what is observed in practice. Subgroup and sensitivity analyses should explore heterogeneity and robustness to assumption violations.
 :::
 
 ---
@@ -264,7 +264,7 @@ Assume hypothetical results:
 :::{.callout-warning}
 ## Positivity Violations in Longitudinal Settings
 
-**Pitfall.** Positivity must hold *at every time point* for *every observed covariate history* --- a much stronger requirement than in single-timepoint studies. Plot estimated propensity scores at each visit; if scores cluster near 0 or 1 at later time points, you likely have a structural positivity violation. LMTP and L-TMLE handle extreme weights better than IPTW (substitution vs. inverse weighting), but you should still examine influence-function values for outliers and consider density-ratio truncation for sparse treatment histories.
+**Pitfall.** Positivity must hold *at every time point* for *every observed covariate history*, a much stronger requirement than in single-timepoint studies. Plot estimated propensity scores at each visit; if scores cluster near 0 or 1 at later time points, you likely have a structural positivity violation. LMTP and L-TMLE handle extreme weights better than IPTW (substitution vs. inverse weighting), but you should still examine influence-function values for outliers and consider density-ratio truncation for sparse treatment histories.
 :::
 
 Beyond positivity, you should also assess whether unmeasured confounding might bias your primary analysis.
@@ -272,7 +272,7 @@ Beyond positivity, you should also assess whether unmeasured confounding might b
 :::{.callout-important}
 ## Negative Control Outcomes
 
-**Practical implementation.** Run your entire LMTP pipeline substituting a **negative control outcome** --- one that *should not* be affected by the treatment (e.g., accidental injury rates). If the estimated effect is close to the null, that is reassuring. A substantial effect suggests residual confounding that may also bias your primary analysis.
+**Practical implementation.** Run your entire LMTP pipeline substituting a **negative control outcome**, one that *should not* be affected by the treatment (e.g., accidental injury rates). If the estimated effect is close to the null, that is reassuring. A substantial effect suggests residual confounding that may also bias your primary analysis.
 :::
 
 ---
@@ -302,16 +302,20 @@ Because time-varying confounders that are affected by prior treatment sit on the
 <details>
 <summary><strong>Q2. What does "sequential exchangeability" require that ordinary exchangeability does not?</strong></summary>
 
-Ordinary (point-treatment) exchangeability requires that treatment is unconfounded conditional on baseline covariates measured at a single time point. **Sequential exchangeability** requires this to hold **at every time point**, conditional on the entire covariate and treatment history up to that point. In practice, this means you must measure every confounder that influences both treatment decisions and the outcome *at every visit* --- a much harder bar to clear, especially when physician judgment, symptom severity, or patient preferences evolve over time and may not be captured in the data.
+Ordinary (point-treatment) exchangeability requires that treatment is unconfounded conditional on baseline covariates measured at a single time point. **Sequential exchangeability** requires this to hold **at every time point**, conditional on the entire covariate and treatment history up to that point. In practice, this means you must measure every confounder that influences both treatment decisions and the outcome *at every visit*, a much harder bar to clear, especially when physician judgment, symptom severity, or patient preferences evolve over time and may not be captured in the data.
 
 </details>
 
 <details>
-<summary><strong>Q3. The LMTP estimate compares "always denosumab" vs "always ZA" --- is this an intention-to-treat or per-protocol effect?</strong></summary>
+<summary><strong>Q3. The LMTP estimate compares "always denosumab" vs "always ZA": is this an intention-to-treat or per-protocol effect?</strong></summary>
 
 It is a **per-protocol effect** (more precisely, a "treatment-policy" or "sustained-strategy" effect under full adherence). Unlike the intention-to-treat (ITT) effect, which estimates the impact of initial treatment *assignment* regardless of subsequent adherence, the LMTP estimate asks what *would* happen if every patient remained on the assigned treatment at every visit. This is the clinically relevant question when you want to know the causal effect of the treatment itself, but it requires the additional assumption of sequential exchangeability, which is not needed for ITT analyses in randomised trials.
 
 </details>
+
+## What comes next
+
+This case study applied longitudinal methods to a single treatment comparison. The next part of the handbook broadens the scope to advanced applications: combining RCT and real-world data, pre-specified regulatory analyses, mediation decomposition, and time-to-event estimands.
 
 ```{r}
 sessionInfo()
