@@ -1,9 +1,9 @@
 ---
-title: "Chapter 2.4: From Question to Estimate — TMLE in Practice"
+title: "Chapter 2.4: From Question to Estimate: TMLE in Practice"
 format: html
 ---
 
-# Chapter 2.4: From Question to Estimate — TMLE in Practice
+# Chapter 2.4: From Question to Estimate: TMLE in Practice
 *A progressive tutorial for pharmacoepidemiologists*
 
 This chapter walks through a complete causal analysis from start to finish, building each estimator step-by-step so you can see exactly where bias enters, how each method addresses it, and why TMLE provides a principled solution.
@@ -66,9 +66,7 @@ This is a classic **active comparator, new user** design question.
 
 ### Why standard regression falls short
 
-A logistic regression of MACE on treatment will confound the effect with differences in baseline health. Patients prescribed newer, more expensive agents may differ systematically from those prescribed sulfonylureas — in age, comorbidity burden, prior cardiovascular history, renal function, and concomitant medications.
-
-We need methods that explicitly separate confounding from causal effects.
+As introduced in [Chapter 1.1](01-01-regression-vs-causal.qmd), regression coefficients from observational data reflect both the treatment effect and confounding. A logistic regression of MACE on treatment will conflate the drug's effect with differences in baseline health, because patients prescribed newer, more expensive agents differ systematically from those prescribed sulfonylureas in age, comorbidity burden, prior cardiovascular history, renal function, and concomitant medications. We need methods that explicitly separate confounding from causal effects.
 
 ---
 
@@ -102,12 +100,12 @@ We posit the following causal structure. Confounders $W$ affect both treatment c
 
 The confounders include:
 
-- **Age** — older patients have higher CV risk and may receive different prescriptions
-- **BMI** — obesity correlates with both drug choice and CV risk
-- **HbA1c** — glycemic control at baseline affects prescribing and outcomes
-- **Prior CVD** — history of cardiovascular disease is a strong confounder
-- **eGFR** — renal function influences both drug eligibility and CV risk
-- **Statin use** — a marker of CV risk management
+- **Age**: older patients have higher CV risk and may receive different prescriptions
+- **BMI**: obesity correlates with both drug choice and CV risk
+- **HbA1c**: glycemic control at baseline affects prescribing and outcomes
+- **Prior CVD**: history of cardiovascular disease is a strong confounder
+- **eGFR**: renal function influences both drug eligibility and CV risk
+- **Statin use**: a marker of CV risk management
 
 The DAG (directed acyclic graph):
 
@@ -123,24 +121,13 @@ All arrows from $W$ point to both $A$ and $Y$. There is a direct arrow from $A$ 
 Structural equations:
 
 - $W$ is drawn from the population distribution
-- $A = f_A(W, U_A)$ — treatment depends on confounders and unmeasured factors
-- $Y = f_Y(A, W, U_Y)$ — outcome depends on treatment, confounders, and unmeasured factors
+- $A = f_A(W, U_A)$: treatment depends on confounders and unmeasured factors
+- $Y = f_Y(A, W, U_Y)$: outcome depends on treatment, confounders, and unmeasured factors
 
 :::{.callout-warning}
 ## Step 3: Identify Assumptions
 
-For the causal estimand $\psi = E[Y(1)] - E[Y(0)]$ to be identified from observational data, we need three untestable assumptions:
-
-**Consistency:**
-The observed outcome for a patient who received treatment $a$ equals their potential outcome $Y(a)$. This requires a well-defined intervention — "initiate dapagliflozin" must mean the same thing across patients. In practice, we define treatment as filling a new prescription.
-
-**Exchangeability (no unmeasured confounding):**
-$Y(a) \perp\!\!\!\perp A \mid W$ for all $a$. Conditional on measured baseline covariates, treatment assignment is as-good-as-random. This is the most vulnerable assumption. We cannot test it, but we can make it more plausible by adjusting for a rich set of confounders.
-
-**Positivity:**
-$0 < P(A = 1 \mid W = w) < 1$ for all $w$ with $P(W = w) > 0$. Every patient type has some chance of receiving either drug. Violations occur when, for example, patients with severe renal impairment are never prescribed dapagliflozin.
-
-Each assumption is untestable but can be made more or less plausible by study design.
+As discussed in [Chapter 1.3](01-03-identification-estimands.qmd), identification of $\psi = E[Y(1)] - E[Y(0)]$ from observational data requires three assumptions: **consistency** (the observed outcome equals the potential outcome under the treatment actually received), **exchangeability** ($Y(a) \perp\!\!\!\perp A \mid W$, i.e., no unmeasured confounding), and **positivity** ($0 < P(A = 1 \mid W = w) < 1$ for all relevant $w$). In this application, consistency requires that "initiate dapagliflozin" is well-defined across patients. Exchangeability is the most vulnerable assumption: we cannot test it, but we strengthen it by adjusting for a rich set of confounders. Positivity can be violated when, for example, patients with severe renal impairment are never prescribed dapagliflozin.
 :::
 
 **Step 4: Map to a Statistical Estimand.**
@@ -285,7 +272,7 @@ Notice the imbalances: dapagliflozin patients are younger, have higher eGFR, and
 
 # 4. Progressive Estimation
 
-## 4A. Naive (Unadjusted) Model — What Happens Without Adjustment?
+## 4A. Naive (Unadjusted) Model: What Happens Without Adjustment?
 
 We start with what many analysts would try first: a simple comparison of MACE rates by treatment group. This establishes the baseline from which all other methods improve.
 
@@ -310,9 +297,7 @@ summary(naive_mod)
 :::{.callout-warning}
 ## What Went Wrong?
 
-The naive estimate is biased because dapagliflozin patients differ systematically from sulfonylurea patients. The treatment groups are not exchangeable. The naive estimate conflates the drug effect with the confounding by indication.
-
-**The lesson:** Never interpret unadjusted treatment comparisons as causal effects in observational data. The difference in MACE rates reflects both the drug's effect AND the differences in who gets each drug.
+The naive estimate is biased because dapagliflozin patients differ systematically from sulfonylurea patients. The treatment groups are not exchangeable (see [Chapter 1.3](01-03-identification-estimands.qmd)), so the naive comparison conflates the drug effect with confounding by indication. The difference in MACE rates reflects both the drug's effect AND the differences in who gets each drug. This is why unadjusted treatment comparisons cannot be interpreted as causal effects in observational data.
 :::
 
 ---
@@ -321,7 +306,7 @@ The naive estimate is biased because dapagliflozin patients differ systematicall
 
 G-computation directly implements the identification formula by modeling $E[Y \mid A, W]$, then standardizing.
 
-**Step 1: Fit the Outcome Model.** Fit a model for $E[Y \mid A, W]$ — the expected outcome given treatment and confounders. This model will be used to predict what would happen to each patient under each treatment scenario.
+**Step 1: Fit the Outcome Model.** Fit a model for $E[Y \mid A, W]$, the expected outcome given treatment and confounders. This model will be used to predict what would happen to each patient under each treatment scenario.
 
 ```{r}
 # Parametric outcome model (logistic regression)
@@ -382,7 +367,7 @@ cat("G-comp ATE:", round(gcomp_ate, 4),
     " 95% CI: [", round(gcomp_ci[1], 4), ",", round(gcomp_ci[2], 4), "]\n")
 ```
 
-**Pitfall.** G-computation gave a much better estimate than the naive approach by adjusting for confounders. It works by predicting what would happen to each patient under each treatment, then averaging. But G-computation depends entirely on the outcome model being correct. If we misspecified the functional form (missed interactions, nonlinearities), the estimate would be biased — and we would have no way to know. This motivates IPTW, which adjusts for confounding using the *treatment* model instead.
+**Pitfall.** G-computation gave a much better estimate than the naive approach by adjusting for confounders. It works by predicting what would happen to each patient under each treatment, then averaging. But G-computation depends entirely on the outcome model being correct. If we misspecified the functional form (missed interactions, nonlinearities), the estimate would be biased, and we would have no way to know. This motivates IPTW, which adjusts for confounding using the *treatment* model instead.
 
 ---
 
@@ -553,7 +538,7 @@ iptw_ate_trunc <- risk1_trunc - risk0_trunc
 cat("IPTW ATE (truncated weights):", round(iptw_ate_trunc, 4), "\n")
 ```
 
-**Pitfall.** IPTW adjusts for confounding through the treatment model alone. It does not use information about the outcome-confounder relationship. If the propensity score model is wrong, IPTW is biased. If positivity is limited, weights become extreme and the estimate becomes unstable. This motivates doubly robust methods — which use BOTH the outcome model and the treatment model, so that if either one is correct, the estimate is consistent.
+**Pitfall.** IPTW adjusts for confounding through the treatment model alone. It does not use information about the outcome-confounder relationship. If the propensity score model is wrong, IPTW is biased. If positivity is limited, weights become extreme and the estimate becomes unstable. This motivates doubly robust methods, which use BOTH the outcome model and the treatment model, so that if either one is correct, the estimate is consistent.
 
 ---
 
@@ -565,7 +550,7 @@ cat("IPTW ATE (truncated weights):", round(iptw_ate_trunc, 4), "\n")
 What if we could use BOTH the outcome model and the treatment model, and as long as EITHER one is correct, get a consistent estimate? This is exactly what AIPW (and TMLE) provide.
 :::
 
-AIPW combines the outcome model and the treatment model. It is **doubly robust**: consistent if either model is correct.
+AIPW combines the outcome model and the treatment model. It is **doubly robust**: consistent if either model is correct. The formula starts with the G-computation prediction and adds a weighted residual correction from the propensity score. If the outcome model is already good, the correction is small; if the outcome model is poor but the propensity score is accurate, the correction rescues the estimate.
 
 ```{r}
 # Using models from previous steps:
@@ -606,7 +591,7 @@ cat("AIPW ATE:", round(aipw_ate, 4),
     " 95% CI: [", round(aipw_ci[1], 4), ",", round(aipw_ci[2], 4), "]\n")
 ```
 
-**Key insight:** AIPW improves on both g-computation and IPTW by using both models. However, AIPW does not "target" its initial estimates — it can produce predicted probabilities outside [0, 1], and it does not solve the efficient influence curve equation exactly when machine learning is used. TMLE addresses both issues.
+**Key insight:** AIPW improves on both g-computation and IPTW by using both models. However, AIPW does not "target" its initial estimates. It can produce predicted probabilities outside [0, 1], and it does not solve the efficient influence curve equation exactly when machine learning is used. TMLE addresses both issues.
 
 ---
 
@@ -627,15 +612,15 @@ TMLE combines the best properties of all previous methods: it uses both outcome 
 2. **Targeting step:** Update $\hat{Q}^0$ using information from the propensity score to reduce bias for the specific estimand
 3. **Substitution estimate:** Plug the updated $\hat{Q}^*$ into the G-computation formula
 
-The targeting step is what makes TMLE special. It uses the **clever covariate** — a function of the propensity score — to fluctuate the initial outcome model in the direction that solves the efficient influence curve equation.
+The targeting step is what makes TMLE special. It uses the **clever covariate**, a function of the propensity score, to fluctuate the initial outcome model in the direction that solves the efficient influence curve equation.
 :::
 
 ### Step-by-step implementation
 
-**Step 1: Initial Outcome Model.** This is the same as G-computation — fit $E[Y \mid A, W]$. Think of this as your "first draft" of the outcome model. It does not need to be perfect; the targeting step will correct it.
+**Step 1: Initial Outcome Model.** This is the same as G-computation: fit $E[Y \mid A, W]$. Think of this as your "first draft" of the outcome model. It does not need to be perfect; the targeting step will correct it.
 
 ```{r}
-# Same as g-computation — fit E[Y | A, W]
+# Same as g-computation: fit E[Y | A, W]
 q_init <- glm(Y ~ A + age + bmi + hba1c + cvd + egfr + statin +
                 A:cvd + I(age^2),
               family = binomial, data = dat)
@@ -646,7 +631,7 @@ Q0_init <- predict(q_init, newdata = dat %>% mutate(A = 0), type = "response")
 QA_init <- predict(q_init, type = "response")  # predictions at observed A
 ```
 
-**Step 2: Estimate the Propensity Score.** Same as IPTW — model the probability of treatment given confounders. We bound the scores away from 0 and 1 to prevent numerical instability.
+**Step 2: Estimate the Propensity Score.** Same as IPTW: model the probability of treatment given confounders. We bound the scores away from 0 and 1 to prevent numerical instability.
 
 ```{r}
 # Same model as IPTW
@@ -675,7 +660,7 @@ H_1 <- 1 / ps_tmle
 H_0 <- -1 / (1 - ps_tmle)
 ```
 
-The clever covariate is large when a patient's treatment was unlikely given their covariates — exactly the patients who are most informative about the causal effect.
+The clever covariate is large when a patient's treatment was unlikely given their covariates, which are exactly the patients who are most informative about the causal effect.
 
 :::{.callout-important}
 #### Step 4: Fluctuation (The Targeting Step)
@@ -696,7 +681,7 @@ cat("Epsilon (fluctuation parameter):", round(epsilon, 5), "\n")
 
 **Key point.** A small $\epsilon$ means the initial model was already close to solving the EIC equation. A large $\epsilon$ means the targeting step made a substantial correction.
 
-**Step 5: Update Predictions.** Apply the fluctuation to get the **targeted** predictions. Because we use the inverse-logit function (`plogis`), predictions are guaranteed to stay in [0, 1] — the natural bounds for a probability.
+**Step 5: Update Predictions.** Apply the fluctuation to get the **targeted** predictions. Because we use the inverse-logit function (`plogis`), predictions are guaranteed to stay in [0, 1], the natural bounds for a probability.
 
 ```{r}
 # Apply the fluctuation to counterfactual predictions
@@ -704,7 +689,7 @@ Q1_star <- plogis(logit(Q1_init) + epsilon * H_1)
 Q0_star <- plogis(logit(Q0_init) + epsilon * H_0)
 ```
 
-**Step 6: Compute the TMLE Estimate.** Average the targeted predictions across the population — just like the final step of G-computation, but now using the **updated** $\hat{Q}^*$ that has been targeted for our specific estimand.
+**Step 6: Compute the TMLE Estimate.** Average the targeted predictions across the population, just like the final step of G-computation, but now using the **updated** $\hat{Q}^*$ that has been targeted for our specific estimand.
 
 ```{r}
 tmle_risk1 <- mean(Q1_star)
@@ -720,7 +705,7 @@ cat("True ATE:                 ", round(true_ate, 4), "\n")
 :::{.callout-important}
 #### Step 7: Inference via the Efficient Influence Curve
 
-The EIC gives each observation a "score" measuring its contribution to the estimate. The variance of these scores provides asymptotically valid standard errors — no bootstrap needed.
+The EIC gives each observation a "score" measuring its contribution to the estimate. The variance of these scores provides asymptotically valid standard errors, with no bootstrap needed.
 :::
 
 ```{r}
@@ -799,7 +784,7 @@ Good estimation is nothing without good diagnostics. **Never report a causal est
 
 ### 6.1 Propensity Score Overlap
 
-If the propensity score distributions for treated and untreated overlap well, the positivity assumption is plausible. **Gaps** indicate regions where one treatment is rarely or never prescribed — all methods will struggle there, but IPTW is especially vulnerable.
+If the propensity score distributions for treated and untreated overlap well, the positivity assumption is plausible. **Gaps** indicate regions where one treatment is rarely or never prescribed. All methods will struggle there, but IPTW is especially vulnerable.
 
 ```{r}
 ggplot(dat, aes(x = ps_tmle, fill = factor(A, labels = c("Sulfonylurea", "Dapagliflozin")))) +
@@ -816,7 +801,7 @@ ggplot(dat, aes(x = ps_tmle, fill = factor(A, labels = c("Sulfonylurea", "Dapagl
 
 ### 6.2 Weight Distribution
 
-**Key point.** Stabilized weights should center around 1. Very large weights (> 10) indicate practical positivity violations — patients who almost never receive their observed treatment. These patients dominate IPTW estimates and destabilize the clever covariate in TMLE.
+**Key point.** Stabilized weights should center around 1. Very large weights (> 10) indicate practical positivity violations, meaning patients who almost never receive their observed treatment. These patients dominate IPTW estimates and destabilize the clever covariate in TMLE.
 
 ```{r}
 cat("--- Unstabilized weight summary ---\n")
@@ -830,7 +815,7 @@ cat("Proportion of stabilized weights > 10:", mean(dat$sw > 10), "\n")
 :::{.callout-important}
 ## 6.3 Clever Covariate Diagnostics
 
-The clever covariate drives the TMLE targeting step. Extreme values indicate potential instability — if $H(A, W)$ has heavy tails, the targeting step may overfit to a few influential observations.
+The clever covariate drives the TMLE targeting step. Extreme values indicate potential instability. If $H(A, W)$ has heavy tails, the targeting step may overfit to a few influential observations.
 :::
 
 ```{r}
@@ -877,7 +862,7 @@ cat("EIC mean:", round(mean(eic_tmle), 6), "\n")
 
 ### 6.5 Extreme Prediction Check
 
-**Key point.** One of TMLE's advantages: because the targeting step uses a logistic fluctuation, predictions are guaranteed to stay in [0, 1]. Compare the initial and targeted ranges — the targeting step may shift predictions, but never outside the natural bounds.
+**Key point.** One of TMLE's advantages: because the targeting step uses a logistic fluctuation, predictions are guaranteed to stay in [0, 1]. Compare the initial and targeted ranges. The targeting step may shift predictions, but never outside the natural bounds.
 
 ```{r}
 cat("--- Predicted outcome range (initial model) ---\n")
@@ -903,7 +888,7 @@ cat("Q0* range:", round(range(Q0_star), 4), "\n")
 **Regulatory Decision.** If the confidence interval excludes zero and the point estimate is negative (protective), the data do not support adding a cardiovascular warning. If the CI includes zero, the evidence is inconclusive and further monitoring or a dedicated outcomes trial may be warranted.
 
 :::{.callout-warning}
-## Sensitivity to Assumptions — Which Are Most Fragile?
+## Sensitivity to Assumptions: Which Are Most Fragile?
 
 1. **No unmeasured confounding (exchangeability):** This is always the weakest link in observational data. Lifestyle factors (diet, exercise, smoking) may confound and are poorly captured in claims data.
 
@@ -918,7 +903,7 @@ cat("Q0* range:", round(range(Q0_star), 4), "\n")
 
 # 8. Why Super Learner Improves Nuisance Estimation
 
-In the examples above, we used parametric logistic regression for both the outcome and treatment models. In practice, these models may be misspecified — missing interactions, wrong functional forms, or overly rigid assumptions. **Super Learner** eliminates the need to guess the right model.
+In the examples above, we used parametric logistic regression for both the outcome and treatment models. In practice, these models may be misspecified: missing interactions, wrong functional forms, or overly rigid assumptions. **Super Learner** eliminates the need to guess the right model.
 
 **Definition.** Super Learner is an ensemble machine learning method that: (1) takes a library of candidate learners (logistic regression, LASSO, random forest, etc.), (2) uses cross-validation to evaluate each learner's performance, (3) combines them using optimally weighted stacking, and (4) guarantees performance at least as good as the best individual learner (asymptotically).
 
@@ -959,7 +944,7 @@ Q_SL$coef  # how much each learner contributes to the outcome model
 g_SL$coef  # how much each learner contributes to the treatment model
 ```
 
-The Super Learner automatically determines which learners are most useful and how to combine them — no manual model selection required.
+The Super Learner automatically determines which learners are most useful and how to combine them, so no manual model selection is required.
 
 ---
 
@@ -995,17 +980,11 @@ The table below summarizes the key properties of each estimator. TMLE stands out
 
 # 10. Where to Go Next
 
-The framework in this chapter extends to several important settings — each covered in subsequent chapters:
+## What comes next
 
-- **Dynamic treatment regimes:** Treatment rules that depend on patient characteristics (e.g., "prescribe dapagliflozin if eGFR > 45, else sulfonylurea")
-- **Stochastic interventions:** Shift the probability of treatment rather than forcing a deterministic assignment — useful when positivity is limited
-- **Mediation analysis:** Decompose the total effect into direct and indirect pathways (see Chapter 3.10)
-- **Longitudinal TMLE (LTMLE):** Handle time-varying treatments and confounders (see Chapters 3.7 and 3.9)
-- **Clean-room TMLE:** Pre-specified, locked, auditable analysis for regulatory submissions (see Chapter 3.8)
-- **Conditional average treatment effects (CATE):** Estimate how the treatment effect varies across subgroups
-- **Variable importance:** Identify which confounders matter most for the treatment effect
+With the core estimators in hand, the next part of the handbook turns to diagnostics and heterogeneity. How do you know if your analysis is trustworthy? And does the treatment work differently for different patients? Part III addresses both questions.
 
-Each extension follows the same causal roadmap: define the question, specify the causal model, verify assumptions, identify the statistical estimand, and choose an appropriate estimator.
+The framework in this chapter also extends to several important settings covered in later chapters, including dynamic treatment regimes, stochastic interventions, mediation analysis, longitudinal TMLE, and conditional average treatment effects. Each extension follows the same causal roadmap: define the question, specify the causal model, verify assumptions, identify the statistical estimand, and choose an appropriate estimator.
 
 ```{r}
 sessionInfo()
@@ -1025,14 +1004,14 @@ No. A naive comparison does not account for confounding by indication. Physician
 <details>
 <summary><strong>Q2. TMLE uses both an outcome model and a treatment model. If both models are somewhat misspecified, does double robustness still protect you?</strong></summary>
 
-Not fully. Double robustness means the estimator is consistent if *at least one* of the two nuisance models is correctly specified. If both models are misspecified, the estimate can be biased. However, TMLE still has an advantage in this scenario: the bias depends on the *product* of the errors in the two models, so moderate misspecification of both may produce smaller bias than severe misspecification of a single model in g-computation or IPTW. This is why pairing TMLE with Super Learner is recommended -- by using a flexible, data-adaptive ensemble for both nuisance functions, you reduce the chance that either model is badly wrong.
+Not fully. Double robustness means the estimator is consistent if *at least one* of the two nuisance models is correctly specified. If both models are misspecified, the estimate can be biased. However, TMLE still has an advantage in this scenario: the bias depends on the *product* of the errors in the two models, so moderate misspecification of both may produce smaller bias than severe misspecification of a single model in g-computation or IPTW. This is why pairing TMLE with Super Learner is recommended. By using a flexible, data-adaptive ensemble for both nuisance functions, you reduce the chance that either model is badly wrong.
 
 </details>
 
 <details>
 <summary><strong>Q3. You run TMLE and find that the mean of the efficient influence curve is not close to zero. What does this suggest about your analysis?</strong></summary>
 
-A correctly implemented TMLE solves the efficient influence curve (EIC) equation, so the sample mean of the EIC should be numerically zero (or very close to it). If the mean is appreciably different from zero, this suggests a problem with the implementation or with the models feeding into it. Common causes include: (1) a programming error in the targeting step, (2) propensity scores that are too close to 0 or 1, causing numerical instability in the clever covariate, or (3) convergence failure in the fluctuation model. The EIC mean serves as a built-in diagnostic -- it is one of the key advantages TMLE has over other doubly robust estimators like AIPW, where the EIC equation is only solved asymptotically.
+A correctly implemented TMLE solves the efficient influence curve (EIC) equation, so the sample mean of the EIC should be numerically zero (or very close to it). If the mean is appreciably different from zero, this suggests a problem with the implementation or with the models feeding into it. Common causes include: (1) a programming error in the targeting step, (2) propensity scores that are too close to 0 or 1, causing numerical instability in the clever covariate, or (3) convergence failure in the fluctuation model. The EIC mean serves as a built-in diagnostic. It is one of the key advantages TMLE has over other doubly robust estimators like AIPW, where the EIC equation is only solved asymptotically.
 
 </details>
 

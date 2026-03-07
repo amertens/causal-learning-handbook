@@ -4,28 +4,23 @@ format: html
 ---
 
 
-# Chapter 3.4  
+# Chapter 3.4
 
 ## Effect Modification and Heterogeneous Treatment Effects
 *Identifying who benefits most (or least) from treatment*
 
-Causal inference is not only about estimating *average* treatment effects.  
-In many scientific and regulatory settings, we want to know:
+A large observational study estimates that a new antihypertensive reduces cardiovascular events by 4 percentage points overall. A clinician reviewing the result asks: "Does this drug work equally well for my 82-year-old patient with CKD stage 4 and my 55-year-old patient with no comorbidities?" The overall average treatment effect cannot answer that question, because it averages over patients who may respond very differently to the drug.
 
-> **Does the treatment work differently for different types of patients?**
+A natural first instinct is to split the data into subgroups and run separate analyses. But this naive approach fails for several reasons. Unadjusted within-subgroup comparisons do not control for confounding that may vary across strata. Testing many subgroups inflates the false positive rate. And the "winner’s curse" means that whichever subgroup looks most impressive is also the most likely to be a false lead. A principled framework is needed: one that defines subgroup-specific causal estimands, controls confounding within each subgroup, and honestly distinguishes confirmatory from exploratory findings.
 
-This phenomenon is known as **effect modification** or **treatment-effect heterogeneity (HTE)**.
+This chapter provides that framework. You will learn to:
 
-In this chapter, you’ll learn:
+1. Define subgroup-specific causal estimands (the CATE)
+2. Use TMLE to estimate prespecified subgroup effects with double robustness
+3. Use causal forests as an exploratory, data-adaptive tool for discovering heterogeneity
+4. Recognize the key pitfalls: positivity fragility in small subgroups, multiple comparisons, and the distinction between confirmatory and exploratory findings
 
-1. Conceptual foundations of effect modification  
-2. How to define subgroup-specific causal estimands  
-3. TMLE-based approaches to effect heterogeneity  
-4. Machine-learning approaches, focusing on the **causal forest**  
-5. How to interpret heterogeneous effects responsibly  
-6. Diagnostics, uncertainty, and false discovery concerns  
-
-This chapter builds on the causal roadmap and estimation methods from earlier modules.
+The chapter proceeds from estimands (Section 2) through identification (Section 3), to estimation with TMLE (Sections 5--6) and causal forests (Sections 7--8), and closes with interpretation guidance (Sections 10--11).
 
 ::: {.callout-note}
 ## Learning objectives
@@ -36,7 +31,7 @@ This chapter builds on the causal roadmap and estimation methods from earlier mo
 - Recognize the risks of subgroup analyses: multiple testing, post-hoc selection, and the winner's curse
 :::
 
-*This chapter is educational. Causal conclusions depend on identification assumptions (e.g., consistency, exchangeability, positivity) and on diagnostic evidence that the data support the target estimand. When flexible machine learning is used for nuisance estimation, valid inference typically requires cross-fitting or a cross-validated TMLE variant, plus appropriate rate conditions.*
+*Causal conclusions require that the identification assumptions hold; see [Chapter 1.3](01-03-identification-estimands.qmd) for details. When flexible machine learning is used for nuisance estimation, valid inference typically requires cross-fitting or a cross-validated TMLE variant.*
 
 ```{r}
 #| include: false
@@ -55,7 +50,7 @@ knitr::opts_chunk$set(
 
 ## 1. Why Study Effect Modification?
 
-**Key point.** The ATE tells you the mean treatment effect in the population, but patients differ in age, comorbidities, biomarkers, baseline risk, and genetics. Clinically relevant questions --- *Does the drug work better in high-risk patients? Are cardiovascular risks higher with CKD? Does benefit differ by frailty?* --- require studying **who benefits most** (or least). Effect modification is essential for translating population-level evidence into individualized clinical and policy recommendations.
+**Key point.** The ATE tells you the mean treatment effect in the population, but patients differ in age, comorbidities, biomarkers, baseline risk, and genetics. Clinically relevant questions (*Does the drug work better in high-risk patients? Are cardiovascular risks higher with CKD? Does benefit differ by frailty?*) require studying **who benefits most** (or least). Effect modification is essential for translating population-level evidence into individualized clinical and policy recommendations.
 
 ---
 
@@ -98,9 +93,9 @@ Your choice of estimand must match the scientific question:
 ## 3. Identification Assumptions
 
 :::{.callout-warning}
-## Assumptions Still Apply -- And Get Harder in Subgroups
+## Assumptions Still Apply and Get Harder in Subgroups
 
-Effect modification estimands inherit exchangeability, positivity, and consistency. Additionally, moderator variables must be **measured before treatment**, and you should avoid conditioning on post-treatment variables.
+Effect modification estimands inherit the same identification assumptions as the overall ATE: exchangeability, positivity, and consistency (see [Chapter 1.3](01-03-identification-estimands.qmd)). Additionally, moderator variables must be **measured before treatment**, and you should avoid conditioning on post-treatment variables.
 
 **Pitfall.** Positivity is especially fragile in subgroup analyses. When you slice the data into smaller groups, some subgroups may have very few treated or untreated individuals. Always check that both treatment arms are adequately represented in every subgroup you analyze.
 :::
@@ -112,7 +107,7 @@ Effect modification estimands inherit exchangeability, positivity, and consisten
 A practical workflow for investigating effect modification:
 
 1. **Define causal estimands** (subgroup-specific ATE, CATE(x))
-2. **Choose moderators** --- prespecified vs exploratory
+2. **Choose moderators** (prespecified vs exploratory)
 3. **Estimate nuisance functions** with SuperLearner
 4. **Estimate heterogeneous effects** using TMLE or causal forests
 5. **Quantify uncertainty**
@@ -129,7 +124,7 @@ We now walk through TMLE and causal forest approaches.
 :::{.callout-important}
 ## TMLE for Subgroup Effects
 
-**Practical implementation.** Subset your data to a prespecified subgroup and run TMLE within that subset to estimate $ATE_g = E[Y(1) - Y(0) \mid X_g = 1]$. Because TMLE is doubly robust and uses SuperLearner, you get reliable subgroup-specific estimates --- as long as you have enough data and positivity holds.
+**Practical implementation.** Subset your data to a prespecified subgroup and run TMLE within that subset to estimate $ATE_g = E[Y(1) - Y(0) \mid X_g = 1]$. Because TMLE is doubly robust and uses SuperLearner, you get reliable subgroup-specific estimates, as long as you have enough data and positivity holds.
 :::
 
 Example: ATE among patients younger than 75.
@@ -212,7 +207,7 @@ for all x (e.g., all ages). TMLE-based approaches often use:
 :::{.callout-note}
 ## Causal Forests in Plain Language
 
-**Definition.** Causal forests are tree-based methods designed to estimate CATEs --- “smart subgroup finders” that search across covariates for splits maximizing treatment-effect heterogeneity. They use honest sample splitting and averaging across many trees to produce smooth, individual-level CATE estimates $\hat\tau(x)$ with approximate pointwise confidence intervals.
+**Definition.** Causal forests are tree-based methods designed to estimate CATEs. Think of them as “smart subgroup finders” that search across covariates for splits maximizing treatment-effect heterogeneity. They use honest sample splitting and averaging across many trees to produce smooth, individual-level CATE estimates $\hat\tau(x)$ with approximate pointwise confidence intervals.
 :::
 
 Causal forests are powerful exploratory tools, but they come with important limitations.
@@ -220,7 +215,7 @@ Causal forests are powerful exploratory tools, but they come with important limi
 :::{.callout-warning}
 ## Caveats About Causal Forests
 
-**Pitfall.** Causal forests are not doubly robust, can overfit to noise in small samples, and their output is associational unless embedded in a rigorous causal framework. Treat causal forest results as **hypothesis-generating**, not confirmatory --- validate findings in independent data or prespecify them in future studies.
+**Pitfall.** Causal forests are not doubly robust, can overfit to noise in small samples, and their output is associational unless embedded in a rigorous causal framework. Treat causal forest results as **hypothesis-generating**, not confirmatory. Validate findings in independent data or prespecify them in future studies.
 :::
 
 ---
@@ -263,8 +258,6 @@ summary(tau_hat)
 ```
 
 ### Visualizing CATE vs. risk score
-
-**To do** debug
 
 ```{r, eval=FALSE}
 plot(X$risk_score, tau_hat,
@@ -392,7 +385,7 @@ This is an **exploratory** finding. Causal forests are data-adaptive methods tha
 <details>
 <summary><strong>Q2. Why is positivity especially fragile in subgroup analyses compared to the overall ATE analysis?</strong></summary>
 
-Positivity requires that both treated and untreated individuals exist within every stratum of confounders. When you slice the data into subgroups, the sample size in each stratum shrinks, making it increasingly likely that some confounder-by-treatment combinations have zero or near-zero representation. For example, if you estimate the ATE among patients over 80 with CKD stage 4, there may be very few (or no) untreated individuals in that subgroup --- making the causal effect unidentifiable there. The overall ATE analysis pools across subgroups and is therefore less vulnerable to these sparse-data positivity violations.
+Positivity requires that both treated and untreated individuals exist within every stratum of confounders. When you slice the data into subgroups, the sample size in each stratum shrinks, making it increasingly likely that some confounder-by-treatment combinations have zero or near-zero representation. For example, if you estimate the ATE among patients over 80 with CKD stage 4, there may be very few (or no) untreated individuals in that subgroup, making the causal effect unidentifiable there. The overall ATE analysis pools across subgroups and is therefore less vulnerable to these sparse-data positivity violations.
 
 </details>
 
@@ -402,6 +395,10 @@ Positivity requires that both treated and untreated individuals exist within eve
 **TMLE** is designed for **confirmatory** inference on prespecified subgroups or estimands. It is doubly robust (consistent if either the outcome model or propensity model is correct), provides valid confidence intervals grounded in semiparametric efficiency theory, and targets a clearly defined causal parameter. **Causal forests** are designed for **exploratory** heterogeneity discovery: they search data-adaptively across covariates to find where treatment effects vary, but they are not doubly robust, are more susceptible to overfitting, and their output should be treated as hypothesis-generating rather than confirmatory. The strongest analyses use both: TMLE for pre-planned subgroup effects, and causal forests to explore where additional heterogeneity might exist.
 
 </details>
+
+## What comes next
+
+Effect modification analysis raises an important follow-up question: how do you know if your analysis is trustworthy? The next chapter provides a systematic framework for diagnostics, covering identifiability checks, nuisance model assessment, estimator behavior, and sensitivity analyses.
 
 ```{r}
 sessionInfo()

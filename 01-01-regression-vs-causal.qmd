@@ -3,7 +3,17 @@ title: 'Chapter 1.1: Limitations of Standard Regression Analyses'
 format: html
 ---
 
-In this chapter, we motivate the need for modern causal inference tools by walking through real-world examples where traditional regression fails. We also introduce the counterfactual (potential outcomes) framework as the foundation for defining causal effects.
+Suppose you want to know whether patients who start denosumab have a higher three-year risk of heart attack than those who start zoledronic acid. You have a large claims database. The natural instinct is to fit a logistic regression, adjust for confounders, and interpret the treatment coefficient as a causal effect. That instinct is wrong, and the consequences can mislead clinical decisions.
+
+The problem is not that regression is useless. The problem is that a regression coefficient answers a different question than the one you are asking. The adjusted log-odds ratio from logistic regression is a conditional measure on the wrong scale, entangled with model assumptions that are rarely examined. Confounding, non-collapsibility, and misspecification can each silently distort the number you report.
+
+This chapter is the canonical reference for why regression coefficients are not causal effects. We walk through a concrete example, show exactly where naive and adjusted regression go wrong, introduce the counterfactual framework that defines what a causal effect actually is, and demonstrate g-computation as a first alternative. Later chapters will reference back to this discussion rather than repeat it. The chapter proceeds as follows:
+
+1. A motivating example comparing osteoporosis treatments
+2. What adjusted regression does and does not give you
+3. The counterfactual (potential outcomes) framework
+4. G-computation as a bridge from association to causation
+5. Summary and practice questions
 
 ::: {.callout-note}
 ## Learning objectives
@@ -14,7 +24,7 @@ In this chapter, we motivate the need for modern causal inference tools by walki
 - Motivate the need for the Causal Roadmap and modern estimation methods (g-computation, IPTW, TMLE)
 :::
 
-*Sources and scope. This chapter is educational. Causal conclusions depend on identification assumptions (e.g., consistency, exchangeability, positivity) and on diagnostic evidence that the data support the target estimand. When flexible machine learning is used for nuisance estimation, valid inference typically requires cross-fitting or a cross-validated TMLE variant, plus appropriate rate conditions.*
+*Causal conclusions require identification assumptions (consistency, exchangeability, positivity) that no statistical method can verify from data alone.*
 
 ```{r}
 #| include: false
@@ -33,7 +43,7 @@ knitr::opts_chunk$set(
 
 Multivariable regression has long been the standard tool in observational research for "adjusting" for confounders. But regression coefficients don't always represent causal effects. In fact, they almost never do without additional assumptions and deliberate analytic choices that go beyond what standard regression provides.
 
-**Key point.** If you've been trained to interpret an adjusted regression coefficient as "the effect of X on Y, holding all else equal," you're in good company — but that interpretation quietly smuggles in causal language that the model itself cannot justify. The coefficient tells you about the **conditional association** within strata defined by the other variables in the model. Whether that association equals a causal effect depends on assumptions that regression alone cannot verify.
+**Key point.** If you've been trained to interpret an adjusted regression coefficient as "the effect of X on Y, holding all else equal," you're in good company, but that interpretation quietly smuggles in causal language that the model itself cannot justify. The coefficient tells you about the **conditional association** within strata defined by the other variables in the model. Whether that association equals a causal effect depends on assumptions that regression alone cannot verify.
 
 Let's consider a motivating example based on a real-world study comparing two osteoporosis treatments: **denosumab** (Prolia) and **zoledronic acid**.
 
@@ -62,7 +72,7 @@ summary(model1)
 :::{.callout-warning}
 ## What the Crude Estimate Conflates
 
-The crude coefficient bundles together any true treatment effect with the influence of confounders (age, CVD history). You cannot disentangle these from an unadjusted regression. This is **confounding bias** — and as we will see, adjustment alone is not enough.
+The crude coefficient bundles together any true treatment effect with the influence of confounders (age, CVD history). You cannot disentangle these from an unadjusted regression. This is **confounding bias**, and as we will see, adjustment alone is not enough.
 :::
 
 ### Adjusting for Confounders
@@ -94,7 +104,7 @@ ATE = E[Y(1) - Y(0)]
 $$
 :::
 
-The fundamental problem of causal inference is that each person only receives one treatment — we observe Y(1) or Y(0), never both. Under three key identification assumptions — **exchangeability** (no unmeasured confounding), **consistency** (the observed outcome under the treatment actually received equals the potential outcome), and **positivity** (every individual has a nonzero probability of receiving either treatment given their covariates) — we can identify the causal ATE from observed data using the **g-computation formula**:
+The fundamental problem of causal inference is that each person only receives one treatment. We observe Y(1) or Y(0), never both. Under three key identification assumptions, **exchangeability** (no unmeasured confounding), **consistency** (the observed outcome under the treatment actually received equals the potential outcome), and **positivity** (every individual has a nonzero probability of receiving either treatment given their covariates), we can identify the causal ATE from observed data using the **g-computation formula**:
 
 $$
 ATE = E_W\big[ E[Y \mid A = 1, W] - E[Y \mid A = 0, W] \big]
@@ -102,14 +112,14 @@ $$
 
 where W represents the measured confounders and A is the treatment. This expression says: within each confounder stratum, compute the difference in expected outcomes between treated and untreated, then average over the distribution of confounders in the population.
 
-This formula motivates **standardization (g-computation)**, **inverse probability of treatment weighting (IPTW)**, and **targeted minimum loss-based estimation (TMLE)** — all of which are designed to estimate this population-level causal quantity.
+This formula motivates **standardization (g-computation)**, **inverse probability of treatment weighting (IPTW)**, and **targeted minimum loss-based estimation (TMLE)**, all of which are designed to estimate this population-level causal quantity.
 
 ## When Regression Fails
 
 :::{.callout-warning}
 ## Model Misspecification Can Silently Bias Your Results
 
-Misspecification bias is **silent** — a regression with the wrong functional form still produces coefficients and p-values with no warning. This motivates semiparametric estimators (like TMLE with machine learning) that relax parametric assumptions.
+Misspecification bias is **silent**. A regression with the wrong functional form still produces coefficients and p-values with no warning. This motivates semiparametric estimators (like TMLE with machine learning) that relax parametric assumptions.
 :::
 
 Let's compare regression to a nonparametric substitution estimator (g-computation):
@@ -132,7 +142,7 @@ mean(p1 - p0)  # this is g-computation
 :::{.callout-tip}
 ## Why G-Computation Gives You a Population-Level Causal Effect
 
-G-computation **predicts** counterfactual outcomes for every person under treatment and under control, then **averages** the difference. The result is a **marginal risk difference** — a population-level quantity directly relevant to decision-making, unlike the conditional log-odds ratio from regression.
+G-computation **predicts** counterfactual outcomes for every person under treatment and under control, then **averages** the difference. The result is a **marginal risk difference**, a population-level quantity directly relevant to decision-making, unlike the conditional log-odds ratio from regression.
 :::
 
 Compare this to the regression coefficient:
@@ -141,39 +151,39 @@ Compare this to the regression coefficient:
 coef(model3)["treatment"]
 ```
 
-The coefficient gives you a conditional odds ratio, but the g-comp version gives you a marginal risk difference — a more interpretable, population-level quantity.
+The coefficient gives you a conditional odds ratio, but the g-comp version gives you a marginal risk difference, a more interpretable, population-level quantity.
 
 ## Summary
 
 :::{.callout-tip}
 ## Key Takeaways
 
-- **Regression is not inherently causal** — it estimates conditional associations under strong model assumptions. An adjusted coefficient is not the same as a causal effect.
-- **Causal inference starts with a question, not a model** — define your causal question and target estimand (e.g., the ATE on the risk difference scale) *before* choosing an analytic method.
-- **The counterfactual framework clarifies what we want to estimate** — Y(1), Y(0), and the ATE give us precise, model-free definitions of causal effects.
-- **G-computation, IPTW, and TMLE estimate marginal causal effects** — these methods target the population-level quantity defined by the g-computation formula, rather than relying on regression coefficients that conflate the estimand with the model.
-- **The conditional log-odds ratio from logistic regression is not the ATE** — this is perhaps the single most important distinction for epidemiologists moving from traditional regression to causal inference methods.
+- **Regression is not inherently causal.** It estimates conditional associations under strong model assumptions. An adjusted coefficient is not the same as a causal effect.
+- **Causal inference starts with a question, not a model.** Define your causal question and target estimand (e.g., the ATE on the risk difference scale) *before* choosing an analytic method.
+- **The counterfactual framework clarifies what we want to estimate.** Y(1), Y(0), and the ATE give us precise, model-free definitions of causal effects.
+- **G-computation, IPTW, and TMLE estimate marginal causal effects.** These methods target the population-level quantity defined by the g-computation formula, rather than relying on regression coefficients that conflate the estimand with the model.
+- **The conditional log-odds ratio from logistic regression is not the ATE.** This is perhaps the single most important distinction for epidemiologists moving from traditional regression to causal inference methods.
 :::
 
-## Next
+## What comes next
 
-In the next chapter, we'll introduce the Causal Roadmap — a structured workflow for planning and executing causal analyses.
+In the next chapter, we introduce the Causal Roadmap, a structured workflow that turns a scientific question into a defensible analysis plan. The roadmap ensures that every step, from question definition through estimation and interpretation, is explicit, transparent, and pre-specified.
 
 ## Check your understanding
 
 <details>
 <summary><strong>Q1. Why can't you interpret an adjusted logistic regression coefficient as the ATE?</strong></summary>
 
-The adjusted coefficient from logistic regression is a **conditional log-odds ratio** — it describes the association between treatment and outcome within strata defined by the covariates in the model. This differs from the ATE (a marginal risk difference) in at least two ways. First, the odds ratio is **non-collapsible**: even without confounding, a conditional odds ratio and a marginal odds ratio will differ, so you cannot read the coefficient as a population-level summary. Second, the coefficient lives on the **log-odds scale**, not the risk-difference scale, and converting between them requires averaging over the covariate distribution (which is exactly what g-computation does). Finally, the coefficient inherits every **parametric assumption** in the model (log-linearity, no interactions, correct link function); if any assumption fails, the coefficient is biased for any causal quantity.
+The adjusted coefficient from logistic regression is a **conditional log-odds ratio**. It describes the association between treatment and outcome within strata defined by the covariates in the model. This differs from the ATE (a marginal risk difference) in at least two ways. First, the odds ratio is **non-collapsible**: even without confounding, a conditional odds ratio and a marginal odds ratio will differ, so you cannot read the coefficient as a population-level summary. Second, the coefficient lives on the **log-odds scale**, not the risk-difference scale, and converting between them requires averaging over the covariate distribution (which is exactly what g-computation does). Finally, the coefficient inherits every **parametric assumption** in the model (log-linearity, no interactions, correct link function); if any assumption fails, the coefficient is biased for any causal quantity.
 
 </details>
 
 <details>
 <summary><strong>Q2. What are the three identification assumptions needed to give the g-computation formula a causal interpretation?</strong></summary>
 
-1. **Exchangeability (no unmeasured confounding):** Within levels of the measured covariates W, treatment assignment is independent of the potential outcomes — $Y(a) \perp A \mid W$. This means every common cause of treatment and outcome has been measured and adjusted for.
+1. **Exchangeability (no unmeasured confounding):** Within levels of the measured covariates W, treatment assignment is independent of the potential outcomes, $Y(a) \perp A \mid W$. This means every common cause of treatment and outcome has been measured and adjusted for.
 2. **Consistency:** The observed outcome for a person who received treatment $a$ equals their potential outcome $Y(a)$. This requires a well-defined intervention with no hidden variations.
-3. **Positivity:** Every covariate stratum has a nonzero probability of receiving each treatment level — $P(A = a \mid W = w) > 0$ for all relevant $a$ and $w$. Without positivity, there are subgroups for which no data-based comparison is possible.
+3. **Positivity:** Every covariate stratum has a nonzero probability of receiving each treatment level, $P(A = a \mid W = w) > 0$ for all relevant $a$ and $w$. Without positivity, there are subgroups for which no data-based comparison is possible.
 
 If any of these assumptions fails, the g-computation estimator may be biased regardless of how well the outcome model fits the data.
 
@@ -182,11 +192,9 @@ If any of these assumptions fails, the g-computation estimator may be biased reg
 <details>
 <summary><strong>Q3. What is the difference between a conditional log-odds ratio and a marginal risk difference?</strong></summary>
 
-A **conditional log-odds ratio** is the change in the log-odds of the outcome per unit change in treatment, holding all other covariates fixed at specific values. It is a stratum-specific measure on the odds scale. A **marginal risk difference** is the difference in the probability of the outcome if everyone in the population were treated versus if everyone were untreated — it is a population-averaged measure on the probability scale. In nonlinear models (such as logistic regression), these two quantities answer different questions and are generally not numerically equal, even when the model is correctly specified. The marginal risk difference is usually more directly relevant for public health decision-making because it tells you how many additional cases per 100 people would result from a policy change.
+A **conditional log-odds ratio** is the change in the log-odds of the outcome per unit change in treatment, holding all other covariates fixed at specific values. It is a stratum-specific measure on the odds scale. A **marginal risk difference** is the difference in the probability of the outcome if everyone in the population were treated versus if everyone were untreated. It is a population-averaged measure on the probability scale. In nonlinear models (such as logistic regression), these two quantities answer different questions and are generally not numerically equal, even when the model is correctly specified. The marginal risk difference is usually more directly relevant for public health decision-making because it tells you how many additional cases per 100 people would result from a policy change.
 
 </details>
-
----
 
 ## Sources and further reading
 
@@ -198,8 +206,6 @@ A **conditional log-odds ratio** is the change in the log-odds of the outcome pe
 - Petersen ML, van der Laan MJ (2014). Causal models and learning from data. *Epidemiology* 25(3):418-426.
 - `tmle` R package: [CRAN](https://cran.r-project.org/package=tmle)
 - `SuperLearner` R package: [CRAN](https://cran.r-project.org/package=SuperLearner)
-
----
 
 ## Software Implementation (R)
 
@@ -218,11 +224,11 @@ W <- rnorm(n)
 A <- rbinom(n, 1, plogis(0.5 * W))
 Y <- 0.8 * A + 1.2 * W + rnorm(n, sd = 0.5)  # true ATE = 0.8
 
-## ── Naive regression (biased) ──
+## -- Naive regression (biased) --
 naive_fit <- lm(Y ~ A)
 cat("Naive regression coefficient on A:", round(coef(naive_fit)["A"], 3), "\n")
 
-## ── TMLE (targets the ATE) ──
+## -- TMLE (targets the ATE) --
 if (requireNamespace("tmle", quietly = TRUE)) {
   library(tmle)
   tmle_fit <- tmle(
