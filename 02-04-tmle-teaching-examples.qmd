@@ -70,86 +70,21 @@ As introduced in [Chapter 1.1](01-01-regression-vs-causal.qmd), regression coeff
 
 ---
 
-# 2. The Causal Roadmap
+# 2. Setup: Question, Assumptions, and Estimand
 
-We follow a five-step workflow that structures every causal analysis.
+This chapter applies the Causal Roadmap from [Chapter 1.2](01-02-causal-roadmap.qmd) to the dapagliflozin safety question. We briefly state each roadmap step here; see Chapters 1.2 and 1.3 for the full framework.
 
-:::{.callout-note}
-## Step 1: Define the Causal Question
+**Causal question.** What would happen to 1-year MACE risk if every eligible patient started dapagliflozin, compared to if every eligible patient started a sulfonylurea?
 
-**In plain language:**
-What would happen to 1-year MACE risk if every eligible patient started dapagliflozin, compared to if every eligible patient started a sulfonylurea?
+**Estimand.** The ATE on the risk difference scale: $\psi = E[Y(1)] - E[Y(0)]$.
 
-**As a counterfactual estimand:**
+**Causal model.** Confounders $W$ (age, BMI, HbA1c, prior CVD, eGFR, statin use) affect both treatment $A$ and outcome $Y$. The DAG is the standard point-treatment structure: $W \to A$, $W \to Y$, $A \to Y$.
 
-The Average Treatment Effect (ATE) on the risk difference scale:
+**Identification.** We assume consistency, exchangeability, and positivity as defined in [Chapter 1.3](01-03-identification-estimands.qmd). In this application, consistency requires that "initiate dapagliflozin" is well-defined across patients. Exchangeability is the most vulnerable assumption: we cannot test it, but we strengthen it by adjusting for a rich set of confounders. Positivity can be violated when, for example, patients with severe renal impairment are never prescribed dapagliflozin.
 
-$$
-\psi = E[Y(1)] - E[Y(0)]
-$$
+**Statistical estimand.** Under identification, the causal ATE equals $E_W[E[Y \mid A=1, W]] - E_W[E[Y \mid A=0, W]]$.
 
-where $Y(a)$ is the potential outcome under treatment strategy $a$.
-
-- $E[Y(1)]$ = population risk of MACE if everyone took dapagliflozin
-- $E[Y(0)]$ = population risk of MACE if everyone took sulfonylurea
-- A negative $\psi$ means dapagliflozin is protective; a positive $\psi$ means increased risk
-:::
-
-**Step 2: Define the Causal Model.**
-We posit the following causal structure. Confounders $W$ affect both treatment choice $A$ and the outcome $Y$. Treatment $A$ also affects $Y$ directly.
-
-The confounders include:
-
-- **Age**: older patients have higher CV risk and may receive different prescriptions
-- **BMI**: obesity correlates with both drug choice and CV risk
-- **HbA1c**: glycemic control at baseline affects prescribing and outcomes
-- **Prior CVD**: history of cardiovascular disease is a strong confounder
-- **eGFR**: renal function influences both drug eligibility and CV risk
-- **Statin use**: a marker of CV risk management
-
-The DAG (directed acyclic graph):
-
-```
-       W (age, BMI, HbA1c, prior CVD, eGFR, statin)
-      / \
-     v   v
-     A --> Y
-```
-
-All arrows from $W$ point to both $A$ and $Y$. There is a direct arrow from $A$ to $Y$. There are no arrows from $A$ back to $W$ (this is a point-treatment analysis at baseline).
-
-Structural equations:
-
-- $W$ is drawn from the population distribution
-- $A = f_A(W, U_A)$: treatment depends on confounders and unmeasured factors
-- $Y = f_Y(A, W, U_Y)$: outcome depends on treatment, confounders, and unmeasured factors
-
-:::{.callout-warning}
-## Step 3: Identify Assumptions
-
-As discussed in [Chapter 1.3](01-03-identification-estimands.qmd), identification of $\psi = E[Y(1)] - E[Y(0)]$ from observational data requires three assumptions: **consistency** (the observed outcome equals the potential outcome under the treatment actually received), **exchangeability** ($Y(a) \perp\!\!\!\perp A \mid W$, i.e., no unmeasured confounding), and **positivity** ($0 < P(A = 1 \mid W = w) < 1$ for all relevant $w$). In this application, consistency requires that "initiate dapagliflozin" is well-defined across patients. Exchangeability is the most vulnerable assumption: we cannot test it, but we strengthen it by adjusting for a rich set of confounders. Positivity can be violated when, for example, patients with severe renal impairment are never prescribed dapagliflozin.
-:::
-
-**Step 4: Map to a Statistical Estimand.**
-Under the three assumptions above, the causal estimand equals a statistical quantity we can estimate from data:
-
-$$
-\psi = E_W\big[E[Y \mid A=1, W]\big] - E_W\big[E[Y \mid A=0, W]\big]
-$$
-
-This is the **G-computation identification formula**. It says: fit a model for $E[Y \mid A, W]$, predict under $A = 1$ and $A = 0$ for every patient, and average over the population distribution of $W$.
-
-Equivalently, using the propensity score $g(W) = P(A=1 \mid W)$:
-
-$$
-E[Y(a)] = E\left[\frac{I(A=a) Y}{P(A=a \mid W)}\right]
-$$
-
-This is the **IPTW identification formula**.
-
-Both representations target the same quantity. They differ in which nuisance function they rely on.
-
-**Step 5: Choose an Estimation Strategy.**
+**Estimation strategy.** We implement five estimators progressively, from naive to TMLE, so you can see exactly what each adds. The table below summarizes the trade-offs developed in Chapters 2.1 through 2.3:
 
 | Method | Relies on | Robust to | Weakness |
 |--------|-----------|-----------|----------|
@@ -157,13 +92,6 @@ Both representations target the same quantity. They differ in which nuisance fun
 | IPTW | Treatment model $P(A \mid W)$ | Outcome model misspecification | Sensitive to positivity violations and weight instability |
 | AIPW | Both models | Misspecification of either one model | Not targeted; can produce out-of-bounds estimates |
 | TMLE | Both models | Misspecification of either one model | More complex to implement; requires understanding the targeting step |
-
-TMLE additionally:
-
-- Respects the natural bounds of the parameter space (probabilities stay between 0 and 1)
-- Achieves the semiparametric efficiency bound when both models are well-specified
-- Provides valid inference through the efficient influence curve
-- Integrates naturally with machine learning via Super Learner
 
 We now implement each estimator progressively.
 
