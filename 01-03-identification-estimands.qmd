@@ -22,30 +22,6 @@ What went wrong? The key lesson is not that observational data are useless. The 
 
 That is the central job of this chapter. Before we estimate anything, we need to know whether our causal estimand can be linked to the observed data under assumptions we are willing to defend. The hormone therapy story is a reminder that strong methods begin **before** modeling, at the stage of defining the estimand, defending exchangeability, and checking whether identification is even plausible.
 
-The following simulation makes this concrete. A single binary confounder is enough to make a crude comparison misleading, while g-computation (which implements the identification formula) recovers the true causal effect.
-
-```{r}
-set.seed(42)
-n <- 2000
-W <- rbinom(n, 1, 0.5)                    # confounder: e.g., prior CVD
-A <- rbinom(n, 1, plogis(-0.5 + 1.5 * W)) # treatment depends on W
-Y <- rbinom(n, 1, plogis(-2 + 0.3 * A + 1.5 * W))  # true causal effect of A is modest
-
-# Crude comparison (confounded)
-crude_rd <- mean(Y[A == 1]) - mean(Y[A == 0])
-
-# G-computation (adjusting for W)
-mod <- glm(Y ~ A + W, family = binomial)
-p1 <- predict(mod, newdata = data.frame(A = 1, W = W), type = "response")
-p0 <- predict(mod, newdata = data.frame(A = 0, W = W), type = "response")
-gcomp_ate <- mean(p1 - p0)
-
-cat("Crude risk difference (confounded):", round(crude_rd, 3), "\n")
-cat("G-computation ATE (adjusted):      ", round(gcomp_ate, 3), "\n")
-```
-
-The crude estimate overstates the effect because people with prior CVD (W = 1) are more likely to receive treatment *and* more likely to have the outcome. G-computation breaks this confounding by standardizing over W.
-
 
 ::: {.callout-note}
 ## Learning objectives
@@ -81,7 +57,6 @@ knitr::opts_chunk$set(
 
 The three key assumptions required for identification are:
 
-This chapter is the **canonical reference** for these three assumptions. Later chapters will refer back here rather than re-derive them.
 
 :::{.callout-note}
 ## Assumption 1: Consistency, "You Get What You Get"
@@ -123,10 +98,10 @@ $$
 0 < P(A=a \mid W=w) < 1
 $$
 
-**Practical positivity violations** are extremely common in real-world observational data and deserve careful attention:
 
-- **Structural violations**: Some covariate strata *never* receive a particular treatment by clinical convention (e.g., patients over age 90 may never be prescribed aggressive chemotherapy). No statistical method can fix this. The causal effect is simply not defined in those strata.
-- **Random violations**: Some strata have very few patients receiving one treatment, leading to near-zero propensity scores. This causes extreme inverse-probability weights and unstable estimates.
+**Theoretical positivity violations**: Some covariate strata *never* receive a particular treatment by clinical convention (e.g., patients over age 90 may never be prescribed aggressive chemotherapy). No statistical method can fix this. The causal effect is simply not defined in those strata.
+
+**Practical positivity violations** are extremely common in real-world observational data and deserve careful attention: Some strata have no or very few patients receiving one treatment, leading to near-zero propensity scores, even though those patients could theoretically recieve treatment. This causes extreme inverse-probability weights and unstable estimates.
 
 Signs to look for: propensity scores piling up near 0 or 1, very large IPTW weights, and g-computation predictions extrapolating far outside the support of the data. We will practice diagnosing this with R shortly.
 :::
@@ -162,11 +137,9 @@ A **causal estimand** is defined via potential outcomes (e.g., 3-year MI risk di
 **Pitfall.** Regression coefficients (e.g., log-odds ratios) are **not** the statistical estimand for the ATE. They are conditional measures on the log-odds scale, not marginal risk differences.
 :::
 
-# 4. Example: Identification in a Simulated Osteoporosis Cohort
 
-We walk through a reproducible R example to illustrate the identification step.
 
-```{r}
+```{r, include=FALSE}
 set.seed(2025)
 
 n <- 5000
@@ -181,42 +154,16 @@ risk <- plogis(-2 + 0.5*A + 0.08*(age - 70) + 0.9*cvd)
 Y <- rbinom(n, 1, risk)
 
 dat <- data.frame(age, cvd, A, Y)
-```
-
-# 5. Step-by-Step Identification Using G-Computation
-
-### 5.1 Fit an outcome regression
-
-```{r}
 mod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
+
 ```
 
-### 5.2 Predict counterfactual outcomes
 
-```{r}
-dat1 <- transform(dat, A = 1)
-dat0 <- transform(dat, A = 0)
 
-p1 <- predict(mod, newdata = dat1, type = "response")
-p0 <- predict(mod, newdata = dat0, type = "response")
-```
 
-### 5.3 Compute the standardized ATE
+# 4. Diagnosing Exchangeability and Positivity
 
-```{r}
-ate_gcomp <- mean(p1 - p0)
-ate_gcomp
-```
-
-:::{.callout-tip}
-## Interpreting the G-Computation ATE
-
-The number printed above is the **average treatment effect on the risk-difference scale**. It estimates how much the probability of MI would change, on average, if every patient in the study population were given denosumab ($A=1$) compared to a world where every patient received ZA ($A=0$). A positive value means denosumab is associated with *higher* MI risk after adjusting for age and CVD history; a negative value means *lower* risk. Because this is a standardized (marginal) estimate averaged over the real covariate distribution, it has a direct public-health interpretation, unlike a conditional odds ratio from a logistic regression.
-:::
-
-# 6. Diagnosing Exchangeability and Positivity
-
-## 6.1 Overlap check
+## 4.1 Overlap check
 
 :::{.callout-important}
 ## Diagnosing Positivity Violations in Practice
@@ -236,18 +183,13 @@ plot(density(predict(glm(A ~ age + cvd, family = binomial, data = dat), type = "
 ps <- predict(glm(A ~ age + cvd, family = binomial, data = dat), type = "response")
 ```
 
-# 7. Interpretability: Why the Roadmap Matters
-
-**Key point.** The Causal Roadmap keeps your analysis honest. Without explicit identification, analysts may report non-causal associations as causal effects, sensitivity analyses are impossible because assumptions were never stated, and regulatory decisions become less defensible. With identification, the causal effect has an unambiguous interpretation tied to a well-defined intervention, assumptions are transparent and can be interrogated by reviewers, and statistical methods are chosen *because they target the identified estimand*, not out of convenience.
-
-# 8. Summary
+# 5. Summary
 
 :::{.callout-tip}
 ## Chapter Takeaways
 
 - Identification bridges **potential outcomes** (causal) to **observable quantities** (statistical) via three assumptions: consistency, exchangeability, and positivity.
 - A statistical estimand is not a regression coefficient. It is the observed-data function that equals the causal estimand under the identification assumptions.
-- **G-computation** implements the identification formula: model, predict under each treatment, average.
 :::
 
 ## Check your understanding
@@ -288,51 +230,3 @@ Before moving to estimation, the next chapter introduces **target trial emulatio
 - `lmtp` R package: [CRAN](https://cran.r-project.org/package=lmtp)
 - `tmle` R package: [CRAN](https://cran.r-project.org/package=tmle)
 
-## Software Implementation (R)
-
-This example estimates the effect of a **modified treatment policy** (a stochastic intervention that shifts treatment probability) using the `lmtp` package. This connects directly to the identification results in this chapter: rather than asking "what if everyone were treated?", we ask "what if each person's probability of treatment increased?"
-
-- Simulate panel data with a single time point
-- Use `lmtp_tmle()` to estimate the effect of shifting the treatment mechanism
-- Falls back to `tmle` for a standard ATE if `lmtp` is unavailable
-
-```{r}
-#| eval: false
-set.seed(1)
-n <- 500
-W1 <- rnorm(n)
-W2 <- rbinom(n, 1, 0.5)
-A  <- rbinom(n, 1, plogis(-0.3 + 0.5 * W1))
-Y  <- as.numeric(rbinom(n, 1, plogis(-1 + 0.8 * A + 0.6 * W1 + 0.3 * W2)))
-
-if (requireNamespace("lmtp", quietly = TRUE)) {
-  library(lmtp)
-
-  dat <- data.frame(W1 = W1, W2 = W2, A = A, Y = Y)
-
-  ## Modified treatment policy: shift everyone to A = 1
-  result <- lmtp_tmle(
-    data = dat,
-    trt = "A",
-    outcome = "Y",
-    baseline = c("W1", "W2"),
-    shift = function(data, trt) rep(1, nrow(data)),
-    outcome_type = "binomial",
-    learners_outcome = "SL.glm",
-    learners_trt = "SL.glm",
-    folds = 5
-  )
-  print(result)
-} else if (requireNamespace("tmle", quietly = TRUE)) {
-  message("lmtp not available; falling back to tmle for a standard ATE.")
-  library(tmle)
-  fit <- tmle(Y = Y, A = A, W = data.frame(W1, W2),
-              Q.SL.library = "SL.glm", g.SL.library = "SL.glm")
-  cat("ATE:", round(fit$estimates$ATE$psi, 3), "\n")
-  cat("95% CI:", round(fit$estimates$ATE$CI, 3), "\n")
-} else {
-  message("Install 'lmtp' or 'tmle':
-    install.packages('lmtp')
-    install.packages('tmle')")
-}
-```
