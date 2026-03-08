@@ -3,6 +3,8 @@ title: "Chapter 1.2: The Causal Roadmap"
 format: html
 ---
 
+*Estimated reading time: 40 minutes*
+
 In this chapter, we introduce the **Causal Roadmap** (Petersen & van der Laan, 2014, "Causal models and learning from data: integrating causal modeling and statistical estimation"), a structured approach for asking and answering causal questions with observational data. We begin with a motivating example of how things go wrong without a roadmap, then introduce the **target trial protocol** and walk through the **six steps of the causal roadmap** that translate a causal question into a defensible analysis --- including the **identification assumptions** (consistency, exchangeability, positivity) that bridge potential outcomes and observed data.
 
 ::: {.callout-note}
@@ -25,9 +27,7 @@ knitr::opts_chunk$set(
   comment = "#>",
   fig.width = 7,
   fig.height = 4,
-  fig.align = "center",
-  message = FALSE,
-  warning = FALSE
+  fig.align = "center"
 )
 library(dagitty)
 library(ggdag)
@@ -322,55 +322,11 @@ Throughout this handbook, we use a shared observational dataset to illustrate ea
 
 ### Applying the roadmap to the HAART question
 
-**Step 1: Target trial protocol.**
+Here we walk through each roadmap step for the HAART case study. See the [Running Case Study](00-case-study.qmd) for the full target trial protocol, DAGs, and data description.
 
-| Component | Specification |
-|-----------|---------------|
-| Eligibility | HIV-positive adults at seroconversion, antiretroviral-naive |
-| Time zero | Date of HIV seroconversion |
-| Treatment strategies | (1) Initiate HAART when clinically indicated vs. (2) defer HAART |
-| Assignment | Random assignment at time zero |
-| Outcome | All-cause mortality |
-| Follow-up | Until death, dropout, or administrative end of study (up to 3,700 days) |
-| Causal contrast | Risk difference in mortality |
+**Step 1: Target trial protocol.** The target trial compares initiating HAART when clinically indicated versus deferring HAART, among HIV-positive adults from seroconversion, with all-cause mortality as the outcome and the risk difference as the causal contrast. The full protocol table is in the [case study chapter](00-case-study.qmd#the-target-trial-we-wish-we-could-run).
 
-**Step 2: Causal model and DAG.** The key variables are baseline covariates W (age, sex), time-varying CD4 count, treatment A (HAART initiation), and outcome Y (death). The longitudinal structure creates treatment-confounder feedback: CD4 is affected by prior HAART and also affects future HAART decisions.
-
-```{r}
-#| label: fig-haart-long-dag
-#| fig-cap: "Longitudinal DAG for the HAART example. CD4 at time t+1 is affected by prior HAART, creating treatment-confounder feedback."
-#| fig-width: 8
-#| fig-height: 5
-haart_dag <- dagify(
-  L1 ~ W,
-  A1 ~ L1 + W,
-  L2 ~ A1 + L1 + W,
-  A2 ~ L2 + A1 + W,
-  Y ~ A2 + A1 + L2 + L1 + W,
-  C ~ L2 + A1 + W,
-  exposure = "A1",
-  outcome = "Y",
-  coords = list(
-    x = c(W = 0, L1 = 1, A1 = 2, L2 = 3, A2 = 4, Y = 5.5, C = 4.5),
-    y = c(W = 1, L1 = 1, A1 = 0, L2 = 1, A2 = 0, Y = 0, C = 1.5)
-  ),
-  labels = c(
-    W = "Baseline\n(age, sex)",
-    L1 = "CD4(t)",
-    A1 = "HAART(t)",
-    L2 = "CD4(t+1)",
-    A2 = "HAART(t+1)",
-    Y = "Death",
-    C = "Dropout"
-  )
-)
-
-ggdag(haart_dag, text = FALSE, use_labels = "label") +
-  theme_dag() +
-  labs(title = "Longitudinal DAG with treatment-confounder feedback")
-```
-
-The arrow from HAART(t) to CD4(t+1) represents the effect of treatment on the confounder. The arrow from CD4(t+1) to HAART(t+1) represents the confounder influencing future treatment. This feedback means that conditioning on time-varying CD4 in a regression blocks part of the causal pathway, while not conditioning on it leaves confounding unaddressed. Neither approach is correct. This is the classic motivation for g-methods (g-computation, IPTW, TMLE), which we develop in Part II.
+**Step 2: Causal model and DAG.** The key variables are baseline covariates W (age, sex), time-varying CD4 count, treatment A (HAART initiation), and outcome Y (death). The longitudinal structure creates treatment-confounder feedback: CD4 is affected by prior HAART and also affects future HAART decisions. Because conditioning on time-varying CD4 in a regression blocks part of the causal pathway while not conditioning on it leaves confounding unaddressed, neither standard regression approach is correct. This is the classic motivation for g-methods (g-computation, IPTW, TMLE), which we develop in Part II. See the [case study DAGs](00-case-study.qmd#the-observed-data-and-causal-structure) for the full point-treatment and longitudinal DAGs.
 
 **Step 3: Estimand.** The marginal risk difference in mortality under the two treatment strategies.
 
