@@ -3,18 +3,9 @@ title: "Running Case Study: Antiretroviral Therapy, HIV Progression, and Longitu
 format: html
 ---
 
-```{r}
-#| include: false
-knitr::opts_chunk$set(
-  collapse = TRUE,
-  comment = "#>",
-  fig.width = 7,
-  fig.height = 4,
-  fig.align = "center",
-  message = FALSE,
-  warning = FALSE
-)
-```
+::: {.callout-note appearance="simple"}
+**Estimated reading time: 15 minutes**
+:::
 
 Throughout this handbook, we use a single recurring example to illustrate causal concepts, estimation methods, and diagnostic tools: the longitudinal HIV antiretroviral therapy cohort example used in the marginal structural model literature (Van der Wal & Geskus, 2011). Using one example across all chapters lets you see how the same data look different through the lens of each method, and makes it easier to compare approaches.
 
@@ -154,127 +145,7 @@ This is a question about a *sustained treatment strategy*, not simply a comparis
 
 It is important to distinguish this causal question from the naive associational question. The **associational question** asks: among patients who happened to initiate HAART, was mortality different from those who did not? This comparison is confounded because sicker patients are more likely to start treatment. The **causal question** asks what would happen if we could assign treatment strategies to everyone, removing the influence of confounding factors on the treatment decision. Answering the causal question requires the identification assumptions and estimation methods developed throughout this handbook.
 
-
-## The target trial we wish we could run
-
-To make the causal question precise, we specify the randomized trial we would ideally like to conduct. This target trial protocol serves as a design template that the observational analysis will attempt to emulate.
-
-:::{.callout-note}
-## Target trial protocol
-
-| Component | Specification |
-|-----------|---------------|
-| **Eligibility** | HIV-positive adults at the time of seroconversion, antiretroviral-naive |
-| **Time zero** | Date of HIV seroconversion |
-| **Treatment strategies** | (1) Initiate HAART according to clinical guidelines during follow-up vs. (2) defer HAART initiation throughout follow-up |
-| **Assignment** | Random assignment to one of the two strategies at time zero |
-| **Outcome** | All-cause mortality |
-| **Follow-up** | From seroconversion until death, dropout, or administrative end of study (up to 3,700 days) |
-| **Causal contrast** | Risk difference in mortality at a specified time horizon |
-| **Analysis** | Intention-to-treat or per-protocol, depending on the question |
-:::
-
-Starting with the target trial helps in several ways. First, it forces us to define the causal question precisely before choosing any statistical method. Second, it makes the assumptions of the analysis transparent: we are asking what would have happened under specific, well-defined treatment strategies, not just whether treated and untreated patients have different outcomes. Third, it highlights where the observational data fall short of the ideal trial. In the observed data, treatment is not randomly assigned; instead, it is determined by evolving clinical status. The causal roadmap provides the framework for bridging from this ideal trial to the data we actually have, using identification assumptions and appropriate estimators.
-
-
-## The observed data and causal structure
-
-### A simplified DAG for point-treatment chapters
-
-For the early chapters of this handbook (g-computation, IPTW, TMLE), we work with a point-treatment simplification where treatment is defined as "ever initiated HAART during follow-up" and confounders are measured at baseline. The following DAG captures this simplified structure:
-
-```{r}
-#| label: fig-simple-dag
-#| fig-cap: "Simplified point-treatment DAG for the HAART example. Baseline confounders (age, sex, CD4) affect both treatment and mortality."
-#| fig-width: 6
-#| fig-height: 4
-library(dagitty)
-library(ggdag)
-
-simple_dag <- dagify(
-  A ~ W_age + W_sex + W_cd4,
-  Y ~ A + W_age + W_sex + W_cd4,
-  exposure = "A",
-  outcome = "Y",
-  coords = list(
-    x = c(W_age = 0, W_sex = 0, W_cd4 = 0, A = 1, Y = 2),
-    y = c(W_age = 1.5, W_sex = 1, W_cd4 = 0.5, A = 0, Y = 0)
-  ),
-  labels = c(
-    W_age = "Age", W_sex = "Sex", W_cd4 = "Baseline\nCD4",
-    A = "HAART\ninitiation", Y = "Death"
-  )
-)
-
-ggdag(simple_dag, text = FALSE, use_labels = "label") +
-  theme_dag() +
-  labs(title = "Point-treatment DAG")
-```
-
-In this simplified view, the baseline confounders (age, sex, baseline CD4 count) each affect both the probability of initiating HAART and the risk of death. Under the assumptions of consistency, exchangeability (conditional on these baseline confounders), and positivity, the causal effect of HAART initiation on mortality is identified by the g-computation formula.
-
-### The longitudinal DAG: treatment-confounder feedback
-
-The real complexity of this example becomes apparent when we consider the longitudinal structure. The following DAG shows two time slices and illustrates the treatment-confounder feedback loop:
-
-```{r}
-#| label: fig-longitudinal-dag
-#| fig-cap: "Longitudinal DAG for the HAART example showing treatment-confounder feedback. CD4 at time t is affected by prior HAART and also affects future HAART decisions."
-#| fig-width: 8
-#| fig-height: 5
-long_dag <- dagify(
-  L1 ~ W,
-  A1 ~ L1 + W,
-  L2 ~ A1 + L1 + W,
-  A2 ~ L2 + A1 + W,
-  Y ~ A2 + A1 + L2 + L1 + W,
-  C ~ L2 + A1 + W,
-  exposure = "A1",
-  outcome = "Y",
-  coords = list(
-    x = c(W = 0, L1 = 1, A1 = 2, L2 = 3, A2 = 4, Y = 5.5, C = 4.5),
-    y = c(W = 1, L1 = 1, A1 = 0, L2 = 1, A2 = 0, Y = 0, C = 1.5)
-  ),
-  labels = c(
-    W = "Baseline\n(age, sex)",
-    L1 = "CD4(t)",
-    A1 = "HAART(t)",
-    L2 = "CD4(t+1)",
-    A2 = "HAART(t+1)",
-    Y = "Death",
-    C = "Dropout"
-  )
-)
-
-ggdag(long_dag, text = FALSE, use_labels = "label") +
-  theme_dag() +
-  labs(title = "Longitudinal DAG with treatment-confounder feedback")
-```
-
-This DAG encodes the following causal relationships:
-
-- **Baseline confounders (W).** Age and sex are fixed at baseline. They affect CD4 levels, treatment decisions, dropout, and mortality at all future time points.
-
-- **Time-varying confounder (L).** The CD4 count (`cd4.sqrt`) at each interval serves as a time-varying confounder. It is affected by prior treatment (HAART improves CD4) and also influences future treatment decisions (low CD4 prompts HAART initiation) and mortality (low CD4 increases death risk).
-
-- **Treatment-confounder feedback.** The arrow from $A_1$ (HAART at time $t$) to $L_2$ (CD4 at time $t+1$) represents the effect of treatment on the confounder. The arrow from $L_2$ to $A_2$ represents the confounder influencing future treatment. This is the hallmark of treatment-confounder feedback: the same variable (CD4) is both a confounder of future treatment and a consequence of past treatment.
-
-- **Censoring.** Dropout (`dropout`) may depend on CD4 levels and prior treatment, creating the potential for informative censoring.
-
-**Why standard regression fails.** If we condition on $L_2$ (time-varying CD4) in a regression, we block part of the causal pathway from $A_1$ through $L_2$ to $Y$. This removes the indirect benefit of HAART (via improved CD4) from the estimate, leading to attenuation or bias. If we do *not* condition on $L_2$, we leave the confounding path $A_2 \leftarrow L_2 \rightarrow Y$ open. No single regression model can simultaneously block confounding paths and preserve causal pathways when treatment-confounder feedback is present. This is the fundamental motivation for g-methods: g-computation, IPTW with marginal structural models, and longitudinal TMLE.
-
-### Mapping the DAG to the observed data
-
-The person-period structure of `haartdat` maps directly onto this longitudinal DAG:
-
-- Each row corresponds to one time slice in the DAG.
-- `cd4.sqrt` at each interval is the time-varying confounder $L_t$, measured before the treatment decision.
-- `haartind` at each interval is the treatment decision $A_t$, occurring at the end of the interval.
-- `event` is the outcome $Y$, observed at the end of the interval.
-- `dropout` is the censoring indicator $C$, also at the end of the interval.
-- `age` and `sex` are the baseline covariates $W$, fixed across all intervals for a given patient.
-
-The temporal ordering within each interval is: measure CD4 (beginning of interval), then treatment decision and outcome/censoring (end of interval). This ordering, combined with the identification assumptions (sequential exchangeability, consistency, and positivity at each time point), allows the causal effect to be identified using longitudinal g-methods.
+The target trial protocol, causal DAGs (both the simplified point-treatment version and the full longitudinal structure with treatment-confounder feedback), and identification assumptions for this case study are developed in detail in [Chapter 1.2: The Causal Roadmap](01-02-causal-roadmap.qmd), where each step of the roadmap is applied to this HAART example.
 
 
 ## Why naive methods fail in this cohort
