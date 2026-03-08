@@ -6,16 +6,15 @@ format: html
 # Chapter 2.1: Outcome Modeling and Standardization  
 *G-computation as a foundation for causal estimation*
 
-Outcome modeling and standardization, often referred to as **g-computation**, is one of the oldest and most intuitive approaches to causal inference. In this chapter, we'll build intuition, walk carefully through why the method works, show where it fails, and provide fully reproducible examples in R (using tidyverse style).  
+Outcome modeling and standardization, often referred to as **g-computation**, is one of the oldest and most intuitive approaches to causal inference. In this chapter, we'll build intuition, walk carefully through why the method works, and show where it fails. 
 
-This chapter is intentionally thorough, designed for students new to causal inference but with working knowledge of regression.
 
 ---
 
 :::{.callout-tip}
 ## Why Start With G-Computation?
 
-G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions. No reliance on a single regression coefficient required. It directly implements the identification formula from Chapter 1.3 ($E[Y(a)] = E_W[E[Y \mid A=a, W]]$), making it the most concrete entry point for learning causal estimation.
+G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions. No reliance on a single regression coefficient required. It directly implements the identification formula from Chapter 1.3 ($E[Y(a)] = E_W[E[Y \mid A=a, W]]$), making it the most concrete entry point for learning causal estimation, and mapping the causal estimand to a statistical estimand.
 :::
 
 **Key point.** G-computation reconstructs what would have happened if *everyone* received treatment ($A=1$) and, separately, if *everyone* received control ($A=0$). The recipe is three steps: (1) fit an outcome model $E[Y \mid A, W]$, (2) predict outcomes for each individual under both treatments, and (3) average those predictions (standardization). That is the entire method.
@@ -23,6 +22,8 @@ G-computation estimates causal effects by predicting what *would* happen to ever
 # 3. Implementation Example: Simulated Osteoporosis Cohort
 
 We simulate a small cohort similar to the denosumab vs zoledronic acid motivating example.
+
+**NOTE: many of the chapters have simulated data within them. It would be better to have a single simulated dataset that we use across all chapters, that is introduced when we introduce the case study up front, then we don't need to re-introduce it in all the chapters. Can you det that up?**
 
 ```{r}
 library(tidyverse)
@@ -79,18 +80,21 @@ Here `p1[i]` and `p0[i]` are the predicted outcomes for person *i* under treatme
 :::{.callout-important}
 ## Step 3: Standardize. This Is the Step That Makes It Causal
 
-Averaging the counterfactual predictions over the *entire population* converts model-based predictions into a **causal** estimate: a standardized (marginal) risk difference, the same quantity a perfectly executed randomized trial would yield.
+Averaging the counterfactual predictions over the *entire population* converts model-based predictions into a **causal** estimate: a standardized (marginal) risk difference, the same quantity a well-randomized trial would yield.
 
 ```{r}
 risk1 <- mean(p1)
 risk0 <- mean(p0)
 ate  <- risk1 - risk0
 
-list(risk1 = risk1, risk0 = risk0, ate = ate)
+knitr::kable(data.frame(risk1 = risk1, risk0 = risk0, ate = ate))
 ```
 
-Interpret the result as: “Initiating denosumab rather than ZA is estimated to change 3-year MI/stroke risk by X percentage points.”
+Interpret the result as: “The entire population initiating denosumab rather than ZA is estimated to change 3-year MI/stroke risk by X percentage points.”
 :::
+
+**NOTE: can you add a section here showing we could also estimate a relative risk with g-computation, or even something more complicated like the population attributable risk, something not easy to get out of a regression?**
+
 
 # 5. Why G-Computation Works
 
@@ -100,15 +104,7 @@ $$
 E_W[ E[Y | A=a, W] ].
 $$
 
-This contrasts with regression coefficients, which estimate:
 
-$$
-	ext{conditional log-odds ratios given W}
-$$
-
-These are completely different from the marginal risk difference.
-
-Standardization always yields marginal (population-level) effects.
 
 :::{.callout-tip}
 ## Key Distinction: Marginal Risk Difference vs. Conditional Log-Odds Ratio
@@ -172,6 +168,9 @@ mean(p1_sl - p0_sl)
 
 ---
 
+**NOTE: add another note that the reason G-computation is not used as much is it returns the point estimate but has no theory for estimating the standard error and getting a confidence interval compared to a regression. You can get boot-strap based confidence intervals, but the methods coming up (IPTW and TMLE) have appealing properties beyond G-comp, including easier standard error estimation**
+
+
 :::{.callout-tip}
 ## Summary
 
@@ -210,41 +209,3 @@ The key is the standardization (averaging) step. The outcome model $E[Y \mid A, 
 G-computation depends entirely on the outcome model being correctly specified. What if we could instead model the treatment mechanism? The next chapter introduces IPTW, which takes exactly that approach: reweighting observations to create a pseudo-population where treatment appears randomized.
 
 ---
-
-## Software Implementation (R)
-
-This example implements **g-computation** (parametric standardization) by hand, then shows how the `tmle` package automates and improves on this approach with targeting.
-
-- Simulate a confounded point-treatment dataset
-- Fit an outcome model $\hat{Q}(A,W) = E[Y \mid A, W]$
-- Predict under $A=1$ and $A=0$ for everyone, then average (g-computation)
-- Compare with the TMLE estimate, which adds a targeting step for bias correction
-
-```{r}
-#| eval: false
-set.seed(1)
-n <- 500
-W <- rnorm(n)
-A <- rbinom(n, 1, plogis(0.5 * W))
-Y <- rbinom(n, 1, plogis(-1 + 0.8 * A + 1.0 * W))  # true RD ≈ 0.16
-
-## ── Manual g-computation ──
-Q_mod <- glm(Y ~ A + W, family = binomial, data = data.frame(Y, A, W))
-
-Q1 <- predict(Q_mod, newdata = data.frame(A = 1, W = W), type = "response")
-Q0 <- predict(Q_mod, newdata = data.frame(A = 0, W = W), type = "response")
-gcomp_ate <- mean(Q1) - mean(Q0)
-cat("G-computation ATE:", round(gcomp_ate, 3), "\n")
-
-## ── TMLE (adds targeting to g-computation) ──
-if (requireNamespace("tmle", quietly = TRUE)) {
-  library(tmle)
-  fit <- tmle(Y = Y, A = A, W = data.frame(W = W),
-              family = "binomial",
-              Q.SL.library = "SL.glm", g.SL.library = "SL.glm")
-  cat("TMLE ATE:", round(fit$estimates$ATE$psi, 3), "\n")
-  cat("95% CI: ", round(fit$estimates$ATE$CI, 3), "\n")
-} else {
-  message("Install the 'tmle' package:  install.packages('tmle')")
-}
-```
