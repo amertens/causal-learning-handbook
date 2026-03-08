@@ -50,7 +50,11 @@ library(tidyverse)
 source("_data/load-haart-cohort.R")
 ```
 
-The HIV cohort in `haartdat` illustrates treatment-confounder feedback in real clinical data. CD4 counts change over time, and clinicians initiate HAART partly in response to falling CD4. But HAART itself raises CD4, so CD4 is simultaneously a confounder of future treatment and a mediator of past treatment.
+See the [Running Case Study](00-case-study.qmd) for the full data description.
+
+This chapter uses the full longitudinal panel `haartdat`, where each row is a 100-day interval for one `patient`. The key variables are the time-varying treatment indicator (`haartind`), the square-root CD4 count (`cd4.sqrt`), the death indicator (`event`), and the censoring flag (`dropout`). Time is indexed by `tstart` and `fuptime`.
+
+The HIV/HAART cohort is a textbook example of time-varying confounding with treatment-confounder feedback. Clinicians initiate HAART partly in response to falling CD4 counts, but HAART itself raises CD4. This means `cd4.sqrt` is simultaneously a confounder of future treatment decisions and a mediator of past treatment effects. The trajectory plot below makes this feedback visible: CD4 counts shift after HAART initiation, and those same CD4 levels drive subsequent treatment decisions.
 
 ```{r}
 #| label: fig-haart-trajectories
@@ -73,7 +77,7 @@ haartdat |>
   theme_minimal()
 ```
 
-A naive approach adjusts for time-varying CD4 in a pooled logistic regression. But this blocks the causal pathway from prior HAART through improved CD4 to survival, biasing the treatment effect toward zero.
+To see why this matters, consider the naive approach: a pooled logistic regression that conditions on time-varying `cd4.sqrt`. This blocks the causal pathway from prior HAART through improved CD4 to survival, biasing the treatment effect toward zero (or even reversing its sign).
 
 ```{r}
 naive_pooled <- glm(event ~ haartind + cd4.sqrt + age + sex,
@@ -82,7 +86,7 @@ cat("Naive pooled logistic regression (biased by conditioning on CD4):\n")
 round(coef(summary(naive_pooled))[, c("Estimate", "Std. Error")], 4)
 ```
 
-The HAART coefficient from this model is attenuated because conditioning on CD4 blocks the indirect benefit of treatment. Chapters ahead use g-methods to handle this correctly.
+The attenuated `haartind` coefficient illustrates exactly the problem this chapter addresses. Standard regression cannot simultaneously adjust for `cd4.sqrt` as a confounder and preserve it as a mediator. The g-methods introduced in the sections below resolve this dilemma.
 
 ## A familiar example: statins and cholesterol
 

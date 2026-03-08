@@ -21,8 +21,9 @@
 #   endtime   - patient's final observed time
 #   dropout   - censored at interval end (0/1)
 
-# Load from bundled .rda file
-load("_data/haartdat.rda")
+# Load from ipw package
+library(ipw)
+data(haartdat)
 
 # Also create a point-treatment (baseline) snapshot for chapters
 # that need a simpler cross-sectional version of the data

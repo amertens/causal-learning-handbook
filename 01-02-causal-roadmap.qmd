@@ -281,11 +281,13 @@ A **causal estimand** is defined via potential outcomes (e.g., 3-year MI risk di
 The propensity score overlap plot is your primary diagnostic. Look for mass piling up near 0 or 1 and poor overlap between groups.
 
 ```{r}
-source("_data/sim-osteoporosis-cohort.R")
+source("_data/load-haart-cohort.R")
 
-ps <- predict(glm(A ~ age + cvd, family = binomial, data = dat), type = "response")
+ps <- predict(glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
+                   family = binomial, data = haart_baseline),
+              type = "response")
 plot(density(ps), main = "Propensity Score Distribution",
-     xlab = "Estimated P(A=1 | W)")
+     xlab = "Estimated P(HAART = 1 | W)")
 ```
 
 When you see poor overlap, consider restricting to the region of common support, trimming extreme weights, or acknowledging the limitations. See [Chapter 3.2](03-02-positivity-overlap.qmd) for a detailed treatment.
@@ -316,46 +318,67 @@ The Causal Roadmap gives a rigorous framework for designing and evaluating real-
 
 ## Running Example: Antiretroviral Therapy Cohort
 
-Throughout this handbook, we use a shared observational dataset to illustrate each method. The cohort follows HIV-positive patients from seroconversion and asks whether initiating highly active antiretroviral therapy (HAART) reduces mortality.
+Throughout this handbook, we use a shared observational dataset to illustrate each method: the longitudinal HIV antiretroviral therapy cohort example used in the marginal structural model literature (Van der Wal & Geskus, 2011). The cohort follows 1,200 HIV-positive patients from seroconversion and asks whether initiating highly active antiretroviral therapy (HAART) reduces mortality. See the [Running Case Study](00-case-study.qmd) for the full data description, variable dictionary, and patient trajectories.
 
-```{r}
-source("_data/load-haart-cohort.R")
-```
+### Applying the roadmap to the HAART question
 
-**Target trial protocol for the HAART question:**
+**Step 1: Target trial protocol.**
 
 | Component | Specification |
 |-----------|---------------|
-| Eligibility | HIV-positive patients at seroconversion |
-| Time zero | Date of seroconversion |
-| Treatment | Initiate HAART vs. no HAART |
+| Eligibility | HIV-positive adults at seroconversion, antiretroviral-naive |
+| Time zero | Date of HIV seroconversion |
+| Treatment strategies | (1) Initiate HAART when clinically indicated vs. (2) defer HAART |
+| Assignment | Random assignment at time zero |
 | Outcome | All-cause mortality |
-| Follow-up | Until death, dropout, or end of study |
+| Follow-up | Until death, dropout, or administrative end of study (up to 3,700 days) |
 | Causal contrast | Risk difference in mortality |
 
-**Causal DAG.** The key variables are baseline covariates W (age, sex, CD4 count), treatment A (HAART initiation), and outcome Y (death). CD4 count is a time-varying confounder that is also affected by prior treatment, creating treatment-confounder feedback.
+**Step 2: Causal model and DAG.** The key variables are baseline covariates W (age, sex), time-varying CD4 count, treatment A (HAART initiation), and outcome Y (death). The longitudinal structure creates treatment-confounder feedback: CD4 is affected by prior HAART and also affects future HAART decisions.
 
 ```{r}
-#| label: fig-haart-dag
-#| fig-cap: "DAG for the HAART example. CD4 is both a confounder and affected by prior treatment."
-#| fig-width: 6
-#| fig-height: 3.5
+#| label: fig-haart-long-dag
+#| fig-cap: "Longitudinal DAG for the HAART example. CD4 at time t+1 is affected by prior HAART, creating treatment-confounder feedback."
+#| fig-width: 8
+#| fig-height: 5
 haart_dag <- dagify(
-  A ~ age + sex + CD4,
-  Y ~ A + age + sex + CD4,
-  CD4 ~ A_prev + age + sex,
-  exposure = "A", outcome = "Y",
+  L1 ~ W,
+  A1 ~ L1 + W,
+  L2 ~ A1 + L1 + W,
+  A2 ~ L2 + A1 + W,
+  Y ~ A2 + A1 + L2 + L1 + W,
+  C ~ L2 + A1 + W,
+  exposure = "A1",
+  outcome = "Y",
   coords = list(
-    x = c(age = 0, sex = 0.5, A_prev = 0.5, CD4 = 1, A = 2, Y = 3),
-    y = c(age = 1, sex = 1.5, A_prev = 0, CD4 = 0.5, A = 0, Y = 0)
+    x = c(W = 0, L1 = 1, A1 = 2, L2 = 3, A2 = 4, Y = 5.5, C = 4.5),
+    y = c(W = 1, L1 = 1, A1 = 0, L2 = 1, A2 = 0, Y = 0, C = 1.5)
   ),
-  labels = c(A_prev = "A[t-1]", CD4 = "CD4", A = "A", Y = "Y",
-             age = "Age", sex = "Sex")
+  labels = c(
+    W = "Baseline\n(age, sex)",
+    L1 = "CD4(t)",
+    A1 = "HAART(t)",
+    L2 = "CD4(t+1)",
+    A2 = "HAART(t+1)",
+    Y = "Death",
+    C = "Dropout"
+  )
 )
-ggdag(haart_dag, text = TRUE, use_labels = "label") + theme_dag()
+
+ggdag(haart_dag, text = FALSE, use_labels = "label") +
+  theme_dag() +
+  labs(title = "Longitudinal DAG with treatment-confounder feedback")
 ```
 
-Because CD4 is simultaneously a confounder (it predicts both future treatment and mortality) and a mediator of prior treatment, standard regression that conditions on CD4 will block part of the causal pathway and produce biased estimates. This treatment-confounder feedback is the classic motivation for g-methods (g-computation, IPTW, TMLE), which we develop in Part II.
+The arrow from HAART(t) to CD4(t+1) represents the effect of treatment on the confounder. The arrow from CD4(t+1) to HAART(t+1) represents the confounder influencing future treatment. This feedback means that conditioning on time-varying CD4 in a regression blocks part of the causal pathway, while not conditioning on it leaves confounding unaddressed. Neither approach is correct. This is the classic motivation for g-methods (g-computation, IPTW, TMLE), which we develop in Part II.
+
+**Step 3: Estimand.** The marginal risk difference in mortality under the two treatment strategies.
+
+**Step 4: Identification.** Under consistency (HAART is well-defined), sequential exchangeability (no unmeasured time-varying confounders beyond CD4, age, and sex), and positivity (at each time point, patients with any covariate profile have nonzero probability of either treatment decision), the causal effect is identified by the longitudinal g-computation formula.
+
+**Step 5: Estimation.** Point-treatment versions of this question are addressed with g-computation (Chapter 2.1), IPTW (Chapter 2.2), and TMLE (Chapter 2.3). The full longitudinal question requires IPTW with marginal structural models (Chapter 3.7) or longitudinal TMLE (Chapter 3.9).
+
+**Step 6: Interpretation.** Diagnostics (Chapter 3.5), sensitivity analysis for unmeasured confounding (Chapter 3.12), and consideration of informative censoring are all critical before interpreting results from this cohort.
 
 ## Check your understanding
 
