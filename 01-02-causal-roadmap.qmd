@@ -314,6 +314,49 @@ We cover diagnostics in detail in [Chapter 3.5: Advanced Diagnostics](03-05-adva
 The Causal Roadmap gives a rigorous framework for designing and evaluating real-world effect estimates. Before choosing a statistical method, start with the science: define your causal question, specify your model and assumptions, decide how to express the effect, and choose a transparent, defensible estimation method.
 :::
 
+## Running Example: Antiretroviral Therapy Cohort
+
+Throughout this handbook, we use a shared observational dataset to illustrate each method. The cohort follows HIV-positive patients from seroconversion and asks whether initiating highly active antiretroviral therapy (HAART) reduces mortality.
+
+```{r}
+source("_data/load-haart-cohort.R")
+```
+
+**Target trial protocol for the HAART question:**
+
+| Component | Specification |
+|-----------|---------------|
+| Eligibility | HIV-positive patients at seroconversion |
+| Time zero | Date of seroconversion |
+| Treatment | Initiate HAART vs. no HAART |
+| Outcome | All-cause mortality |
+| Follow-up | Until death, dropout, or end of study |
+| Causal contrast | Risk difference in mortality |
+
+**Causal DAG.** The key variables are baseline covariates W (age, sex, CD4 count), treatment A (HAART initiation), and outcome Y (death). CD4 count is a time-varying confounder that is also affected by prior treatment, creating treatment-confounder feedback.
+
+```{r}
+#| label: fig-haart-dag
+#| fig-cap: "DAG for the HAART example. CD4 is both a confounder and affected by prior treatment."
+#| fig-width: 6
+#| fig-height: 3.5
+haart_dag <- dagify(
+  A ~ age + sex + CD4,
+  Y ~ A + age + sex + CD4,
+  CD4 ~ A_prev + age + sex,
+  exposure = "A", outcome = "Y",
+  coords = list(
+    x = c(age = 0, sex = 0.5, A_prev = 0.5, CD4 = 1, A = 2, Y = 3),
+    y = c(age = 1, sex = 1.5, A_prev = 0, CD4 = 0.5, A = 0, Y = 0)
+  ),
+  labels = c(A_prev = "A[t-1]", CD4 = "CD4", A = "A", Y = "Y",
+             age = "Age", sex = "Sex")
+)
+ggdag(haart_dag, text = TRUE, use_labels = "label") + theme_dag()
+```
+
+Because CD4 is simultaneously a confounder (it predicts both future treatment and mortality) and a mediator of prior treatment, standard regression that conditions on CD4 will block part of the causal pathway and produce biased estimates. This treatment-confounder feedback is the classic motivation for g-methods (g-computation, IPTW, TMLE), which we develop in Part II.
+
 ## Check your understanding
 
 <details>

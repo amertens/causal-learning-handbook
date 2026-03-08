@@ -14,7 +14,7 @@ In this chapter we will
 - Show how to estimate and diagnose propensity scores
 - Implement IPTW in R with tidyverse style
 - Discuss stabilized weights and truncation
-- Compare IPTW to g computation on the same simulated data
+- Compare IPTW to g computation on the same data
 
 This is still point treatment only. Longitudinal extensions come later.
 
@@ -71,15 +71,15 @@ This is called a **Horvitz-Thompson type** estimator because it has the same str
 
 ---
 
-# 3. Simulated Example
+# 3. Data Example
 
-We use the shared osteoporosis cohort from `_data/sim-osteoporosis-cohort.R`, the same simulated dataset used throughout the handbook: denosumab (A=1) vs zoledronic acid (A=0) for 3-year MI risk, with confounding by age and cardiovascular history.
+We use the HIV antiretroviral therapy cohort from `_data/load-haart-cohort.R`, the same dataset used throughout the handbook: ever initiating HAART (`ever_haart`, A=1) vs never initiating HAART (A=0) for mortality (`died`), with confounding by age, sex, and baseline CD4 count (`cd4_sqrt_baseline`).
 
 ```{r}
 library(tidyverse)
 
-source("_data/sim-osteoporosis-cohort.R")
-dat <- as_tibble(dat)
+source("_data/load-haart-cohort.R")
+dat <- as_tibble(haart_baseline)
 dat %>% head()
 ```
 
@@ -92,7 +92,7 @@ We model the probability of receiving treatment given covariates.
 In practice, one might use logistic regression, SuperLearner, or other ML. Here we start with logistic regression for clarity.
 
 ```{r}
-ps_mod <- glm(A ~ age + cvd, family = binomial, data = dat)
+ps_mod <- glm(ever_haart ~ age + sex + cd4_sqrt_baseline, family = binomial, data = dat)
 summary(ps_mod)
 
 dat <- dat %>%
@@ -110,11 +110,11 @@ dat %>%
 We can visualize the propensity score distribution.
 
 ```{r}
-ggplot(dat, aes(x = ps, fill = factor(A))) +
+ggplot(dat, aes(x = ps, fill = factor(ever_haart))) +
   geom_density(alpha = 0.4) +
   labs(
-    x = "Estimated propensity score P(A=1 | W)",
-    fill = "Treatment",
+    x = "Estimated propensity score P(ever_haart = 1 | W)",
+    fill = "HAART",
     title = "Propensity score overlap"
   ) +
   theme_minimal()
@@ -124,7 +124,7 @@ ggplot(dat, aes(x = ps, fill = factor(A))) +
 :::{.callout-important}
 ## Reading the Propensity Score Overlap Plot
 
-In our simulated example, the propensity score distributions for treated and untreated overlap substantially --- this is what **good overlap** looks like. The two density curves cover mostly the same range of propensity scores, even though their peaks differ. This means that for most covariate patterns, there are both treated and untreated patients, exactly what positivity requires.
+In this example, the propensity score distributions for treated and untreated overlap substantially -- this is what **good overlap** looks like. The two density curves cover mostly the same range of propensity scores, even though their peaks differ. This means that for most covariate patterns, there are both treated and untreated patients, exactly what positivity requires.
 
 **Bad overlap** looks like two density curves that barely touch, with the treated group concentrated at high propensity scores and the untreated group concentrated at low ones. When this happens:
 
@@ -144,7 +144,7 @@ As a rule of thumb, be concerned if propensity scores for either group pile up n
 ```{r}
 dat <- dat %>%
   mutate(
-    w_ipw = if_else(A == 1, 1 / ps, 1 / (1 - ps))
+    w_ipw = if_else(ever_haart == 1, 1 / ps, 1 / (1 - ps))
   )
 
 summary(dat$w_ipw)
@@ -160,7 +160,7 @@ Keep an eye on
 ## Why Stabilized Weights Are Preferred in Practice
 
 
-Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment** --- that is, the overall proportion of patients in the study who received treatment, ignoring their covariates. This simple rescaling brings the weights closer to 1 on average and reduces their variance without introducing bias for the marginal causal effect.
+Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment** -- that is, the overall proportion of patients in the study who received treatment, ignoring their covariates. This simple rescaling brings the weights closer to 1 on average and reduces their variance without introducing bias for the marginal causal effect.
 
 For a binary treatment:
 
@@ -187,13 +187,13 @@ In epidemiologic practice, **always prefer stabilized weights** unless you have 
 :::
 
 ```{r}
-pA <- mean(dat$A)
+pA <- mean(dat$ever_haart)
 
 dat <- dat %>%
   mutate(
     sw_ipw = case_when(
-      A == 1 ~ pA / ps,
-      A == 0 ~ (1 - pA) / (1 - ps)
+      ever_haart == 1 ~ pA / ps,
+      ever_haart == 0 ~ (1 - pA) / (1 - ps)
     )
   )
 
@@ -212,8 +212,8 @@ There are several equivalent ways to use the weights.
 Estimated risk under treatment
 
 ```{r}
-risk1_ipw <- with(dat, sum(sw_ipw * Y * (A == 1)) / sum(sw_ipw * (A == 1)))
-risk0_ipw <- with(dat, sum(sw_ipw * Y * (A == 0)) / sum(sw_ipw * (A == 0)))
+risk1_ipw <- with(dat, sum(sw_ipw * died * (ever_haart == 1)) / sum(sw_ipw * (ever_haart == 1)))
+risk0_ipw <- with(dat, sum(sw_ipw * died * (ever_haart == 0)) / sum(sw_ipw * (ever_haart == 0)))
 
 ate_ipw <- risk1_ipw - risk0_ipw
 c(risk1 = risk1_ipw, risk0 = risk0_ipw, ate = ate_ipw)
@@ -245,7 +245,7 @@ library(sandwich)
 library(lmtest)
 
 # Fit a simple weighted model
-fit_ipw <- glm(Y ~ A, family = binomial, weights = sw_ipw, data = dat)
+fit_ipw <- glm(died ~ ever_haart, family = binomial, weights = sw_ipw, data = dat)
 
 # Robust standard errors
 cov_ipw <- vcovHC(fit_ipw, type = "HC0")
@@ -254,8 +254,8 @@ coeftest(fit_ipw, cov_ipw)
 
 Interpretation
 
-- The coefficient of A (on the log odds scale) now estimates a marginal effect in the pseudo population
-- You can compute marginal risk differences or ratios by predicting from the model at A=1 and A=0 and standardizing
+- The coefficient of `ever_haart` (on the log odds scale) now estimates a marginal effect in the pseudo population
+- You can compute marginal risk differences or ratios by predicting from the model at `ever_haart=1` and `ever_haart=0` and standardizing
 
 ---
 
@@ -265,9 +265,9 @@ We can compare the IPTW ATE to the g computation ATE from the previous chapter.
 
 ```{r}
 # g computation
-g_mod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
-p1_g <- predict(g_mod, newdata = dat %>% mutate(A = 1), type = "response")
-p0_g <- predict(g_mod, newdata = dat %>% mutate(A = 0), type = "response")
+g_mod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline, family = binomial, data = dat)
+p1_g <- predict(g_mod, newdata = dat %>% mutate(ever_haart = 1), type = "response")
+p0_g <- predict(g_mod, newdata = dat %>% mutate(ever_haart = 0), type = "response")
 ate_g <- mean(p1_g - p0_g)
 
 c(ate_gcomp = ate_g, ate_iptw = ate_ipw)
@@ -338,8 +338,8 @@ dat <- dat %>%
   )
 
 # recompute ATE with truncated weights
-risk1_trunc <- with(dat, sum(sw_trunc * Y * (A == 1)) / sum(sw_trunc * (A == 1)))
-risk0_trunc <- with(dat, sum(sw_trunc * Y * (A == 0)) / sum(sw_trunc * (A == 0)))
+risk1_trunc <- with(dat, sum(sw_trunc * died * (ever_haart == 1)) / sum(sw_trunc * (ever_haart == 1)))
+risk0_trunc <- with(dat, sum(sw_trunc * died * (ever_haart == 0)) / sum(sw_trunc * (ever_haart == 0)))
 ate_trunc   <- risk1_trunc - risk0_trunc
 
 c(ate_truncated = ate_trunc)
@@ -365,6 +365,12 @@ There is no single "right" truncation threshold. In your manuscripts, always rep
 
 
 :::
+
+---
+
+# Running Example: Antiretroviral Therapy Cohort
+
+Throughout this chapter we applied IPTW to the HIV antiretroviral therapy cohort, estimating the causal effect of ever initiating HAART (`ever_haart`) on mortality (`died`). This is the **point-treatment** version of the analysis: a single binary treatment decision measured at baseline, with baseline confounders age, sex, and square-root-transformed CD4 count (`cd4_sqrt_baseline`). In later chapters we will extend this same cohort to handle time-varying treatment and censoring using longitudinal IPTW methods.
 
 ---
 

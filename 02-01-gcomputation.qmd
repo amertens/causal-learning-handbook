@@ -19,18 +19,18 @@ G-computation estimates causal effects by predicting what *would* happen to ever
 
 **Key point.** G-computation reconstructs what would have happened if *everyone* received treatment ($A=1$) and, separately, if *everyone* received control ($A=0$). The recipe is three steps: (1) fit an outcome model $E[Y \mid A, W]$, (2) predict outcomes for each individual under both treatments, and (3) average those predictions (standardization). That is the entire method.
 
-# 3. Implementation Example: Simulated Osteoporosis Cohort
+# 3. Implementation Example: HIV Antiretroviral Therapy Cohort
 
-We use the shared osteoporosis cohort introduced in the case study. This simulated dataset mimics a claims-database comparison of denosumab (A=1) vs zoledronic acid (A=0) for 3-year MI risk, with confounding by age and cardiovascular history.
+We use the shared HIV antiretroviral therapy cohort introduced in the case study. This dataset follows HIV-positive patients from seroconversion, tracking HAART initiation and mortality. Here we collapse the longitudinal data to a point-treatment snapshot: A = `ever_haart` (1 = initiated HAART at any point, 0 = never initiated), Y = `died` (1 = died, 0 = alive at end of follow-up), with confounders age, sex, and baseline CD4 count (square-root transformed).
 
 ```{r}
 library(tidyverse)
 
-source("_data/sim-osteoporosis-cohort.R")
-dat <- as_tibble(dat)
+source("_data/load-haart-cohort.R")
+dat <- as_tibble(haart_baseline)
 ```
 
-The treatment is strongly confounded by cardiovascular history, making this a good scenario for demonstrating g-computation.
+Treatment is strongly confounded by baseline CD4 count and age, making this a good scenario for demonstrating g-computation.
 
 ---
 
@@ -41,11 +41,12 @@ The treatment is strongly confounded by cardiovascular history, making this a go
 We fit a logistic regression model predicting the outcome from treatment and confounders:
 
 ```{r}
-mod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
+mod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
+           family = binomial, data = dat)
 summary(mod)
 ```
 
-**Pitfall.** The coefficient on `A` from this logistic regression is a *conditional log-odds ratio*. It tells you the association between treatment and outcome *holding confounders fixed*. That is **not** a causal effect on its own. We need the next two steps (prediction + averaging) to turn this model into a causal estimate.
+**Pitfall.** The coefficient on `ever_haart` from this logistic regression is a *conditional log-odds ratio*. It tells you the association between HAART initiation and mortality *holding confounders fixed*. That is **not** a causal effect on its own. We need the next two steps (prediction + averaging) to turn this model into a causal estimate.
 
 ### Step 2: Predict Counterfactual Outcomes (The "What If" Step)
 
@@ -53,8 +54,8 @@ This is where g-computation earns its name. We ask two "what if" questions for *
 
 ```{r}
 # create counterfactual datasets
-dat1 <- dat %>% mutate(A = 1)
-dat0 <- dat %>% mutate(A = 0)
+dat1 <- dat %>% mutate(ever_haart = 1)
+dat0 <- dat %>% mutate(ever_haart = 0)
 
 # predict potential outcomes
 p1 <- predict(mod, newdata = dat1, type = "response")
@@ -76,7 +77,7 @@ ate  <- risk1 - risk0
 knitr::kable(data.frame(risk1 = risk1, risk0 = risk0, ate = ate))
 ```
 
-Interpret the result as: “The entire population initiating denosumab rather than ZA is estimated to change 3-year MI/stroke risk by X percentage points.”
+Interpret the result as: “If the entire population had initiated HAART rather than not, the estimated change in mortality risk would be X percentage points.”
 :::
 
 ### Beyond the Risk Difference: Relative Risk and Population Attributable Risk
@@ -90,7 +91,7 @@ rr <- risk1 / risk0
 # Population attributable risk (PAR):
 # What fraction of cases in the population are attributable to treatment?
 # PAR = (P(Y=1) - P(Y(0)=1)) / P(Y=1)
-overall_risk <- mean(dat$Y)
+overall_risk <- mean(dat$died)
 par_frac <- (overall_risk - risk0) / overall_risk
 
 knitr::kable(data.frame(
@@ -117,7 +118,7 @@ $$
 
 This is one of the most commonly confused points in epidemiology:
 
-- **Conditional log-odds ratio** (what logistic regression gives you): "Among people with the *same* age and CVD status, how do the odds of the outcome differ between treated and untreated?" This is a measure of *association within strata*. It does not tell you what would happen if you intervened on the whole population. It is also non-collapsible, meaning it changes depending on which covariates you condition on, even without confounding.
+- **Conditional log-odds ratio** (what logistic regression gives you): "Among people with the *same* age, sex, and baseline CD4, how do the odds of death differ between those who initiated HAART and those who did not?" This is a measure of *association within strata*. It does not tell you what would happen if you intervened on the whole population. It is also non-collapsible, meaning it changes depending on which covariates you condition on, even without confounding.
 
 - **Marginal risk difference** (what g-computation gives you): "If we could treat *everyone* versus *no one*, how much would the overall population risk change?" This is a *causal* contrast on the risk scale, the kind of number a clinician or policy maker can act on.
 
@@ -142,7 +143,8 @@ G-computation rests entirely on the outcome model $E[Y \mid A, W]$. If that mode
 If some strata almost never receive a treatment, g-computation *extrapolates* into regions with little observed data. R will return a number, but it may be meaningless. Check propensity scores for values near 0 or 1:
 
 ```{r}
-ps <- predict(glm(A ~ age + cvd, family = binomial, data = dat), type = "response")
+ps <- predict(glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
+                   family = binomial, data = dat), type = "response")
 summary(ps)
 ```
 :::
@@ -159,8 +161,8 @@ summary(ps)
 library(SuperLearner)
 
 sl_mod <- SuperLearner(
-  Y = dat$Y,
-  X = dat %>% select(A, age, cvd),
+  Y = dat$died,
+  X = dat %>% select(ever_haart, age, sex, cd4_sqrt_baseline),
   family = binomial(),
   SL.library = c("SL.glm", "SL.ranger", "SL.gam")
 )
@@ -187,9 +189,10 @@ boot_ates <- numeric(n_boot)
 
 for (b in seq_len(n_boot)) {
   boot_dat <- dat[sample(nrow(dat), replace = TRUE), ]
-  boot_mod <- glm(Y ~ A + age + cvd, family = binomial, data = boot_dat)
-  bp1 <- predict(boot_mod, newdata = mutate(boot_dat, A = 1), type = "response")
-  bp0 <- predict(boot_mod, newdata = mutate(boot_dat, A = 0), type = "response")
+  boot_mod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
+                   family = binomial, data = boot_dat)
+  bp1 <- predict(boot_mod, newdata = mutate(boot_dat, ever_haart = 1), type = "response")
+  bp0 <- predict(boot_mod, newdata = mutate(boot_dat, ever_haart = 0), type = "response")
   boot_ates[b] <- mean(bp1) - mean(bp0)
 }
 
@@ -198,6 +201,12 @@ quantile(boot_ates, c(0.025, 0.975))
 
 This works but is computationally expensive and does not benefit from efficiency theory. The methods in the next two chapters --- **IPTW** and especially **TMLE** --- provide analytic standard errors and confidence intervals based on influence function theory, making them more practical for routine use. TMLE in particular combines the outcome-modeling strengths of g-computation with formal inference, which is one reason it is the recommended approach in later chapters.
 :::
+
+## Running Example: Antiretroviral Therapy Cohort
+
+Throughout this chapter we used a **point-treatment snapshot** of the HIV antiretroviral therapy cohort: each patient is summarized by whether they ever initiated HAART (`ever_haart`) and whether they died (`died`) over follow-up, with baseline confounders age, sex, and square-root CD4 count. This simplification lets us apply standard g-computation without worrying about time-varying confounding or treatment changes over time.
+
+In practice, HAART initiation is a time-varying treatment whose effect is confounded by evolving CD4 counts, which are themselves affected by prior treatment. The point-treatment analysis here is a useful pedagogical starting point, but it does not fully capture the causal structure of the problem. In later chapters (Ch 3.7 on longitudinal TMLE and Ch 3.9 on marginal structural models) we return to the full longitudinal version of this dataset and handle time-varying treatment and confounding properly.
 
 :::{.callout-tip}
 ## Summary

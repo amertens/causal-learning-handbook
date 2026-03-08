@@ -1,0 +1,184 @@
+---
+title: "Running Case Study: Antiretroviral Therapy and HIV Progression"
+format: html
+---
+
+```{r}
+#| include: false
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4,
+  fig.align = "center",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+Throughout this handbook, we use a single recurring example to illustrate causal concepts, estimation methods, and diagnostic tools: the longitudinal HIV antiretroviral therapy cohort example used in the marginal structural model literature (Van der Wal & Geskus, 2011). Using one example across all chapters lets you see how the same data look different through the lens of each method, and makes it easier to compare approaches.
+
+## The substantive problem
+
+In the early years of combination antiretroviral therapy (commonly referred to as HAART, highly active antiretroviral therapy), a central clinical question was:
+
+> **Does initiating HAART reduce mortality among HIV-positive patients, and if so, by how much?**
+
+This question sounds straightforward, but answering it from observational data is not. In practice, physicians initiate HAART in response to declining CD4 cell counts and worsening clinical status. The very biomarkers that predict death also determine who gets treated and when. This creates a tangle of confounding that standard regression cannot unravel.
+
+## Why this example is pedagogically useful
+
+This cohort illustrates essentially every complication that motivates modern causal inference:
+
+1. **Confounding by indication.** Sicker patients (lower CD4 counts) are more likely to start HAART. A naive comparison of treated vs. untreated patients conflates the drug's benefit with the fact that treated patients were sicker to begin with.
+
+2. **Time-varying treatment.** Patients can initiate HAART at different times during follow-up. Treatment is not a single baseline decision but a process that unfolds over time.
+
+3. **Time-varying confounders (CD4 count).** CD4 counts change over time and are measured at each visit. They influence the decision to start treatment and independently predict mortality.
+
+4. **Treatment-confounder feedback.** This is the critical complication. CD4 count at time $t$ is affected by prior HAART use (treatment improves CD4), and CD4 at time $t$ also affects whether HAART is initiated or continued at time $t+1$. This feedback loop means that:
+   - Adjusting for time-updated CD4 in a regression blocks part of the treatment effect (overadjustment bias).
+   - *Not* adjusting for time-updated CD4 leaves confounding unaddressed.
+   - Standard regression cannot do both correctly. This is exactly the setting that motivates marginal structural models, g-computation, and longitudinal TMLE.
+
+5. **Failure of naive regression adjustment.** Because of treatment-confounder feedback, no conventional regression model with time-varying covariates correctly estimates the causal effect of HAART. This makes the example a concrete demonstration of *why* the methods in this handbook exist.
+
+## The dataset
+
+The dataset contains 1,200 simulated HIV-positive patients observed from HIV seroconversion. Follow-up is divided into 100-day intervals using counting process notation. The data were designed to reflect the structure of real HIV cohort studies while allowing controlled comparisons of estimation methods.
+
+```{r}
+library(tidyverse)
+source("_data/load-haart-cohort.R")
+```
+
+### Structure
+
+```{r}
+glimpse(haartdat)
+```
+
+- **Unit of observation:** one row per patient per 100-day interval.
+- **`patient`**: patient identifier (1,200 unique patients).
+- **`tstart`, `fuptime`**: start and end of each interval in days since HIV seroconversion. The first interval starts at $-100$ to allow modeling of HAART initiation at day 0.
+- **`haartind`**: indicator for HAART initiation at the end of the interval (1 = initiated, 0 = not). Once a patient initiates, `haartind` remains 1 for all subsequent intervals.
+- **`event`**: mortality indicator (1 = died during this interval).
+- **`sex`**: 0 = male, 1 = female.
+- **`age`**: age in years at follow-up start.
+- **`cd4.sqrt`**: square root of CD4 cell count at the end of the interval, measured *before* the treatment decision. This is the key time-varying confounder.
+- **`endtime`**: final observed time for the patient.
+- **`dropout`**: censoring indicator (1 = dropped out at interval end).
+
+### Example patient trajectories
+
+```{r}
+haartdat |>
+  filter(patient %in% c(1, 5, 10)) |>
+  select(patient, tstart, fuptime, haartind, cd4.sqrt, event, dropout) |>
+  knitr::kable(digits = 2,
+    caption = "Trajectories for three patients"
+  )
+```
+
+Notice that Patient 1 initiates HAART at day 600 (the interval ending at 700) and remains on treatment. Patient 5 initiates later, at day 800. CD4 counts fluctuate over time for all patients. This is the longitudinal, time-varying structure that makes causal inference challenging and interesting.
+
+### Baseline summary
+
+We also create a simplified baseline snapshot for chapters that use point-treatment examples:
+
+```{r}
+haart_baseline |>
+  summarise(
+    n = n(),
+    pct_female = mean(sex) * 100,
+    median_age = median(age),
+    median_cd4 = median(cd4_baseline),
+    pct_ever_haart = mean(ever_haart) * 100,
+    pct_died = mean(died) * 100,
+    pct_dropout = mean(dropout) * 100
+  ) |>
+  knitr::kable(digits = 1, caption = "Baseline cohort summary")
+```
+
+## Why naive methods fail: a preview
+
+Before diving into the methods, it is worth seeing concretely why standard approaches produce misleading results for this dataset. We demonstrate three naive analyses, each of which targets the wrong estimand or introduces bias.
+
+### Approach 1: Crude comparison
+
+```{r}
+# Simple treated vs. untreated comparison
+haart_baseline |>
+  group_by(ever_haart) |>
+  summarise(
+    n = n(),
+    deaths = sum(died),
+    mortality_pct = mean(died) * 100,
+    .groups = "drop"
+  ) |>
+  knitr::kable(digits = 1, caption = "Crude mortality by HAART status")
+```
+
+The crude comparison may show that HAART users have *higher* mortality. This is confounding by indication: physicians initiate HAART in sicker patients (lower CD4 counts), so the treated group was at higher risk to begin with. Without adjustment, the treatment appears harmful when it may actually be beneficial.
+
+### Approach 2: Baseline regression
+
+```{r}
+# Logistic regression adjusting only for baseline covariates
+naive_mod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
+                 family = binomial, data = haart_baseline)
+broom::tidy(naive_mod, conf.int = TRUE) |>
+  knitr::kable(digits = 3, caption = "Baseline-adjusted logistic regression")
+```
+
+This improves on the crude comparison by adjusting for baseline confounders, but it still uses a single baseline CD4 measurement. It ignores that CD4 changes over time and that HAART initiation is a time-varying decision. The coefficient is a conditional log-odds ratio, not a marginal causal effect.
+
+### Approach 3: Regression conditioning on time-varying CD4
+
+```{r}
+# Pooled logistic regression adjusting for time-varying CD4
+naive_tv <- glm(event ~ haartind + cd4.sqrt + age + sex,
+                family = binomial, data = haartdat)
+broom::tidy(naive_tv, conf.int = TRUE) |>
+  knitr::kable(digits = 3,
+    caption = "Pooled logistic regression with time-varying CD4 adjustment")
+```
+
+This is the most dangerous naive approach. By conditioning on `cd4.sqrt` (a time-varying confounder affected by prior treatment), this regression:
+
+1. **Blocks part of the causal pathway.** HAART improves CD4, and improved CD4 reduces mortality. Adjusting for post-treatment CD4 removes part of the treatment's benefit from the estimate.
+2. **Still leaves confounding.** Even after adjustment, the coefficient conflates the direct effect of HAART with residual confounding through unmeasured time-varying factors.
+
+This is exactly the **treatment-confounder feedback** problem that standard regression cannot solve. The methods in this handbook (IPTW with marginal structural models, g-computation, longitudinal TMLE) are designed to handle this correctly.
+
+:::{.callout-important}
+## The core lesson
+
+No standard regression model, whether it ignores time-varying confounders or adjusts for them, correctly estimates the causal effect of HAART on mortality. Ignoring time-varying CD4 leaves confounding; adjusting for it blocks part of the treatment effect. This is the fundamental motivation for the g-methods (g-computation, IPTW, TMLE) covered in this handbook.
+:::
+
+## How this case study appears throughout the handbook
+
+This example will be revisited in every major chapter, each time illustrating a different concept or method. The table below provides a roadmap.
+
+| Chapter | How the case study is used |
+|---------|---------------------------|
+| 1.1 Why We Need a Causal Roadmap | Define the causal question; show why a Cox regression coefficient is not the answer |
+| 1.2 The Causal Roadmap | Sketch the target trial protocol; build a DAG; identify time-varying confounding |
+| 2.1 G-Computation | Apply g-computation to a point-treatment version of the data |
+| 2.2 IPTW | Estimate propensity scores, construct stabilized weights, fit a marginal structural model |
+| 2.3 TMLE | Walk through the TMLE algorithm on the same data |
+| 2.5 Super Learner | Show how flexible nuisance estimation improves on parametric models for this cohort |
+| 3.2 Positivity and Overlap | Diagnose propensity score overlap and weight distributions |
+| 3.5 Diagnostics | Demonstrate weight truncation, effective sample size, and covariate balance |
+| 3.7 Longitudinal Confounding | Show why standard regression fails under treatment-confounder feedback; apply longitudinal TMLE |
+| 3.9 Illustrated L-TMLE | Step through longitudinal TMLE mechanics on the full panel data |
+| 3.12 Sensitivity Analysis | Assess robustness to unmeasured confounding using E-values |
+
+As methods become more advanced, the same dataset reveals new subtleties. By the end of the handbook, you will have seen this example analyzed with naive regression, g-computation, IPTW, TMLE, and longitudinal TMLE, and you will understand exactly why the simpler methods fail and when the more complex methods are needed.
+
+## Sources
+
+- Van der Wal WM, Geskus RB (2011). ipw: An R Package for Inverse Probability Weighting. *Journal of Statistical Software* 43(13):1-23.
+- Robins JM, Hernan MA, Brumback B (2000). Marginal structural models and causal inference in epidemiology. *Epidemiology* 11(5):550-560.
+- Hernan MA, Brumback B, Robins JM (2000). Marginal structural models to estimate the causal effect of zidovudine on the survival of HIV-positive men. *Epidemiology* 11(5):561-570.

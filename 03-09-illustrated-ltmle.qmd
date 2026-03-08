@@ -11,6 +11,37 @@ This chapter extends the TMLE framework from [Chapter 2.3](02-03-doubly-robust-t
 
 The longitudinal case study in [Chapter 4.1](03-03-longitudinal-case-study.qmd) provides the clinical context for why these methods matter. Here the focus is on the mechanics.
 
+## Running Example: Antiretroviral Therapy Cohort
+
+```{r}
+#| message: false
+library(tidyverse)
+source("_data/load-haart-cohort.R")
+```
+
+This is the same HIV antiretroviral therapy cohort from earlier chapters, now analyzed with the full longitudinal structure. Each row of `haartdat` represents a 100-day interval for one patient, with time-varying treatment and confounders.
+
+```{r}
+haartdat |>
+  select(patient, tstart, fuptime, haartind, cd4.sqrt, event) |>
+  filter(patient %in% c(1, 2)) |>
+  head(10)
+```
+
+The panel structure captures exactly the feedback loop that standard methods cannot handle: CD4 counts (`cd4.sqrt`) respond to prior HAART (`haartind`), and future HAART decisions depend on current CD4 levels. There are `r n_distinct(haartdat$patient)` patients observed over up to `r max(haartdat$fuptime)` days.
+
+```{r}
+haartdat |>
+  summarise(
+    patients = n_distinct(patient),
+    intervals = n(),
+    pct_on_haart = round(100 * mean(haartind), 1),
+    event_rate = round(100 * mean(event), 2)
+  )
+```
+
+Longitudinal TMLE resolves the treatment-confounder feedback by working backwards through time, conditioning on CD4 where it confounds future treatment and integrating it out where it mediates past treatment. The mechanics of this procedure are the focus of the sections below.
+
 ---
 
 # 1. Quick Recap: Point-Treatment TMLE in 4 Steps

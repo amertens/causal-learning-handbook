@@ -2261,6 +2261,60 @@ When reviewing a TMLE analysis (your own or someone else's), here is a practical
 
 ---
 
+## Running Example: Antiretroviral Therapy Cohort {#sec-running-example-diagnostics}
+
+We now apply weight diagnostics to the HIV antiretroviral therapy cohort. This provides a concrete check on the positivity concerns raised in Chapter 3.2.
+
+```{r}
+source("_data/load-haart-cohort.R")
+
+# Fit propensity score and construct stabilized IPTW weights
+ps_model <- glm(
+  ever_haart ~ age + sex + cd4_sqrt_baseline,
+  family = binomial,
+  data = haart_baseline
+)
+haart_baseline <- haart_baseline |>
+  mutate(
+    ps_hat = predict(ps_model, type = "response"),
+    # Stabilized weights: numerator is marginal treatment probability
+    sw = if_else(
+      ever_haart == 1,
+      mean(ever_haart) / ps_hat,
+      (1 - mean(ever_haart)) / (1 - ps_hat)
+    )
+  )
+
+# Weight distribution summary
+haart_baseline |>
+  group_by(ever_haart) |>
+  summarise(
+    n = n(),
+    mean_wt = mean(sw),
+    median_wt = median(sw),
+    max_wt = max(sw),
+    pct_gt_5 = mean(sw > 5) * 100,
+    .groups = "drop"
+  ) |>
+  knitr::kable(digits = 2, caption = "Stabilized IPTW weight distribution")
+
+# Effective sample size
+ess <- function(w) sum(w)^2 / sum(w^2)
+tibble(
+  group = c("HAART", "No HAART"),
+  n_actual = c(sum(haart_baseline$ever_haart == 1),
+               sum(haart_baseline$ever_haart == 0)),
+  ess = c(ess(haart_baseline$sw[haart_baseline$ever_haart == 1]),
+          ess(haart_baseline$sw[haart_baseline$ever_haart == 0]))
+) |>
+  mutate(pct_retained = round(100 * ess / n_actual, 1)) |>
+  knitr::kable(digits = 1, caption = "Effective sample size by treatment group")
+```
+
+Patients with very low baseline CD4 are nearly certain to start HAART, so untreated patients in that region receive large weights. The effective sample size shows how much information is lost to this imbalance. In the full longitudinal version of this analysis, where treatment can start at any visit, these diagnostics become more complex because propensity scores and weights must be computed at each time point and accumulated over the treatment history.
+
+---
+
 ## Check your understanding
 
 <details>

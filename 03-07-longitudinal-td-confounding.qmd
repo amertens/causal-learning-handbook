@@ -42,6 +42,48 @@ The motivating example: **antiretroviral therapy (ART) adherence and HIV virolog
 This chapter is educational. Causal conclusions depend on identification assumptions (e.g., consistency, exchangeability, positivity) and on diagnostic evidence that the data support the target estimand. When flexible machine learning is used for nuisance estimation, valid inference typically requires cross-fitting or a cross-validated TMLE variant, plus appropriate rate conditions.
 :::
 
+## Running Example: Antiretroviral Therapy Cohort
+
+```{r}
+#| message: false
+library(tidyverse)
+source("_data/load-haart-cohort.R")
+```
+
+The HIV cohort in `haartdat` illustrates treatment-confounder feedback in real clinical data. CD4 counts change over time, and clinicians initiate HAART partly in response to falling CD4. But HAART itself raises CD4, so CD4 is simultaneously a confounder of future treatment and a mediator of past treatment.
+
+```{r}
+#| label: fig-haart-trajectories
+#| fig-cap: "Selected patient trajectories showing CD4 evolution and HAART initiation"
+sample_ids <- haartdat |>
+  filter(max(fuptime) >= 500) |>
+  distinct(patient) |>
+  slice_sample(n = 6) |>
+  pull(patient)
+
+haartdat |>
+  filter(patient %in% sample_ids) |>
+  ggplot(aes(x = fuptime, y = cd4.sqrt^2, group = patient)) +
+  geom_line(alpha = 0.7) +
+  geom_point(aes(color = factor(haartind)), size = 1.5) +
+  scale_color_manual(values = c("0" = "grey50", "1" = "steelblue"),
+                     labels = c("No HAART", "HAART initiated")) +
+  labs(x = "Follow-up time (days)", y = "CD4 count (cells/uL)",
+       color = "Treatment") +
+  theme_minimal()
+```
+
+A naive approach adjusts for time-varying CD4 in a pooled logistic regression. But this blocks the causal pathway from prior HAART through improved CD4 to survival, biasing the treatment effect toward zero.
+
+```{r}
+naive_pooled <- glm(event ~ haartind + cd4.sqrt + age + sex,
+                    family = binomial, data = haartdat)
+cat("Naive pooled logistic regression (biased by conditioning on CD4):\n")
+round(coef(summary(naive_pooled))[, c("Estimate", "Std. Error")], 4)
+```
+
+The HAART coefficient from this model is attenuated because conditioning on CD4 blocks the indirect benefit of treatment. Chapters ahead use g-methods to handle this correctly.
+
 ## A familiar example: statins and cholesterol
 
 Before turning to the ART example, it helps to start with a more familiar longitudinal problem.

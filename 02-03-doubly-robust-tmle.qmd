@@ -311,6 +311,96 @@ You can plug these flexible nuisance models directly into TMLE. SuperLearner bui
 
 ---
 
+# Running Example: Antiretroviral Therapy Cohort
+
+In this section we apply TMLE to the HIV antiretroviral therapy cohort that serves as the running example throughout this handbook. The goal is to estimate the causal effect of ever initiating HAART (`ever_haart`) on mortality (`died`), adjusting for baseline covariates `age`, `sex`, and `cd4_sqrt_baseline`.
+
+This is a **point-treatment** analysis using a single baseline snapshot per patient. Longitudinal TMLE, which accounts for time-varying treatment and confounding in the full panel data, is covered in Chapter 3.9.
+
+```{r}
+source("_data/load-haart-cohort.R")
+
+glimpse(haart_baseline)
+```
+
+### Step 1: Fit the initial outcome model
+
+```{r}
+Q_fit <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
+             family = binomial, data = haart_baseline)
+
+haart_baseline <- haart_baseline |>
+  mutate(
+    Q1 = predict(Q_fit,
+                 newdata = mutate(haart_baseline, ever_haart = 1),
+                 type = "response"),
+    Q0 = predict(Q_fit,
+                 newdata = mutate(haart_baseline, ever_haart = 0),
+                 type = "response")
+  )
+```
+
+### Step 2: Fit the propensity score model
+
+```{r}
+g_fit <- glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
+             family = binomial, data = haart_baseline)
+
+haart_baseline <- haart_baseline |>
+  mutate(ps = predict(g_fit, type = "response"))
+
+# Check overlap
+summary(haart_baseline$ps)
+```
+
+### Step 3: Construct the clever covariate and fluctuate
+
+```{r}
+logit <- function(p) log(p / (1 - p))
+
+Q_init <- predict(Q_fit, type = "response")
+H_clever <- with(haart_baseline, ever_haart / ps - (1 - ever_haart) / (1 - ps))
+
+eps <- coef(glm(haart_baseline$died ~ -1 + offset(logit(Q_init)) + H_clever,
+                family = binomial))
+```
+
+### Step 4: Update predictions and compute the ATE
+
+```{r}
+H1 <-  1 / haart_baseline$ps
+H0 <- -1 / (1 - haart_baseline$ps)
+
+Q1_star <- plogis(logit(haart_baseline$Q1) + eps * H1)
+Q0_star <- plogis(logit(haart_baseline$Q0) + eps * H0)
+
+ate <- mean(Q1_star) - mean(Q0_star)
+
+# EIC-based standard error
+n_obs <- nrow(haart_baseline)
+Qstar_obs <- ifelse(haart_baseline$ever_haart == 1, Q1_star, Q0_star)
+H_obs     <- ifelse(haart_baseline$ever_haart == 1, H1, H0)
+EIC <- H_obs * (haart_baseline$died - Qstar_obs) +
+       Q1_star - Q0_star - ate
+
+se  <- sqrt(var(EIC) / n_obs)
+
+tibble(
+  ATE      = round(ate, 4),
+  SE       = round(se, 4),
+  CI_lower = round(ate - 1.96 * se, 4),
+  CI_upper = round(ate + 1.96 * se, 4)
+)
+```
+
+:::{.callout-note}
+## Interpreting the HAART TMLE Result
+
+A positive ATE would suggest that HAART initiation increases the probability of death in this simple point-treatment model. However, this likely reflects **confounding by indication**: patients with more advanced disease (lower CD4 counts) are both more likely to initiate treatment and more likely to die. The baseline snapshot cannot fully capture the time-varying nature of CD4 decline, treatment initiation, and mortality. Chapter 3.9 addresses this with longitudinal TMLE and marginal structural models that properly handle time-varying confounding.
+:::
+
+---
+
 # 11. Summary
 
 :::{.callout-tip}
