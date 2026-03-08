@@ -3,14 +3,17 @@ title: "Chapter 1.2: The Causal Roadmap"
 format: html
 ---
 
-In this chapter, we introduce the **Causal Roadmap** (Petersen & van der Laan, 2014, "Causal models and learning from data: integrating causal modeling and statistical estimation"), a structured approach for asking and answering causal questions with observational data. We begin with the **target trial protocol**, which forces you to define the scientific question precisely before choosing any statistical method, and then walk through the **six steps of the causal roadmap** that translate that question into a defensible analysis.
+In this chapter, we introduce the **Causal Roadmap** (Petersen & van der Laan, 2014, "Causal models and learning from data: integrating causal modeling and statistical estimation"), a structured approach for asking and answering causal questions with observational data. We begin with a motivating example of how things go wrong without a roadmap, then introduce the **target trial protocol** and walk through the **six steps of the causal roadmap** that translate a causal question into a defensible analysis --- including the **identification assumptions** (consistency, exchangeability, positivity) that bridge potential outcomes and observed data.
 
 ::: {.callout-note}
 ## Learning objectives
 - Describe the six steps of the Causal Roadmap and their purpose
-- Formulate a causal question in terms of population, intervention, comparator, and outcome (PICO)
+- Formulate a causal question using a target trial protocol
+- Recognize immortal time bias, prevalent user bias, and vague comparator bias as failures of target trial thinking
 - Draw and interpret a directed acyclic graph (DAG) encoding causal assumptions
+- State the three core identification assumptions: consistency, exchangeability, and positivity
 - Distinguish a causal estimand from a statistical estimand
+- Diagnose positivity violations using propensity score overlap plots
 - Explain why pre-specifying an analysis plan before data access reduces researcher degrees of freedom
 :::
 
@@ -31,26 +34,44 @@ library(ggdag)
 library(ggplot2)
 ```
 
+### A motivating disaster: immortal time bias in statin studies
+
+In 2006, several observational studies reported that statin users had substantially lower mortality than non-users --- not just from cardiovascular disease, but from cancer, trauma, and even infections. The effect sizes were implausibly large. Were statins a miracle drug?
+
+No. The problem was **immortal time bias**, a direct consequence of failing to align time zero with treatment assignment:
+
+1. Researchers identified patients who filled a statin prescription at some point during follow-up.
+2. They classified the entire follow-up period as "statin exposed," including time *before* the prescription was filled.
+3. During that early period, the patient could not have died (otherwise they would never have filled the prescription). That time was, by definition, "immortal."
+4. Non-users had no such guaranteed survival period.
+
+The result was a spurious survival advantage that had nothing to do with the drug. A structured analytic framework --- a **Causal Roadmap** --- would have caught this error at the design stage, before any model was fit.
+
+:::{.callout-important}
+## The core lesson
+Immortal time bias arises when time zero is not aligned with the moment of treatment assignment. A target trial protocol forces you to define time zero explicitly, preventing this error before any data are analyzed.
+:::
+
 ### Why Use a Causal Roadmap?
 
-In epidemiology, it is tempting to jump straight to fitting a model: "Let's run a regression and see what we find." But this approach conflates the scientific question with the statistical procedure, making it difficult to evaluate whether the analysis actually answers the question you care about. Modern causal inference begins by asking: **What is the causal question we are trying to answer?**
+In epidemiology, it is tempting to jump straight to fitting a model: "Let's run a regression and see what we find." But this approach conflates the scientific question with the statistical procedure, making it difficult to evaluate whether the analysis actually answers the question you care about. The statin example illustrates a more insidious version of this problem: even before worrying about confounding or model specification, the study *design* was flawed.
 
 **Key point.** A causal roadmap ensures transparency in how evidence is generated, separation of scientific questions from statistical methods, clear articulation of assumptions, and structured thinking in both trial and non-randomized settings. Starting with a well-defined question, before touching data or code, is the single most important step in any causal analysis.
 
 We'll walk step-by-step through each part of the roadmap, with illustrative examples.
 
 
-## Step 1: Define the Causal Question
+## Step 1: Define the Causal Question Using a Target Trial Protocol
 
 In traditional epidemiologic practice, the form of the outcome often dictates the analysis: binary outcomes get logistic regression, time-to-event data get Cox models, and the resulting coefficient is reported as "the effect." But this approach lets the **statistical model choose the estimand for you**. A hazard ratio from a Cox model answers a different question than a 3-year risk difference, and neither may correspond to the causal contrast that would actually inform a clinical or policy decision. Step 1 of the roadmap insists that you define the causal question *first*, before any model is fit.
 
-### Start with the target trial protocol, then follow the roadmap
+### Start with the target trial protocol
 
-As advocated by Dang and Balzer (2023), a useful way to make the causal question precise is to sketch the **target trial protocol** --- the randomized trial you would ideally like to run, even though you only have observational data. This is a design device, not a claim that every observational study literally recreates a trial. In practice, this means specifying:
+As advocated by Dang and Balzer (2023) and Hernan and Robins (2016), a useful way to make the causal question precise is to sketch the **target trial protocol** --- the randomized trial you would ideally like to run, even though you only have observational data. This is a design device, not a claim that every observational study literally recreates a trial. In practice, this means specifying:
 
 - **Eligibility criteria**: Who would be included?
-- **Time zero**: When would follow-up begin?
-- **Treatment strategies**: What interventions are being compared?
+- **Time zero**: When would follow-up begin? (This must coincide with eligibility and treatment assignment --- see the statin example above.)
+- **Treatment strategies**: What interventions are being compared? (Vague strategies like "statin use" vs. "no statin use" lead to vague causal questions.)
 - **Assignment procedure**: Would treatment be randomized, or are we approximating that contrast with observed data?
 - **Outcome**: What endpoint would be measured?
 - **Follow-up**: Over what time horizon?
@@ -64,6 +85,62 @@ This prevents a very common problem: starting with whatever variables happen to 
 **Example:**
 
 > Among postmenopausal women with osteoporosis who are eligible to initiate either therapy, what is the 3-year risk of cardiovascular events if all initiated **denosumab** compared with if all initiated **zoledronic acid**, starting at treatment initiation and followed for 3 years?
+
+### Common biases prevented by target trial thinking
+
+Many well-known biases in observational research can be traced to violations of specific target trial protocol components:
+
+- **Immortal time bias** (violated: time zero): Follow-up begins before treatment assignment. Prevention: align time zero with the moment of treatment assignment using a new-user design.
+- **Prevalent user bias** (violated: eligibility + time zero): Including patients already on treatment at the start of follow-up. These patients are a selected subset who survived early treatment and tolerated it. Prevention: restrict to new (incident) users who initiate treatment at time zero.
+- **Vague comparator definitions** (violated: treatment strategies): "Everyone not on the drug" includes a mix of people on alternatives, people with contraindications, and people who will start later. Prevention: define specific, well-characterized treatment strategies (e.g., active comparator designs).
+
+:::{.callout-note}
+## A unifying insight
+Nearly every major bias in observational pharmacoepidemiology (immortal time bias, prevalent user bias, selection bias from conditioning on the future, time-window bias) is a violation of one or more target trial protocol components. If you can specify and emulate the protocol correctly, you prevent these biases by design rather than by statistical adjustment.
+:::
+
+### Simulation: immortal time bias in action
+
+The following simulation demonstrates how failing to align time zero creates spurious treatment effects. The treatment has **no causal effect** by construction, but a naive analysis produces a large apparent benefit.
+
+```{r}
+library(tidyverse)
+
+set.seed(2024)
+n <- 5000
+
+# --- Data-generating process (NO treatment effect) ---
+baseline_hazard <- 0.10  # annual probability of event
+max_follow_up <- 5       # years
+
+sim_data <- tibble(
+  id = 1:n,
+  will_treat = rbinom(n, 1, 0.6),
+  time_to_treat = ifelse(will_treat == 1, runif(n, 0, 3), Inf),
+  event_time = rexp(n, rate = baseline_hazard),
+  obs_time = pmin(event_time, max_follow_up),
+  event = as.integer(event_time <= max_follow_up),
+  actually_treated = as.integer(will_treat == 1 & time_to_treat < obs_time)
+)
+
+# --- WRONG analysis: ignore treatment timing ---
+wrong_analysis <- sim_data |>
+  group_by(actually_treated) |>
+  summarise(
+    n = n(), events = sum(event),
+    person_years = sum(obs_time),
+    rate = events / person_years, .groups = "drop"
+  )
+
+rate_ratio_wrong <- wrong_analysis$rate[wrong_analysis$actually_treated == 1] /
+  wrong_analysis$rate[wrong_analysis$actually_treated == 0]
+
+cat("True treatment effect: NONE (null by construction)\n")
+cat("Biased rate ratio:", round(rate_ratio_wrong, 2),
+    "(expected if no bias: 1.00)\n")
+```
+
+The biased rate ratio is well below 1.0, suggesting treatment is protective, even though the treatment has **zero** causal effect. The entire "benefit" comes from the fact that treated patients had to survive long enough to receive treatment. No statistical method can fix a fundamentally flawed study design.
 
 ## Step 2: Specify the Causal Model
 
@@ -125,15 +202,93 @@ Each of these estimands requires its own identification argument and estimation 
 
 **Key point.** Why prefer risk differences over odds ratios or hazard ratios? The risk difference directly tells you: "Treatment changes the probability of the outcome by X percentage points." It is a **marginal causal parameter** that does not depend on which covariates you condition on. Odds ratios, by contrast, are non-collapsible (they change when you marginalize over covariates even without confounding), lack a straightforward population-level causal interpretation, and are frequently misinterpreted as risk ratios. Hazard ratios share similar non-collapsibility issues and depend on the proportional hazards assumption. Additionally, the risk difference is **less sensitive to background disease prevalence** than ratio measures --- the same odds ratio can correspond to very different absolute risk changes depending on how common the outcome is, making ratio measures harder to interpret for clinical decision-making. When your goal is to inform a public health decision, the risk difference answers that question directly.
 
-## Step 4: Link the Causal Estimand to the Observed Data
+## Step 4: Link the Causal Estimand to the Observed Data (Identification)
 
-This is the **identification step** (we go into much more detail in [Chapter 1.3](01-03-identification-estimands.qmd)): *Can we estimate the causal effect from the data we have?* These assumptions are fundamentally untestable and must be justified by subject-matter knowledge.
+This is the **identification step**: *Can we estimate the causal effect from the data we have?* **Identification** is the logical argument that, under stated assumptions, an unobservable causal quantity equals something we *can* compute from observed data. The three key assumptions are fundamentally untestable and must be justified by subject-matter knowledge.
 
-- **Exchangeability**: $Y(a) \perp A \mid W$. You have measured every common cause of treatment and outcome.
-- **Positivity**: $P(A = a \mid W = w) > 0$. No covariate stratum deterministically receives one treatment.
-- **Consistency**: The observed outcome equals the potential outcome under the received treatment.
+:::{.callout-note}
+## Assumption 1: Consistency --- "You Get What You Get"
 
-If satisfied: $E[Y(1) - Y(0)] = E_W[ E[Y \mid A = 1, W] - E[Y \mid A = 0, W] ]$.
+The observed outcome equals the counterfactual outcome under the treatment actually received:
+
+$$
+Y = Y(A)
+$$
+
+In practice, this means the treatment is **well-defined** and there is only one version of it. If someone took denosumab, their observed outcome equals their potential outcome under denosumab. Consistency can break down when "treatment" is vague (e.g., "exercise more") or when the drug formulation, dose, or route varies across patients in ways that matter for the outcome. The target trial protocol (Step 1) helps protect consistency by requiring well-defined treatment strategies.
+:::
+
+
+:::{.callout-warning}
+## Assumption 2: Exchangeability --- The Hardest Assumption to Defend
+
+$$
+Y(a) \perp A \mid W
+$$
+
+This is the assumption that **there are no unmeasured confounders**. After adjusting for the measured covariates $W$, the treated and untreated groups are comparable, as if treatment had been randomly assigned within strata of $W$.
+
+- In a randomized trial, randomization guarantees exchangeability by design.
+- In observational data, we must **assume** it holds, and this assumption is **untestable** from the data alone.
+
+This is typically the most difficult assumption to defend. If there are unmeasured factors (e.g., frailty, physician preference, disease severity scores not in the data) that influence both treatment and outcome, identification fails. Always use a DAG (Step 2) to reason about which variables are sufficient to block all backdoor paths, and conduct sensitivity analyses (e.g., E-values; see [Chapter 3.12](03-12-sensitivity-analysis.qmd)) to assess robustness to potential unmeasured confounding.
+:::
+
+
+:::{.callout-warning}
+## Assumption 3: Positivity --- Watch for Practical Violations
+
+Everyone has a *positive probability* of receiving either treatment at each level of covariates:
+
+$$
+0 < P(A=a \mid W=w) < 1
+$$
+
+**Structural positivity violations**: Some covariate strata *never* receive a particular treatment by clinical convention (e.g., patients over age 90 may never be prescribed aggressive chemotherapy). No statistical method can fix this. The causal effect is simply not defined in those strata.
+
+**Practical positivity violations** are extremely common in real-world data: some strata have very few patients receiving one treatment, leading to near-zero propensity scores and unstable estimates. Signs to look for: propensity scores piling up near 0 or 1, very large IPTW weights, and g-computation predictions extrapolating far outside the support of the data.
+:::
+
+
+:::{.callout-tip}
+## The Key Insight: Replacing Counterfactuals with Observables
+
+Under the three assumptions, the unobservable causal estimand equals a function of the observed data:
+
+$$
+E[Y(1) - Y(0)]
+=
+E_W\!\left[
+E[Y \mid A=1, W]
+-
+E[Y \mid A=0, W]
+\right]
+$$
+
+This is the **g-computation identification formula** --- the foundation for g-computation, IPTW, AIPW, and TMLE.
+:::
+
+:::{.callout-note}
+## Causal Estimand vs. Statistical Estimand
+
+A **causal estimand** is defined via potential outcomes (e.g., 3-year MI risk difference if all patients received denosumab vs. ZA). A **statistical estimand** is the function of the observed-data distribution that equals the causal estimand *under the identification assumptions* (e.g., the standardized mean difference from a model of $P(Y \mid A, W)$).
+
+**Pitfall.** Regression coefficients (e.g., log-odds ratios, hazard ratios) are **not** the statistical estimand for the ATE. They are conditional measures on the wrong scale.
+:::
+
+### Diagnosing positivity violations
+
+The propensity score overlap plot is your primary diagnostic. Look for mass piling up near 0 or 1 and poor overlap between groups.
+
+```{r}
+source("_data/sim-osteoporosis-cohort.R")
+
+ps <- predict(glm(A ~ age + cvd, family = binomial, data = dat), type = "response")
+plot(density(ps), main = "Propensity Score Distribution",
+     xlab = "Estimated P(A=1 | W)")
+```
+
+When you see poor overlap, consider restricting to the region of common support, trimming extreme weights, or acknowledging the limitations. See [Chapter 3.2](03-02-positivity-overlap.qmd) for a detailed treatment.
 
 
 ### Step 5: Choose a Statistical Estimator
@@ -182,17 +337,44 @@ No. Covariate balance checks (e.g., standardized mean differences after weightin
 
 </details>
 
+<details>
+<summary><strong>Q4. A researcher defines "statin users" as anyone who filled a prescription at any time during a 5-year window, and compares their outcomes to never-users. What bias is most likely?</strong></summary>
+
+This design introduces **immortal time bias**. The violated component is **time zero**. Statin users are classified based on a future event (filling a prescription at some point during follow-up), and their follow-up is counted from before treatment began. The period between the start of observation and the prescription fill date is "immortal" for the treated group, because dying before the fill date would have moved them to the untreated group. This creates a spurious survival advantage. The fix is to align time zero with the date of statin initiation and only compare to controls still at risk at that same time.
+
+</details>
+
+<details>
+<summary><strong>Q5. What is a positivity violation, and what should you do when you encounter one?</strong></summary>
+
+A positivity violation occurs when certain covariate strata have zero (or near-zero) probability of receiving one of the treatment levels. **Structural violations** arise when some patients are never treated by clinical convention (e.g., very elderly patients never receiving aggressive chemotherapy). The causal effect is simply not defined in those strata, and no statistical method can fix this. **Practical violations** occur when some strata have very few patients on one treatment, leading to propensity scores near 0 or 1 and unstable estimates. When you encounter positivity violations, you should: (1) inspect propensity score distributions for mass near the boundaries, (2) consider restricting the target population to the region of overlap, (3) use weight trimming or stabilized weights if using IPTW, and (4) be transparent about the limitations and the population to which your estimate applies.
+
+</details>
+
+<details>
+<summary><strong>Q6. How does the target trial protocol connect to the identification assumptions?</strong></summary>
+
+The target trial protocol makes identification assumptions concrete. The **assignment procedure** component supports **exchangeability**: in the target trial, randomization guarantees it; in the emulation, we must argue that conditional on measured covariates, treatment is independent of potential outcomes. The **treatment strategies** component supports **consistency**: well-defined strategies ensure "treatment" means the same thing for everyone, so $Y(a)$ is well-defined. The **eligibility criteria** help support **positivity**: defining the population carefully ensures that within every stratum, there are both treated and untreated individuals.
+
+</details>
+
 ## What comes next
 
-With the causal question defined and the roadmap in hand, the next chapter formalizes the identification step: the assumptions needed to bridge potential outcomes and observed data, and the statistical estimands that result.
+With the causal question defined, the roadmap laid out, and the identification framework in hand, we are ready to move from design to estimation. Part II introduces the statistical methods that deliver on the promise of this framework, beginning with g-computation ([Chapter 2.1](02-01-gcomputation.qmd)), inverse probability weighting ([Chapter 2.2](02-02-iptw.qmd)), and the doubly robust TMLE estimator ([Chapter 2.3](02-03-doubly-robust-tmle.qmd)).
 
 ## Sources and further reading
 
+- Petersen ML, van der Laan MJ (2014). Causal models and learning from data. *Epidemiology* 25(3):418-426.
 - Dang LE, Tager I, Petersen ML (2023). A causal roadmap for generating high-quality real-world evidence. *Journal of Clinical and Translational Science* 7(1):e127.
 - Hernan MA, Robins JM (2016). Using big data to emulate a target trial when a randomized trial is not available. *Am J Epidemiol* 183(8):758-764.
-- Petersen ML, van der Laan MJ (2014). Causal models and learning from data. *Epidemiology* 25(3):418-426.
 - Hernan MA, Robins JM (2020). *Causal Inference: What If*. Chapman & Hall/CRC. [Free online](https://www.hsph.harvard.edu/miguel-hernan/causal-inference-book/)
+- Suissa S (2008). Immortal time bias in pharmacoepidemiology. *Am J Epidemiol* 167(4):492-499.
+- Lund JL, Richardson DB, Sturmer T (2015). The active comparator, new user study design in pharmacoepidemiology. *Epidemiology* 26(1):105-113.
+- Pearl J (2009). *Causality: Models, Reasoning, and Inference*. 2nd ed. Cambridge University Press.
+- Robins JM (1986). A new approach to causal inference in mortality studies with sustained exposure periods. *Mathematical Modelling* 7:1393-1512.
+- van der Laan MJ, Rose S (2011). *Targeted Learning*. Springer.
 - Gruber S, van der Laan MJ (2010). A targeted maximum likelihood estimator of a causal effect on a bounded continuous outcome. *Int J Biostat* 6(1):Article 26.
 - ICH E9 (R1) Addendum (2019). Addendum on estimands and sensitivity analyses in clinical trials.
-- van der Laan MJ, Rose S (2011). *Targeted Learning*. Springer.
+- Kennedy EH (2019). Nonparametric causal effects based on incremental propensity score interventions. *JASA* 114(526):645-656.
 - `tmle` R package: [CRAN](https://cran.r-project.org/package=tmle)
+- `lmtp` R package: [CRAN](https://cran.r-project.org/package=lmtp)

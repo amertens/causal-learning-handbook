@@ -14,34 +14,20 @@ Outcome modeling and standardization, often referred to as **g-computation**, is
 :::{.callout-tip}
 ## Why Start With G-Computation?
 
-G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions. No reliance on a single regression coefficient required. It directly implements the identification formula from Chapter 1.3 ($E[Y(a)] = E_W[E[Y \mid A=a, W]]$), making it the most concrete entry point for learning causal estimation, and mapping the causal estimand to a statistical estimand.
+G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions. No reliance on a single regression coefficient required. It directly implements the identification formula from Chapter 1.2 ($E[Y(a)] = E_W[E[Y \mid A=a, W]]$), making it the most concrete entry point for learning causal estimation, and mapping the causal estimand to a statistical estimand.
 :::
 
 **Key point.** G-computation reconstructs what would have happened if *everyone* received treatment ($A=1$) and, separately, if *everyone* received control ($A=0$). The recipe is three steps: (1) fit an outcome model $E[Y \mid A, W]$, (2) predict outcomes for each individual under both treatments, and (3) average those predictions (standardization). That is the entire method.
 
 # 3. Implementation Example: Simulated Osteoporosis Cohort
 
-We simulate a small cohort similar to the denosumab vs zoledronic acid motivating example.
-
-**NOTE: many of the chapters have simulated data within them. It would be better to have a single simulated dataset that we use across all chapters, that is introduced when we introduce the case study up front, then we don't need to re-introduce it in all the chapters. Can you det that up?**
+We use the shared osteoporosis cohort introduced in the case study. This simulated dataset mimics a claims-database comparison of denosumab (A=1) vs zoledronic acid (A=0) for 3-year MI risk, with confounding by age and cardiovascular history.
 
 ```{r}
 library(tidyverse)
 
-set.seed(2025)
-n <- 3000
-
-# baseline covariates
-age <- rnorm(n, 75, 6)
-cvd <- rbinom(n, 1, plogis(0.12 * (age - 70)))
-
-# treatment assignment
-A <- rbinom(n, 1, plogis(-1 + 0.07 * (age - 70) + 1.4 * cvd))
-
-# outcome
-Y <- rbinom(n, 1, plogis(-2 + 0.6*A + 0.12*(age - 70) + 1.2*cvd))
-
-dat <- tibble(age, cvd, A, Y)
+source("_data/sim-osteoporosis-cohort.R")
+dat <- as_tibble(dat)
 ```
 
 The treatment is strongly confounded by cardiovascular history, making this a good scenario for demonstrating g-computation.
@@ -93,7 +79,27 @@ knitr::kable(data.frame(risk1 = risk1, risk0 = risk0, ate = ate))
 Interpret the result as: “The entire population initiating denosumab rather than ZA is estimated to change 3-year MI/stroke risk by X percentage points.”
 :::
 
-**NOTE: can you add a section here showing we could also estimate a relative risk with g-computation, or even something more complicated like the population attributable risk, something not easy to get out of a regression?**
+### Beyond the Risk Difference: Relative Risk and Population Attributable Risk
+
+One of the strengths of g-computation is that once you have the counterfactual predictions `p1` and `p0`, you can compute *any* contrast --- not just the risk difference. This flexibility is difficult to achieve with a single regression coefficient.
+
+```{r}
+# Relative risk (risk ratio)
+rr <- risk1 / risk0
+
+# Population attributable risk (PAR):
+# What fraction of cases in the population are attributable to treatment?
+# PAR = (P(Y=1) - P(Y(0)=1)) / P(Y=1)
+overall_risk <- mean(dat$Y)
+par_frac <- (overall_risk - risk0) / overall_risk
+
+knitr::kable(data.frame(
+  Measure = c("Risk difference (ATE)", "Relative risk", "Population attributable fraction"),
+  Estimate = round(c(ate, rr, par_frac), 4)
+))
+```
+
+The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **population attributable fraction** tells you what proportion of observed cases would be eliminated if the entire population had received control instead of treatment. Neither of these is directly available from a single logistic regression coefficient --- you would need to exponentiate and back-transform, making strong assumptions about the scale. With g-computation, you compute them directly from the predicted counterfactual risks.
 
 
 # 5. Why G-Computation Works
@@ -168,8 +174,30 @@ mean(p1_sl - p0_sl)
 
 ---
 
-**NOTE: add another note that the reason G-computation is not used as much is it returns the point estimate but has no theory for estimating the standard error and getting a confidence interval compared to a regression. You can get boot-strap based confidence intervals, but the methods coming up (IPTW and TMLE) have appealing properties beyond G-comp, including easier standard error estimation**
+:::{.callout-warning}
+## Why G-Computation Is Less Common in Practice: No Built-In Inference
 
+A key limitation of g-computation is that it provides a **point estimate but no standard error or confidence interval** from the procedure itself. Unlike a regression model, which produces standard errors from the Fisher information matrix, g-computation's standardization step has no closed-form variance formula in general. To obtain confidence intervals, you must use the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.
+
+```{r, eval=FALSE}
+# Bootstrap confidence interval for g-computation
+set.seed(42)
+n_boot <- 500
+boot_ates <- numeric(n_boot)
+
+for (b in seq_len(n_boot)) {
+  boot_dat <- dat[sample(nrow(dat), replace = TRUE), ]
+  boot_mod <- glm(Y ~ A + age + cvd, family = binomial, data = boot_dat)
+  bp1 <- predict(boot_mod, newdata = mutate(boot_dat, A = 1), type = "response")
+  bp0 <- predict(boot_mod, newdata = mutate(boot_dat, A = 0), type = "response")
+  boot_ates[b] <- mean(bp1) - mean(bp0)
+}
+
+quantile(boot_ates, c(0.025, 0.975))
+```
+
+This works but is computationally expensive and does not benefit from efficiency theory. The methods in the next two chapters --- **IPTW** and especially **TMLE** --- provide analytic standard errors and confidence intervals based on influence function theory, making them more practical for routine use. TMLE in particular combines the outcome-modeling strengths of g-computation with formal inference, which is one reason it is the recommended approach in later chapters.
+:::
 
 :::{.callout-tip}
 ## Summary

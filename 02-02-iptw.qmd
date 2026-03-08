@@ -52,7 +52,7 @@ The propensity score is a **balancing score**: conditioning on it is sufficient 
 :::{.callout-note}
 ## The IPTW Identification Result
 
-Under the same identification assumptions from [Chapter 1.3](01-03-identification-estimands.qmd) (consistency, exchangeability, and positivity), the average potential outcome under treatment can be expressed as
+Under the same identification assumptions from [Chapter 1.2](01-02-causal-roadmap.qmd) (consistency, exchangeability, and positivity), the average potential outcome under treatment can be expressed as
 
 $$
 E[Y(1)] = E\left[ \frac{I(A = 1) Y}{e(W)} \right]
@@ -73,32 +73,15 @@ This is called a **Horvitz-Thompson type** estimator because it has the same str
 
 # 3. Simulated Example
 
-We reuse a familiar setup: an osteoporosis like population with confounding by age and cardiovascular history.
+We use the shared osteoporosis cohort from `_data/sim-osteoporosis-cohort.R`, the same simulated dataset used throughout the handbook: denosumab (A=1) vs zoledronic acid (A=0) for 3-year MI risk, with confounding by age and cardiovascular history.
 
 ```{r}
 library(tidyverse)
 
-set.seed(2025)
-n <- 4000
-
-age <- rnorm(n, 75, 6)
-cvd <- rbinom(n, 1, plogis(0.12 * (age - 70)))
-
-# Treatment assignment with strong confounding
-A <- rbinom(n, 1, plogis(-1 + 0.09 * (age - 70) + 1.5 * cvd))
-
-# Outcome model
-Y <- rbinom(n, 1, plogis(-2 + 0.5*A + 0.10*(age - 70) + 1.0*cvd))
-
-dat <- tibble(age, cvd, A, Y)
+source("_data/sim-osteoporosis-cohort.R")
+dat <- as_tibble(dat)
 dat %>% head()
 ```
-
-For simplicity
-
-- A = 1 can be thought of as denosumab
-- A = 0 can be thought of as zoledronic acid
-- Y = 1 indicates occurrence of a cardiovascular outcome
 
 ---
 
@@ -138,12 +121,10 @@ ggplot(dat, aes(x = ps, fill = factor(A))) +
 ```
 
 
-**NOTE: the plot above shows good overlap, note this below**
-
 :::{.callout-important}
 ## Reading the Propensity Score Overlap Plot
 
-**Good overlap** looks like two density curves that cover mostly the same range of propensity scores, even if their peaks differ. This means that for most covariate patterns, there are both treated and untreated patients, exactly what positivity requires.
+In our simulated example, the propensity score distributions for treated and untreated overlap substantially --- this is what **good overlap** looks like. The two density curves cover mostly the same range of propensity scores, even though their peaks differ. This means that for most covariate patterns, there are both treated and untreated patients, exactly what positivity requires.
 
 **Bad overlap** looks like two density curves that barely touch, with the treated group concentrated at high propensity scores and the untreated group concentrated at low ones. When this happens:
 
@@ -179,9 +160,7 @@ Keep an eye on
 ## Why Stabilized Weights Are Preferred in Practice
 
 
-**NOTE: can you briefly define in plain english what the marginal probability of treatment is?**
-
-Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment**, which brings the weights closer to 1 on average and reduces their variance without introducing bias for the marginal causal effect.
+Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment** --- that is, the overall proportion of patients in the study who received treatment, ignoring their covariates. This simple rescaling brings the weights closer to 1 on average and reduces their variance without introducing bias for the marginal causal effect.
 
 For a binary treatment:
 
@@ -203,9 +182,7 @@ Here \( P(A_i) \) is the marginal probability of treatment (estimated as the sam
 - More stable point estimates
 - Better finite-sample performance
 
-In epidemiologic practice, **always prefer stabilized weights** unless you have a specific reason to use unstabilized ones.
-
-**NOTE: can you provide a brief (1 sentence) example when one would prefer unstabalized weights**
+In epidemiologic practice, **always prefer stabilized weights** unless you have a specific reason to use unstabilized ones. One such reason: unstabilized weights are needed when you want to estimate the **total number of events** that would occur under each treatment in the pseudo-population, since stabilized weights rescale the population size.
 
 :::
 
@@ -248,8 +225,16 @@ $$
 \hat E[Y(1)] = \frac{\sum_i SW_i Y_i I(A_i = 1)}{\sum_i SW_i I(A_i = 1)}
 $$
 
-**NOTE: can you describe how we'd get confidence intervals out of the method above? Bootstrapped CIs?**
+:::{.callout-note}
+## Getting Confidence Intervals from IPTW
 
+The direct weighted mean above gives a point estimate but no standard error. There are two main approaches for inference:
+
+1. **Nonparametric bootstrap**: Resample the data with replacement, re-estimate the propensity score and the weighted ATE on each bootstrap sample, and take the 2.5th and 97.5th percentiles as the 95% CI. This is simple but computationally intensive.
+2. **Robust (sandwich) standard errors**: Fit a weighted regression model (as shown below) and use `sandwich::vcovHC()` to obtain variance estimates that account for the weights. This is faster and is the standard approach in practice.
+
+The weighted regression approach in the next section demonstrates option 2.
+:::
 
 ## 6.2 Weighted regression model
 
@@ -288,9 +273,13 @@ ate_g <- mean(p1_g - p0_g)
 c(ate_gcomp = ate_g, ate_iptw = ate_ipw)
 ```
 
-Under correct models and adequate positivity, these methods should converge to similar estimates as sample size grows.
+Under correct models and adequate positivity, these methods should converge to similar estimates as sample size grows. When they disagree substantially, it typically signals that **at least one model is misspecified**. For example:
 
-**NOTE: can you describe when and why they would differ?**
+- If the outcome model omits an important interaction but the propensity score model is correct, g-computation will be biased while IPTW may be closer to the truth.
+- If the propensity score model is too simple (e.g., misses a nonlinear confounder-treatment relationship) but the outcome model captures the right functional form, IPTW will be biased while g-computation may be closer.
+- Near-violations of **positivity** affect IPTW more than g-computation, because extreme weights amplify noise, while g-computation extrapolates from the outcome model (which may or may not be reliable in sparse regions).
+
+Comparing the two estimates is itself a useful diagnostic: large discrepancies should prompt you to investigate both models more carefully.
 
 
 :::{.callout-tip}
@@ -372,9 +361,7 @@ Truncation (also called "winsorizing") reduces variance at the cost of introduci
 - Truncate at fixed values (e.g., cap weights at 10 or 20)
 - Report results with and without truncation as a sensitivity analysis
 
-There is no single "right" truncation threshold. In your manuscripts, always report which threshold you used and show sensitivity to this choice. 
-
-**NOTE: note above that the later chapter will show how simulations can be used to choose appropriate truncations for specific data examples**
+There is no single "right" truncation threshold. In your manuscripts, always report which threshold you used and show sensitivity to this choice. In [Chapter 4.2: Outcome-Blind Simulation Studies](04-02-outcome-blind-simulations.qmd), we show how to use simulations calibrated to your specific dataset to choose an appropriate truncation level that optimizes the bias-variance trade-off for your analysis.
 
 
 :::
