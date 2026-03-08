@@ -32,7 +32,7 @@ The culprit was a **positivity violation**: the data contained patient profiles 
 which one treatment was never (or almost never) observed. No amount of clever
 modeling can conjure information that the data simply do not contain.
 
-We touched on positivity briefly in @sec-identification (Chapter 1.3,
+We touched on positivity briefly in @sec-identification (Chapter 1.2,
 `identification-estimands.qmd`) and saw weight instability in @sec-iptw (Chapter 2.2,
 `iptw.qmd`). But positivity is too important, and too commonly the root cause of
 failed causal analyses, to scatter across chapters. This chapter gives it the dedicated
@@ -78,7 +78,7 @@ is bounded away from zero and one.
 
 ## Connection to identification
 
-Recall the G-computation identification formula from Chapter 1.3:
+Recall the G-computation identification formula from Chapter 1.2:
 
 $$
 \psi = E_W\!\Big[\,E[Y \mid A=1, W] - E[Y \mid A=0, W]\,\Big]
@@ -534,6 +534,42 @@ A healthy ESS does not guarantee that positivity holds everywhere. A few problem
 strata can be masked by many well-behaved ones. Always pair ESS with the overlap plots
 and covariate-specific tables shown in @sec-diagnose.
 :::
+
+---
+
+# Running Example: Antiretroviral Therapy Cohort {#sec-running-example}
+
+See the [Running Case Study](00-case-study.qmd) for the full data description. The HAART cohort provides a clear illustration of practical positivity violations. Clinicians initiate HAART based on declining CD4 counts, so patients with very low baseline CD4 are nearly always treated. This means the untreated group has little or no representation in the low-CD4 region, precisely the pattern diagnosed in the simulated examples above.
+
+```{r}
+source("_data/load-haart-cohort.R")
+
+# Fit propensity score model for HAART initiation
+ps_haart <- glm(
+  ever_haart ~ age + sex + cd4_sqrt_baseline,
+  family = binomial,
+  data = haart_baseline
+)
+haart_baseline <- haart_baseline |>
+  mutate(ps_hat = predict(ps_haart, type = "response"))
+
+# Propensity score overlap plot
+ggplot(haart_baseline, aes(x = ps_hat, fill = factor(ever_haart))) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(
+    values = c("0" = "#E69F00", "1" = "#56B4E9"),
+    labels = c("No HAART", "HAART")
+  ) +
+  labs(
+    x = "Estimated propensity score",
+    y = "Density",
+    fill = "Group",
+    title = "Propensity score overlap: HAART initiation"
+  ) +
+  theme_minimal()
+```
+
+The overlap plot reveals that patients with low `cd4_sqrt_baseline` cluster near propensity scores of 1, because clinical guidelines make HAART initiation near-certain for severely immunocompromised patients. This is a practical (not structural) positivity violation: HAART is not literally required, but it is rarely withheld. Any causal estimate for those patients relies heavily on model extrapolation rather than observed counterfactual data. Analysts should consider restricting the target population to the overlap region or reporting effective sample sizes (Chapter 3.5) to quantify how much information these near-violations consume.
 
 ---
 

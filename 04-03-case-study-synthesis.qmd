@@ -1,0 +1,97 @@
+---
+title: "Lessons from the Antiretroviral Therapy Case Study"
+format: html
+---
+
+```{r}
+#| include: false
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4,
+  fig.align = "center",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+Throughout this handbook, we have used the longitudinal HIV antiretroviral therapy cohort to illustrate every major concept, from defining causal questions to diagnosing estimator behavior. See the [Running Case Study](00-case-study.qmd) for the full data description, including the variable dictionary and target trial protocol. This final section draws together the lessons learned across all preceding chapters and highlights the progression from naive methods to principled causal estimation.
+
+The `haartdat` dataset contains 1,200 HIV-positive patients observed in 100-day intervals. The key variables are the time-varying treatment indicator (`haartind`), square-root CD4 count (`cd4.sqrt`), death indicator (`event`), censoring flag (`dropout`), and patient identifier (`patient`). Time is indexed by `tstart` and `fuptime`, with baseline covariates `age` and `sex`.
+
+## What a naive analysis might have done
+
+A researcher approaching this dataset without the Causal Roadmap would likely:
+
+1. **Start with whatever model seemed natural.** A Cox regression or pooled logistic regression, adjusting for available covariates, and report the hazard ratio or odds ratio as "the effect of HAART."
+2. **Adjust for time-varying CD4 counts in the regression.** This seems like the right thing to do, since CD4 is a confounder. But because CD4 is also *affected by prior treatment*, conditioning on it blocks part of the causal pathway and introduces collider-stratification bias.
+3. **Report a conditional coefficient on the wrong scale.** Even if the model were correct, the hazard ratio or conditional odds ratio does not answer the question "how many deaths would be prevented if everyone initiated HAART?"
+
+As we saw in the [running case study introduction](00-case-study.qmd), these naive approaches can make an effective treatment appear harmful or produce effect estimates that are difficult to interpret clinically.
+
+## How the Causal Roadmap clarified the question
+
+The Causal Roadmap forced us to be explicit at every step:
+
+- **Step 1 (Target Trial Protocol).** We defined the causal question precisely: among HIV-positive patients at seroconversion, what is the effect on mortality of initiating HAART compared to not initiating, with follow-up from seroconversion?
+- **Step 2 (Causal Model).** We drew a DAG showing that CD4 count is both a confounder (it affects HAART initiation) and a mediator (HAART affects CD4, which affects mortality). This immediately flagged the treatment-confounder feedback problem.
+- **Step 3 (Estimand).** We chose the marginal risk difference in mortality, a population-level quantity directly relevant to clinical decision-making.
+- **Step 4 (Identification).** We stated the assumptions (exchangeability, consistency, positivity) and used the DAG to argue which variables were sufficient for identification. We also identified where these assumptions might fail (unmeasured confounding from adherence or clinical staging).
+- **Steps 5-6 (Estimation and Evaluation).** We applied g-computation, IPTW, and TMLE, compared their results, and used diagnostics to assess credibility.
+
+## Why time-dependent confounding required longitudinal methods
+
+The central lesson of this case study is that **standard regression cannot handle treatment-confounder feedback**. When a time-varying confounder (`cd4.sqrt`) is both a consequence of prior treatment (`haartind`) and a cause of future treatment, the analyst faces an impossible choice in a regression framework:
+
+- **Do not adjust for time-varying CD4:** leaves confounding of future treatment unaddressed.
+- **Adjust for time-varying CD4:** blocks part of the treatment effect and introduces collider bias.
+
+Neither option produces an unbiased estimate, as demonstrated concretely in [Chapter 3.7](03-07-longitudinal-td-confounding.qmd). The g-methods (g-computation, IPTW with marginal structural models, longitudinal TMLE) resolve this dilemma by modeling the treatment mechanism separately from the outcome and using that model to reweight or standardize the analysis. [Chapter 3.9](03-09-illustrated-ltmle.qmd) walked through the mechanics of longitudinal TMLE step by step, showing how backwards sequential regression conditions on `cd4.sqrt` where it confounds future treatment and integrates it out where it mediates past treatment. This is not a minor technical improvement; it is a qualitative change in what can be estimated.
+
+## What the example illustrates about real-world evidence analyses
+
+The HIV/HAART example is not unique. Treatment-confounder feedback arises whenever:
+
+- Treatment decisions respond to time-varying patient status (lab values, symptoms, disease progression)
+- Those same patient characteristics are also affected by prior treatment
+- The outcome of interest occurs at the end of a follow-up period during which both treatment and confounders evolve
+
+This pattern is ubiquitous in chronic disease epidemiology, pharmacoepidemiology, and comparative effectiveness research. Examples include:
+
+- Insulin dose adjustments based on HbA1c in diabetes
+- Immunosuppressant dosing based on kidney function in transplant recipients
+- Chemotherapy regimen changes based on tumor markers in oncology
+- Blood pressure medication titration based on BP readings
+
+In all of these settings, the methods covered in this handbook, not standard regression, are needed to estimate causal effects correctly. The Causal Roadmap provides the structure, and the estimation methods (g-computation, IPTW, TMLE, longitudinal TMLE) provide the tools.
+
+## Summary
+
+```{r}
+source("_data/load-haart-cohort.R")
+
+# Final summary table of approaches and their limitations
+tibble::tribble(
+  ~Approach, ~`Handles confounding`, ~`Handles feedback`, ~`Marginal effect`, ~`Valid inference`,
+  "Crude comparison",          "No",  "No",  "Yes", "No",
+  "Baseline regression",       "Partially", "No", "No (conditional)", "Yes (if correct)",
+  "Time-varying regression",   "Partially", "No (biased)", "No (conditional)", "Yes (if correct)",
+  "G-computation",             "Yes", "Yes (longitudinal)", "Yes", "Bootstrap only",
+  "IPTW / MSM",                "Yes", "Yes", "Yes", "Sandwich SE",
+  "TMLE",                      "Yes", "Yes (longitudinal)", "Yes", "Influence curve"
+) |>
+  knitr::kable(caption = "Comparison of approaches for the HAART case study")
+```
+
+Even after applying longitudinal methods, the results depend on untestable identification assumptions. [Chapter 3.12](03-12-sensitivity-analysis.qmd) showed how to probe this dependence using E-values, quantitative bias analysis, and truncation sensitivity. For the HAART cohort, unmeasured adherence is the most plausible threat: patients who adhere to treatment tend to be healthier, potentially inflating the apparent benefit. Sensitivity analysis quantifies how strong this confounding would need to be to explain away the estimated effect.
+
+The progression from naive regression to longitudinal TMLE is not just methodological sophistication for its own sake. Each step solves a real problem that the previous approach could not handle. The antiretroviral therapy case study makes those problems, and their solutions, concrete.
+
+## Sources
+
+- Robins JM, Hernan MA, Brumback B (2000). Marginal structural models and causal inference in epidemiology. *Epidemiology* 11(5):550-560.
+- Hernan MA, Brumback B, Robins JM (2000). Marginal structural models to estimate the causal effect of zidovudine on the survival of HIV-positive men. *Epidemiology* 11(5):561-570.
+- Van der Wal WM, Geskus RB (2011). ipw: An R Package for Inverse Probability Weighting. *Journal of Statistical Software* 43(13):1-23.
+- Petersen ML, van der Laan MJ (2014). Causal models and learning from data. *Epidemiology* 25(3):418-426.
+- Hernan MA, Robins JM (2020). *Causal Inference: What If*. Chapman & Hall/CRC.

@@ -11,6 +11,39 @@ This chapter extends the TMLE framework from [Chapter 2.3](02-03-doubly-robust-t
 
 The longitudinal case study in [Chapter 4.1](03-03-longitudinal-case-study.qmd) provides the clinical context for why these methods matter. Here the focus is on the mechanics.
 
+## Running Example: Antiretroviral Therapy Cohort
+
+```{r}
+#| message: false
+library(tidyverse)
+source("_data/load-haart-cohort.R")
+```
+
+See the [Running Case Study](00-case-study.qmd) for the full data description.
+
+This chapter uses the full longitudinal panel `haartdat`. Each row represents a 100-day interval for one `patient`, with the time-varying treatment indicator `haartind`, square-root CD4 count `cd4.sqrt`, death indicator `event`, and censoring flag `dropout`. The time variables `tstart` and `fuptime` mark interval boundaries.
+
+```{r}
+haartdat |>
+  select(patient, tstart, fuptime, haartind, cd4.sqrt, event, dropout) |>
+  filter(patient %in% c(1, 2)) |>
+  head(10)
+```
+
+The panel structure captures exactly the feedback loop that standard methods cannot handle: CD4 counts (`cd4.sqrt`) respond to prior HAART (`haartind`), and future HAART decisions depend on current CD4 levels. As discussed in [Chapter 3.7](03-07-longitudinal-td-confounding.qmd), no standard regression can simultaneously adjust for `cd4.sqrt` as a confounder and preserve it as a mediator. There are `r n_distinct(haartdat$patient)` patients observed over up to `r max(haartdat$fuptime)` days.
+
+```{r}
+haartdat |>
+  summarise(
+    patients = n_distinct(patient),
+    intervals = n(),
+    pct_on_haart = round(100 * mean(haartind), 1),
+    event_rate = round(100 * mean(event), 2)
+  )
+```
+
+Longitudinal TMLE resolves the treatment-confounder feedback by working backwards through time. It conditions on `cd4.sqrt` where it confounds future treatment and integrates it out where it mediates past treatment. The mechanics of this procedure are the focus of the sections below.
+
 ---
 
 # 1. Quick Recap: Point-Treatment TMLE in 4 Steps
