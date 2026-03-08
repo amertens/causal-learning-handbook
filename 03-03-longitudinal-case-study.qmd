@@ -279,25 +279,26 @@ Beyond positivity, you should also assess whether unmeasured confounding might b
 
 # Running Example: Antiretroviral Therapy Cohort
 
-The longitudinal concepts in this chapter apply directly to the HIV/HAART case study that runs throughout the book. Loading the shared dataset with `source("_data/load-haart-cohort.R")` provides the full longitudinal panel `haartdat`, which contains 19175 rows for 1200 patients observed at 100-day intervals.
+See the [Running Case Study](00-case-study.qmd) for the full data description. The HAART cohort is the canonical example of the longitudinal complications discussed in this chapter. Its person-period structure mirrors the denosumab/zoledronic acid simulation above, but with a real treatment-confounder feedback loop that has been studied extensively in the marginal structural model literature.
 
 ```{r}
 #| label: haart-longitudinal-link
 #| eval: false
 source("_data/load-haart-cohort.R")
 
-# The haartdat panel exemplifies treatment-confounder feedback:
-#   - cd4.sqrt (time-varying CD4) is affected by prior HAART use (haartind)
-#   - cd4.sqrt also confounds future treatment decisions
-#   - dropout and event create informative censoring
-# This is exactly the structure where naive Cox adjustment fails.
+# haartdat: 19,175 rows for 1,200 patients at 100-day intervals
+# Key longitudinal features:
+#   - cd4.sqrt (time-varying CD4) is affected by prior HAART (haartind)
+#   - cd4.sqrt also predicts future HAART initiation decisions
+#   - dropout creates informative censoring that depends on CD4 and treatment
+#   - event (death) is the outcome
 
 haartdat %>%
   select(patient, tstart, fuptime, haartind, cd4.sqrt, event, dropout) %>%
   glimpse()
 ```
 
-In `haartdat`, the variable `cd4.sqrt` evolves over follow-up and is influenced by prior HAART initiation (`haartind`), while also predicting future treatment decisions. This is the hallmark treatment-confounder feedback loop that requires longitudinal TMLE or LMTP rather than standard regression. The `dropout` and `event` indicators create informative censoring that must be handled jointly with the treatment process, just as the denosumab/zoledronic acid example above illustrates.
+In `haartdat`, the variable `cd4.sqrt` plays a dual role at each 100-day interval: it is a confounder of future treatment (low CD4 prompts HAART initiation via `haartind`) and a consequence of past treatment (HAART improves CD4). Adjusting for `cd4.sqrt` in a standard Cox model blocks the beneficial indirect pathway from treatment through improved CD4 to survival. Omitting it leaves confounding uncontrolled. This is precisely the dilemma that longitudinal TMLE and LMTP resolve by modeling the treatment, confounder, and censoring processes sequentially rather than conditioning on post-treatment variables in a single regression.
 
 ---
 
