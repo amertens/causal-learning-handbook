@@ -3,6 +3,10 @@ title: 'Chapter 1.1: Limitations of Standard Regression Analyses'
 format: html
 ---
 
+**FIX: this first chapter should maybe be "motivation for a causal roadmap and targeted learning rather than limitatations of regressions. Look at Maya's roadmap talk for inspiration*
+
+**FIX: this example is not explained. Also could use Cox regression, and is a bit harsh in the tone of calling it a universally wrong instinct**
+
 Suppose you want to know whether patients who start denosumab have a higher three-year risk of heart attack than those who start zoledronic acid. You have a large claims database. The natural instinct is to fit a logistic regression, adjust for confounders, and interpret the treatment coefficient as a causal effect. That instinct is wrong, and the consequences can mislead clinical decisions.
 
 The problem is not that regression is useless. The problem is that a regression coefficient answers a different question than the one you are asking. The adjusted log-odds ratio from logistic regression is a conditional measure on the wrong scale, entangled with model assumptions that are rarely examined. Confounding, non-collapsibility, and misspecification can each silently distort the number you report.
@@ -45,16 +49,20 @@ Multivariable regression has long been the standard tool in observational resear
 
 **Key point.** If you've been trained to interpret an adjusted regression coefficient as "the effect of X on Y, holding all else equal," you're in good company, but that interpretation quietly smuggles in causal language that the model itself cannot justify. The coefficient tells you about the **conditional association** within strata defined by the other variables in the model. Whether that association equals a causal effect depends on assumptions that regression alone cannot verify.
 
+**FIX: we already introduced this example above- just introduce it once here:**
+
 Let's consider a motivating example based on a real-world study comparing two osteoporosis treatments: **denosumab** (Prolia) and **zoledronic acid**.
 
 ### Motivating Example: Comparing Osteoporosis Treatments
 
 Imagine we're interested in whether patients who initiate denosumab have higher 3-year risk of heart attack or stroke compared to those initiating zoledronic acid.
 
-We might be tempted to run the following:
 
-```{r}
-# simulate crude comparison (not real data)
+**FIX: use tidymodels or something else so we just see a clean table of the regression output, **
+
+
+```{r, include =FALSE}
+# simulate crude comparison 
 set.seed(123)
 n <- 2000
 treatment <- rbinom(n, 1, 0.5) # 1 = denosumab, 0 = zoledronic acid
@@ -65,19 +73,11 @@ cvd_history <- rbinom(n, 1, plogis(0.1 * (age - 70)))
 risk <- plogis(-2 + 0.4 * treatment + 0.05 * (age - 70) + 1 * cvd_history)
 outcome <- rbinom(n, 1, risk)
 
-model1 <- glm(outcome ~ treatment, family = binomial)
-summary(model1)
 ```
 
-:::{.callout-warning}
-## What the Crude Estimate Conflates
 
-The crude coefficient bundles together any true treatment effect with the influence of confounders (age, CVD history). You cannot disentangle these from an unadjusted regression. This is **confounding bias**, and as we will see, adjustment alone is not enough.
-:::
+We might be tempted to run the following, adjusting for confounding from age and cardiovascular disease history:
 
-### Adjusting for Confounders
-
-We add adjustment:
 
 ```{r}
 model2 <- glm(outcome ~ treatment + age + cvd_history, family = binomial)
@@ -85,12 +85,14 @@ summary(model2)
 ```
 
 :::{.callout-warning}
-## The Adjusted Coefficient Is Still NOT a Causal Effect
+## The Adjusted Coefficient Is Still NOT a Causal Effect, even if we correctly adjust for all confounding
+
+
+**FIX: we have not motivated why we care about the risk difference.**
 
 Even after adjustment, the logistic regression coefficient is a **conditional log-odds ratio**, not a **marginal causal effect**. The odds ratio is non-collapsible, lives on a different scale from the risk difference, and inherits every parametric assumption in the model.
 :::
 
-**Key point.** Adjustment gets you closer, but the regression coefficient from a logistic model is not, in general, the average treatment effect you are looking for.
 
 ## Enter the Counterfactual Framework
 
@@ -112,7 +114,6 @@ $$
 
 where W represents the measured confounders and A is the treatment. This expression says: within each confounder stratum, compute the difference in expected outcomes between treated and untreated, then average over the distribution of confounders in the population.
 
-This formula motivates **standardization (g-computation)**, **inverse probability of treatment weighting (IPTW)**, and **targeted minimum loss-based estimation (TMLE)**, all of which are designed to estimate this population-level causal quantity.
 
 ## When Regression Fails
 
@@ -206,40 +207,3 @@ A **conditional log-odds ratio** is the change in the log-odds of the outcome pe
 - Petersen ML, van der Laan MJ (2014). Causal models and learning from data. *Epidemiology* 25(3):418-426.
 - `tmle` R package: [CRAN](https://cran.r-project.org/package=tmle)
 - `SuperLearner` R package: [CRAN](https://cran.r-project.org/package=SuperLearner)
-
-## Software Implementation (R)
-
-This example uses the `tmle` package to estimate the **average treatment effect (ATE)** for a point treatment, and contrasts the result with a naive regression coefficient.
-
-- Simulate a simple confounded dataset: $W$ causes both $A$ and $Y$
-- Naive regression of $Y$ on $A$ (ignoring confounding) yields a biased coefficient
-- The `tmle` package estimates the ATE using outcome modeling + targeting
-- Compare: the naive coefficient ≠ the causal ATE
-
-```{r}
-#| eval: false
-set.seed(1)
-n <- 500
-W <- rnorm(n)
-A <- rbinom(n, 1, plogis(0.5 * W))
-Y <- 0.8 * A + 1.2 * W + rnorm(n, sd = 0.5)  # true ATE = 0.8
-
-## -- Naive regression (biased) --
-naive_fit <- lm(Y ~ A)
-cat("Naive regression coefficient on A:", round(coef(naive_fit)["A"], 3), "\n")
-
-## -- TMLE (targets the ATE) --
-if (requireNamespace("tmle", quietly = TRUE)) {
-  library(tmle)
-  tmle_fit <- tmle(
-    Y = Y, A = A,
-    W = data.frame(W = W),
-    Q.SL.library = "SL.glm",
-    g.SL.library  = "SL.glm"
-  )
-  cat("TMLE ATE estimate:", round(tmle_fit$estimates$ATE$psi, 3), "\n")
-  cat("95% CI:", round(tmle_fit$estimates$ATE$CI, 3), "\n")
-} else {
-  message("Install the 'tmle' package:  install.packages('tmle')")
-}
-```
