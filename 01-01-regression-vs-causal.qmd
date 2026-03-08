@@ -1,17 +1,13 @@
 ---
-title: 'Chapter 1.1: Limitations of Standard Regression Analyses'
+title: 'Chapter 1.1: Why We Need a Causal Roadmap'
 format: html
 ---
 
-**FIX: this first chapter should maybe be "motivation for a causal roadmap and targeted learning rather than limitatations of regressions. Look at Maya's roadmap talk for inspiration*
+Most observational studies start with a causal question: does treatment A reduce the risk of outcome Y compared to treatment B? Researchers typically reach for a familiar tool --- multivariable regression --- adjust for available confounders, and interpret the resulting coefficient as the answer. This workflow is so common that it can feel like the *only* workflow.
 
-**FIX: this example is not explained. Also could use Cox regression, and is a bit harsh in the tone of calling it a universally wrong instinct**
+But there is a gap between the question we want to answer and what regression actually estimates. A regression coefficient describes a conditional association within the model, not a population-level causal effect. Recognizing this gap is not a criticism of regression itself; regression remains a useful building block. The gap is a reason to adopt a more deliberate analytic workflow --- a **Causal Roadmap** --- that starts with a clearly defined causal question and chooses an estimation strategy that targets it directly.
 
-Suppose you want to know whether patients who start denosumab have a higher three-year risk of heart attack than those who start zoledronic acid. You have a large claims database. The natural instinct is to fit a logistic regression, adjust for confounders, and interpret the treatment coefficient as a causal effect. That instinct is wrong, and the consequences can mislead clinical decisions.
-
-The problem is not that regression is useless. The problem is that a regression coefficient answers a different question than the one you are asking. The adjusted log-odds ratio from logistic regression is a conditional measure on the wrong scale, entangled with model assumptions that are rarely examined. Confounding, non-collapsibility, and misspecification can each silently distort the number you report.
-
-This chapter is the canonical reference for why regression coefficients are not causal effects. We walk through a concrete example, show exactly where naive and adjusted regression go wrong, introduce the counterfactual framework that defines what a causal effect actually is, and demonstrate g-computation as a first alternative. Later chapters will reference back to this discussion rather than repeat it. The chapter proceeds as follows:
+This chapter uses a concrete clinical example to illustrate where the standard regression-only approach falls short, introduces the counterfactual framework that makes causal questions precise, and demonstrates g-computation as a first step toward targeted estimation. Later chapters build on these ideas with inverse probability weighting (IPTW), targeted minimum loss-based estimation (TMLE), and the full Causal Roadmap. The chapter proceeds as follows:
 
 1. A motivating example comparing osteoporosis treatments
 2. What adjusted regression does and does not give you
@@ -49,48 +45,44 @@ Multivariable regression has long been the standard tool in observational resear
 
 **Key point.** If you've been trained to interpret an adjusted regression coefficient as "the effect of X on Y, holding all else equal," you're in good company, but that interpretation quietly smuggles in causal language that the model itself cannot justify. The coefficient tells you about the **conditional association** within strata defined by the other variables in the model. Whether that association equals a causal effect depends on assumptions that regression alone cannot verify.
 
-**FIX: we already introduced this example above- just introduce it once here:**
-
-Let's consider a motivating example based on a real-world study comparing two osteoporosis treatments: **denosumab** (Prolia) and **zoledronic acid**.
-
 ### Motivating Example: Comparing Osteoporosis Treatments
 
-Imagine we're interested in whether patients who initiate denosumab have higher 3-year risk of heart attack or stroke compared to those initiating zoledronic acid.
+Suppose we have a large claims database and want to know whether patients who initiate **denosumab** (Prolia) have a higher 3-year risk of heart attack compared to those who initiate **zoledronic acid**. Both are common osteoporosis treatments, and the causal question is straightforward: if we could assign everyone to denosumab versus zoledronic acid, would the risk of heart attack differ?
+
+A natural first analysis might fit a logistic regression (or a Cox proportional hazards model), adjust for confounders like age and cardiovascular disease history, and report the treatment coefficient. Let's see what that looks like.
 
 
-**FIX: use tidymodels or something else so we just see a clean table of the regression output, **
+```{r, include=FALSE}
+library(broom)
+library(knitr)
 
-
-```{r, include =FALSE}
-# simulate crude comparison 
+# Simulate data
 set.seed(123)
 n <- 2000
 treatment <- rbinom(n, 1, 0.5) # 1 = denosumab, 0 = zoledronic acid
 age <- rnorm(n, 75, 6)
 cvd_history <- rbinom(n, 1, plogis(0.1 * (age - 70)))
 
-# outcome depends on age and history
+# Outcome depends on age and CVD history
 risk <- plogis(-2 + 0.4 * treatment + 0.05 * (age - 70) + 1 * cvd_history)
 outcome <- rbinom(n, 1, risk)
-
 ```
 
-
-We might be tempted to run the following, adjusting for confounding from age and cardiovascular disease history:
-
+We adjust for age and cardiovascular disease history using logistic regression:
 
 ```{r}
 model2 <- glm(outcome ~ treatment + age + cvd_history, family = binomial)
-summary(model2)
+tidy(model2, conf.int = TRUE) |>
+  kable(digits = 3, caption = "Adjusted logistic regression")
 ```
 
 :::{.callout-warning}
 ## The Adjusted Coefficient Is Still NOT a Causal Effect, even if we correctly adjust for all confounding
 
 
-**FIX: we have not motivated why we care about the risk difference.**
+The coefficient on `treatment` is 0.4 on the log-odds scale. But what does a clinician or policymaker actually need to know? They need to know: **if we switched the entire eligible population from zoledronic acid to denosumab, how many additional heart attacks per 100 patients would we expect?** That quantity --- the **marginal risk difference** --- is the natural scale for comparing treatments and making decisions.
 
-Even after adjustment, the logistic regression coefficient is a **conditional log-odds ratio**, not a **marginal causal effect**. The odds ratio is non-collapsible, lives on a different scale from the risk difference, and inherits every parametric assumption in the model.
+The logistic regression coefficient does not answer that question. It is a **conditional log-odds ratio**: the change in log-odds of the outcome for a one-unit change in treatment, holding the other covariates fixed. The odds ratio is non-collapsible (the conditional and marginal odds ratios differ even without confounding), lives on a scale that is difficult to translate directly into clinical impact, and inherits every parametric assumption in the model.
 :::
 
 
