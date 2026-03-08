@@ -3,15 +3,11 @@ title: 'Chapter 1.1: Why We Need a Causal Roadmap'
 format: html
 ---
 
-**NOTE: this chapter should note not just that a regression might be mispecified, but that our causal question might not match the regression coefficient**
+Most observational studies start with a causal question: does treatment A reduce the risk of outcome Y compared to treatment B? Researchers typically reach for a familiar tool --- fit a Cox proportional hazards model, adjust for available confounders, and interpret the hazard ratio as the answer. This workflow is so common that it can feel like the *only* workflow.
 
-**NOTE: update this regression example to a cox-HR analysis and be specific about how the HR is not a causal parameter and how later in this textbook we'll offer alternative parameters with longitudinal TMLE to answer this question. Make the motivating example a time-to-event analysis then.**
+But there are two distinct problems with this approach. First, the regression model may be **misspecified** --- the wrong functional form, missing interactions, or omitted confounders can bias the coefficient. Second, and more fundamentally, even a perfectly specified model may answer the **wrong question**. A conditional hazard ratio from a Cox model is not the same quantity as "the causal effect of treatment on 3-year risk." The hazard ratio is a conditional, instantaneous rate measure that does not directly translate to a population-level risk difference or survival probability contrast. The causal question you want to answer may simply not correspond to any single regression coefficient.
 
-
-
-Most observational studies start with a causal question: does treatment A reduce the risk of outcome Y compared to treatment B? Researchers typically reach for a familiar tool --- multivariable regression --- adjust for available confounders, and interpret the resulting coefficient as the answer. This workflow is so common that it can feel like the *only* workflow.
-
-But there is a gap between the question we want to answer and what regression actually estimates. A regression coefficient describes a conditional association within the model, not a population-level causal effect. Recognizing this gap is not a criticism of regression itself; regression remains a useful building block. The gap is a reason to adopt a more deliberate analytic workflow --- a **Causal Roadmap** --- that starts with a clearly defined causal question and chooses an estimation strategy that targets it directly.
+Recognizing this gap is not a criticism of regression itself; regression remains a useful building block. The gap is a reason to adopt a more deliberate analytic workflow --- a **Causal Roadmap** --- that starts with a clearly defined causal question, specifies a target estimand on a meaningful scale (such as the risk difference or restricted mean survival time difference), and chooses an estimation strategy that targets it directly. Later chapters introduce **longitudinal TMLE (L-TMLE)**, which can estimate causal survival curve contrasts without relying on the proportional hazards assumption.
 
 This chapter uses a concrete clinical example to illustrate where the standard regression-only approach falls short, introduces the counterfactual framework that makes causal questions precise, and demonstrates g-computation as a first step toward targeted estimation. Later chapters build on these ideas with inverse probability weighting (IPTW), targeted minimum loss-based estimation (TMLE), and the full Causal Roadmap. The chapter proceeds as follows:
 
@@ -53,42 +49,54 @@ Multivariable regression has long been the standard tool in observational resear
 
 ### Motivating Example: Comparing Osteoporosis Treatments
 
-Suppose we have a large claims database and want to know whether patients who initiate **denosumab** (Prolia) have a higher 3-year risk of heart attack compared to those who initiate **zoledronic acid**. Both are common osteoporosis treatments, and the causal question is straightforward: if we could assign everyone to denosumab versus zoledronic acid, would the risk of heart attack differ?
+Suppose we have a large claims database and want to know whether patients who initiate **denosumab** (Prolia) have a higher 3-year risk of myocardial infarction (MI) compared to those initiating **zoledronic acid**. Both are common osteoporosis treatments, and the causal question is straightforward: if we could assign everyone to denosumab versus zoledronic acid, would the 3-year MI risk differ?
 
-A natural first analysis might fit a logistic regression (or a Cox proportional hazards model), adjust for confounders like age and cardiovascular disease history, and report the treatment coefficient. Let's see what that looks like.
+The standard approach is to fit a **Cox proportional hazards model**, adjust for confounders like age and cardiovascular disease history, and report the adjusted hazard ratio. Let's see what that looks like.
 
 
 ```{r, include=FALSE}
 library(broom)
 library(knitr)
+library(survival)
 
-# Simulate data
+# Simulate time-to-event data
 set.seed(123)
 n <- 2000
 treatment <- rbinom(n, 1, 0.5) # 1 = denosumab, 0 = zoledronic acid
 age <- rnorm(n, 75, 6)
 cvd_history <- rbinom(n, 1, plogis(0.1 * (age - 70)))
 
-# Outcome depends on age and CVD history
-risk <- plogis(-2 + 0.4 * treatment + 0.05 * (age - 70) + 1 * cvd_history)
-outcome <- rbinom(n, 1, risk)
+# Simulate event times from an exponential model
+baseline_hazard <- 0.05
+log_hr <- 0.4 * treatment + 0.05 * (age - 70) + 1 * cvd_history
+event_time <- rexp(n, rate = baseline_hazard * exp(log_hr))
+
+# Administrative censoring at 3 years
+censor_time <- 3
+time <- pmin(event_time, censor_time)
+event <- as.integer(event_time <= censor_time)
 ```
 
-We adjust for age and cardiovascular disease history using logistic regression:
+We adjust for age and cardiovascular disease history using a Cox model:
 
 ```{r}
-model2 <- glm(outcome ~ treatment + age + cvd_history, family = binomial)
-tidy(model2, conf.int = TRUE) |>
-  kable(digits = 3, caption = "Adjusted logistic regression")
+cox_model <- coxph(Surv(time, event) ~ treatment + age + cvd_history)
+tidy(cox_model, conf.int = TRUE, exponentiate = TRUE) |>
+  kable(digits = 3, caption = "Adjusted Cox proportional hazards model (hazard ratios)")
 ```
 
 :::{.callout-warning}
-## The Adjusted Coefficient Is Still NOT a Causal Effect, even if we correctly adjust for all confounding
+## The Hazard Ratio Is NOT the Causal Effect You Want
 
+The adjusted hazard ratio for `treatment` is around 1.5. But what does a clinician or policymaker actually need to know? They need to know: **if we switched the entire eligible population from zoledronic acid to denosumab, how many additional MIs per 100 patients would we expect over 3 years?** That quantity --- the **marginal risk difference** at 3 years --- is the natural scale for comparing treatments and making decisions.
 
-The coefficient on `treatment` is 0.4 on the log-odds scale. But what does a clinician or policymaker actually need to know? They need to know: **if we switched the entire eligible population from zoledronic acid to denosumab, how many additional heart attacks per 100 patients would we expect?** That quantity --- the **marginal risk difference** --- is the natural scale for comparing treatments and making decisions.
+The Cox hazard ratio does not answer that question. It is a **conditional, instantaneous rate ratio** that:
 
-The logistic regression coefficient does not answer that question. It is a **conditional log-odds ratio**: the change in log-odds of the outcome for a one-unit change in treatment, holding the other covariates fixed. The odds ratio is non-collapsible (the conditional and marginal odds ratios differ even without confounding), lives on a scale that is difficult to translate directly into clinical impact, and inherits every parametric assumption in the model.
+- Assumes **proportional hazards** --- that the treatment effect is constant over time --- which is often violated in practice.
+- Is **non-collapsible**: the conditional HR and marginal HR differ even without confounding, so the coefficient does not have a straightforward population-level interpretation.
+- Does not directly translate to a risk difference or survival probability contrast without additional computation.
+
+In later chapters, we introduce **longitudinal TMLE (L-TMLE)**, which directly estimates causal survival curves and risk differences at specific time points without relying on the proportional hazards assumption.
 :::
 
 
@@ -121,36 +129,38 @@ where W represents the measured confounders and A is the treatment. This express
 Misspecification bias is **silent**. A regression with the wrong functional form still produces coefficients and p-values with no warning. This motivates semiparametric estimators (like TMLE with machine learning) that relax parametric assumptions.
 :::
 
-Let's compare regression to a nonparametric substitution estimator (g-computation):
+Let's compare the Cox approach to g-computation, which directly targets the 3-year risk difference:
 
 ```{r}
-# Fit model
-model3 <- glm(outcome ~ treatment + age + cvd_history, family = binomial)
+# Fit a logistic model for 3-year risk (binary: event by year 3)
+outcome_3yr <- as.integer(event_time <= 3)
+gcomp_model <- glm(outcome_3yr ~ treatment + age + cvd_history, family = binomial)
 
-# Predict counterfactual outcomes
+# Predict counterfactual 3-year risks
 newdata1 <- data.frame(treatment = 1, age = age, cvd_history = cvd_history)
-p1 <- predict(model3, newdata = newdata1, type = "response")
+p1 <- predict(gcomp_model, newdata = newdata1, type = "response")
 
 newdata0 <- data.frame(treatment = 0, age = age, cvd_history = cvd_history)
-p0 <- predict(model3, newdata = newdata0, type = "response")
+p0 <- predict(gcomp_model, newdata = newdata0, type = "response")
 
-# Estimate marginal risk difference
-mean(p1 - p0)  # this is g-computation
+# Marginal risk difference at 3 years
+cat("G-computation risk difference:", round(mean(p1 - p0), 4), "\n")
 ```
 
 :::{.callout-tip}
 ## Why G-Computation Gives You a Population-Level Causal Effect
 
-G-computation **predicts** counterfactual outcomes for every person under treatment and under control, then **averages** the difference. The result is a **marginal risk difference**, a population-level quantity directly relevant to decision-making, unlike the conditional log-odds ratio from regression.
+G-computation **predicts** counterfactual outcomes for every person under treatment and under control, then **averages** the difference. The result is a **marginal risk difference**, a population-level quantity directly relevant to decision-making, unlike the conditional hazard ratio from the Cox model.
 :::
 
-Compare this to the regression coefficient:
+Compare this to the Cox hazard ratio:
 
 ```{r}
-coef(model3)["treatment"]
+# The Cox HR (exponentiating the coefficient)
+exp(coef(cox_model)["treatment"])
 ```
 
-The coefficient gives you a conditional odds ratio, but the g-comp version gives you a marginal risk difference, a more interpretable, population-level quantity.
+The hazard ratio tells you about instantaneous rate differences, but the g-computation risk difference tells you: "X more people per 100 would have an MI within 3 years under denosumab compared to zoledronic acid." The latter is what patients and clinicians need to make decisions.
 
 ## Summary
 
@@ -161,7 +171,7 @@ The coefficient gives you a conditional odds ratio, but the g-comp version gives
 - **Causal inference starts with a question, not a model.** Define your causal question and target estimand (e.g., the ATE on the risk difference scale) *before* choosing an analytic method.
 - **The counterfactual framework clarifies what we want to estimate.** Y(1), Y(0), and the ATE give us precise, model-free definitions of causal effects.
 - **G-computation, IPTW, and TMLE estimate marginal causal effects.** These methods target the population-level quantity defined by the g-computation formula, rather than relying on regression coefficients that conflate the estimand with the model.
-- **The conditional log-odds ratio from logistic regression is not the ATE.** This is perhaps the single most important distinction for epidemiologists moving from traditional regression to causal inference methods.
+- **The hazard ratio from Cox regression is not the ATE.** Hazard ratios are conditional, instantaneous rate measures that do not directly translate to risk differences. This is perhaps the single most important distinction for epidemiologists moving from traditional regression to causal inference methods.
 :::
 
 ## What comes next
