@@ -522,16 +522,26 @@ fit_natural <- crumble(
   data      = weight_behavior,
   trt       = "sports",
   outcome   = "bmi",
-  covar     = c("age", "sex", "tvhours"),
-  mediators = c("exercises", "overweigh"),
-  d0 = \(data, trt) factor(rep(1, nrow(data)), levels = c("1", "2")),
-  d1 = \(data, trt) factor(rep(2, nrow(data)), levels = c("1", "2")),
-  effect    = "N",
-  learners  = c("mean", "glm", "earth", "ranger"),
-  nn_module = sequential_module(),
-  control   = crumble_control(crossfit_folds = 2L, epochs = 20L)
+  covar     = c("age", "sex", "tvhours"),          # <1>
+  mediators = c("exercises", "overweigh"),           # <2>
+  d0 = \(data, trt) factor(rep(1, nrow(data)), levels = c("1", "2")),  # <3>
+  d1 = \(data, trt) factor(rep(2, nrow(data)), levels = c("1", "2")),  # <3>
+  effect    = "N",                                   # <4>
+  learners  = c("mean", "glm", "earth", "ranger"),   # <5>
+  nn_module = sequential_module(),                   # <6>
+  control   = crumble_control(crossfit_folds = 2L, epochs = 20L)  # <7>
 )
+```
+1. Baseline confounders of the $A \to Y$, $A \to M$, and $M \to Y$ relationships; must all be measured **before** treatment — do not include post-treatment variables here
+2. The mediator(s) on the causal pathway from $A$ to $Y$; `crumble` models $P(M \mid A, W)$ and uses it in the Riesz representer estimation
+3. `d0` and `d1` are **intervention functions**: they take the data and treatment column name and return the counterfactual treatment value for each observation; `d0` sets everyone to the reference level (treatment = "1", i.e., control), `d1` sets everyone to the active level (treatment = "2")
+4. `effect = "N"` requests **natural direct and indirect effects (NDE/NIE)**; requires the cross-world independence assumption — no treatment-induced confounders of $M \to Y$; use `"RI"` or `"RT"` if intermediate confounders exist
+5. `learners`: the Super Learner library used for all nuisance models (outcome $E[Y \mid A, M, W]$, mediator $P(M \mid A, W)$, treatment $P(A \mid W)$); `"earth"` (MARS) and `"ranger"` (random forest) capture nonlinear mediator-outcome relationships
+6. `nn_module = sequential_module()`: a neural network used to estimate the **Riesz representer** — a density ratio of the mediator distribution under treatment vs. control; this avoids explicit density estimation which is difficult in high dimensions
+7. `crumble_control(crossfit_folds = 2L, epochs = 20L)`: controls cross-fitting (2 folds here for speed) and neural network training epochs; increase to `crossfit_folds = 10L, epochs = 100L` for production analyses
 
+```{r}
+#| eval: false
 print(fit_natural)
 ```
 
@@ -544,15 +554,20 @@ fit_ri <- crumble(
   outcome   = "bmi",
   covar     = c("age", "sex", "tvhours"),
   mediators = c("exercises", "overweigh"),
-  moc       = "snack",
+  moc       = "snack",                              # <1>
   d0 = \(data, trt) factor(rep(1, nrow(data)), levels = c("1", "2")),
   d1 = \(data, trt) factor(rep(2, nrow(data)), levels = c("1", "2")),
-  effect    = "RI",
+  effect    = "RI",                                 # <2>
   learners  = c("mean", "glm", "earth", "ranger"),
   nn_module = sequential_module(),
   control   = crumble_control(crossfit_folds = 2L, epochs = 20L)
 )
+```
+1. `moc` (**mediator-outcome confounder**): the variable "snack" is affected by treatment `A` and confounds the `M → Y` path; by specifying it here, `crumble` models it as an intermediate confounder and adjusts the decomposition accordingly — omitting it would bias the indirect effect
+2. `effect = "RI"` requests **randomized interventional indirect effects (IDE/IIE)**: instead of cross-world counterfactuals, these draw the mediator from its distribution under control $P(M \mid A=d_0, W)$, avoiding the cross-world independence assumption while still identifying the mediated pathway
 
+```{r}
+#| eval: false
 print(fit_ri)
 ```
 
@@ -565,15 +580,20 @@ fit_rt <- crumble(
   outcome   = "bmi",
   covar     = c("age", "sex", "tvhours"),
   mediators = c("exercises", "overweigh"),
-  moc       = "snack",
+  moc       = "snack",                              # <1>
   d0 = \(data, trt) factor(rep(1, nrow(data)), levels = c("1", "2")),
   d1 = \(data, trt) factor(rep(2, nrow(data)), levels = c("1", "2")),
-  effect    = "RT",
+  effect    = "RT",                                 # <2>
   learners  = c("mean", "glm", "earth", "ranger"),
   nn_module = sequential_module(),
   control   = crumble_control(crossfit_folds = 2L, epochs = 20L)
 )
+```
+1. `moc` is required for recanting twins: the method explicitly models the intermediate confounder path $A \to Z \to M$ and $Z \to Y$, decomposing the total effect into components that travel through $M$, through $Z$, and directly
+2. `effect = "RT"` requests the **recanting twins** estimand (Robins & Richardson, 2010): conceptually, it imagines two independent "copies" of the world that share the same $W$ but have independent treatment assignments, allowing path-specific effect decomposition even in the presence of the intermediate confounder $Z$
 
+```{r}
+#| eval: false
 print(fit_rt)
 ```
 
@@ -608,14 +628,19 @@ fit_sim_N <- crumble(
   outcome   = "Y",
   covar     = covar_names,
   mediators = "M",
-  d0        = d0_fn,
-  d1        = d1_fn,
-  effect    = "N",
+  d0        = d0_fn,   # <1>
+  d1        = d1_fn,   # <1>
+  effect    = "N",     # <2>
   learners  = c("mean", "glm", "earth", "ranger"),
   nn_module = sequential_module(),
   control   = crumble_control(crossfit_folds = 2L, epochs = 5L)
 )
+```
+1. `d0_fn` and `d1_fn` were defined above as lambda functions that set treatment to `"0"` (control) or `"1"` (treated) for all observations; treatment must be a factor for `crumble` — the levels define what `d0` and `d1` can return
+2. `effect = "N"` fits natural effects — valid here only if the DGP's intermediate confounder $Z$ can be ignored or is absent; since our DGP includes $Z$, this estimate will be biased relative to the true NDE/NIE (compare to `fit_sim_RT`)
 
+```{r}
+#| eval: false
 print(fit_sim_N)
 ```
 
@@ -631,15 +656,20 @@ fit_sim_RT <- crumble(
   outcome   = "Y",
   covar     = covar_names,
   mediators = "M",
-  moc       = "Z",
+  moc       = "Z",     # <1>
   d0        = d0_fn,
   d1        = d1_fn,
-  effect    = "RT",
+  effect    = "RT",    # <2>
   learners  = c("mean", "glm", "earth", "ranger"),
   nn_module = sequential_module(),
   control   = crumble_control(crossfit_folds = 2L, epochs = 5L)
 )
+```
+1. `moc = "Z"`: specifies the **measured intermediate confounder** (blood pressure change in the pharmacoepi framing) — the variable affected by treatment $A$ that confounds the $M \to Y$ path; `crumble` now models $P(Z \mid A, W)$ and uses it in the recanting-twins identification formula
+2. `effect = "RT"` (recanting twins) is the appropriate estimand when `moc` is present: it correctly handles the $A \to Z \to M$ and $Z \to Y$ paths, producing valid path-specific effect decompositions that the natural effects estimator cannot identify when $Z$ exists
 
+```{r}
+#| eval: false
 print(fit_sim_RT)
 ```
 
@@ -656,12 +686,16 @@ fit_sim_RI <- crumble(
   moc       = "Z",
   d0        = d0_fn,
   d1        = d1_fn,
-  effect    = "RI",
+  effect    = "RI",    # <1>
   learners  = c("mean", "glm", "earth", "ranger"),
   nn_module = sequential_module(),
   control   = crumble_control(crossfit_folds = 2L, epochs = 5L)
 )
+```
+1. `effect = "RI"` (**randomized interventional effects**) with `moc` specified: instead of the recanting-twins cross-world structure, the indirect effect is defined by randomly drawing $M$ from $P(M \mid A=d_0, Z, W)$; this is a stochastic intervention on the mediator that avoids both the cross-world assumption and the need to model the full $Z$ pathway explicitly
 
+```{r}
+#| eval: false
 print(fit_sim_RI)
 ```
 

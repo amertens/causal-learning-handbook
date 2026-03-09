@@ -411,16 +411,22 @@ SL_lib <- c("SL.glm",      # logistic regression
             "SL.ranger")   # random forest
 
 sl_fit <- SuperLearner(
-  Y = Y,
-  X = X_df,
-  family = binomial(),
-  SL.library = SL_lib,
-  method = "method.NNLS",
-  cvControl = list(V = 10L)
+  Y = Y,                          # <1>
+  X = X_df,                       # <2>
+  family = binomial(),             # <3>
+  SL.library = SL_lib,            # <4>
+  method = "method.NNLS",         # <5>
+  cvControl = list(V = 10L)       # <6>
 )
 
 sl_fit
 ```
+1. Outcome vector — binary (0/1) or continuous; SuperLearner infers the prediction task from `family`
+2. Predictor data frame — must not contain the outcome; column names are preserved and used by learner wrappers
+3. `binomial()` tells the package this is a classification problem and that predictions should be probabilities in $[0,1]$; use `gaussian()` for continuous outcomes
+4. Named character vector of candidate learner wrappers; learners listed here are all fit in each cross-validation fold
+5. `"method.NNLS"` uses non-negative least squares for the metalearner — default for MSE loss; swap to `"method.NNloglik"` for log-likelihood loss on binary nuisance functions (recommended for causal inference)
+6. `V = 10L` sets 10-fold cross-validation; `L` suffix forces integer type required by the package
 
 Compare the package output to our hand-coded version:
 
@@ -468,12 +474,13 @@ sl_loglik <- SuperLearner(
   X = X_df,
   family = binomial(),
   SL.library = SL_lib,
-  method = "method.NNloglik",
+  method = "method.NNloglik",  # <1>
   cvControl = list(V = 10L)
 )
 
 sl_loglik
 ```
+1. `"method.NNloglik"` optimizes the metalearner weights by minimizing negative log-likelihood rather than squared error; this penalizes overconfident wrong predictions more heavily, producing better-calibrated probabilities — **use this for all binary nuisance functions in TMLE and AIPW** (outcome regressions and propensity scores)
 
 ## 7.3 AUC (rank loss)
 
@@ -526,12 +533,12 @@ A powerful feature of Super Learner is that you can include **multiple versions 
 
 ```{r}
 # Custom random forest with different mtry values
-SL.ranger.mtry2 <- function(..., mtry = 2) SL.ranger(..., mtry = mtry)
-SL.ranger.mtry4 <- function(..., mtry = 4) SL.ranger(..., mtry = mtry)
+SL.ranger.mtry2 <- function(..., mtry = 2) SL.ranger(..., mtry = mtry)  # <1>
+SL.ranger.mtry4 <- function(..., mtry = 4) SL.ranger(..., mtry = mtry)  # <1>
 
 # Custom LASSO with different alpha (mixing parameter)
-SL.glmnet.ridge <- function(..., alpha = 0) SL.glmnet(..., alpha = alpha)
-SL.glmnet.enet  <- function(..., alpha = 0.5) SL.glmnet(..., alpha = alpha)
+SL.glmnet.ridge <- function(..., alpha = 0)   SL.glmnet(..., alpha = alpha)  # <2>
+SL.glmnet.enet  <- function(..., alpha = 0.5) SL.glmnet(..., alpha = alpha)  # <2>
 
 # Expanded library
 SL_lib_expanded <- c(
@@ -557,6 +564,8 @@ sl_expanded <- SuperLearner(
 
 sl_expanded
 ```
+1. Wrapper pattern: create named functions that call the base wrapper with a fixed hyperparameter; including multiple versions in the library lets the metalearner select the best `mtry` without manual tuning
+2. `alpha = 0` gives ridge regression (all variables kept, coefficients shrunk); `alpha = 0.5` gives elastic net (compromise between LASSO sparsity and ridge stability); including both lets the metalearner decide the right regularization type for this dataset
 
 :::{.callout-tip}
 ## Library Design Principles
@@ -721,7 +730,7 @@ expit <- function(x) 1 / (1 + exp(-x))
 ps_hat <- predict(g_sl, X_covariates)$pred[, 1]
 
 # Bound propensity scores away from 0 and 1
-ps_hat <- pmin(pmax(ps_hat, 0.01), 0.99)
+ps_hat <- pmin(pmax(ps_hat, 0.01), 0.99)  # <1>
 
 # Initial outcome predictions at observed A
 Q_init <- predict(Q_sl, X_with_A)$pred[, 1]
@@ -737,6 +746,7 @@ Q0_init <- predict(Q_sl, X_A0)$pred[, 1]
 gcomp_ate <- mean(Q1_init - Q0_init)
 cat("G-computation ATE (SL, before targeting):", round(gcomp_ate, 4), "\n")
 ```
+1. Truncate propensity scores to $[0.01, 0.99]$ before using them in TMLE or IPTW: scores near 0 or 1 blow up the clever covariate $H = A/e(W) - (1-A)/(1-e(W))$, destabilizing the fluctuation step. The threshold 0.01 is a common default; tighter bounds (e.g., 0.05) reduce variance at the cost of introducing truncation bias — vary this in a sensitivity analysis.
 
 ## 10.4 TMLE targeting step
 
@@ -752,18 +762,21 @@ H_obs <- ifelse(W_sim$A == 1, H1, H0)
 Q_obs_init <- ifelse(W_sim$A == 1, Q1_init, Q0_init)
 
 # Fluctuation model
-epsilon <- glm(W_sim$Y ~ -1 + offset(logit(Q_obs_init)) + H_obs,
+epsilon <- glm(W_sim$Y ~ -1 + offset(logit(Q_obs_init)) + H_obs,  # <1>
                family = binomial)$coef
 
 # Update counterfactual predictions
-Q1_star <- expit(logit(Q1_init) + epsilon * H1)
-Q0_star <- expit(logit(Q0_init) + epsilon * H0)
+Q1_star <- expit(logit(Q1_init) + epsilon * H1)  # <2>
+Q0_star <- expit(logit(Q0_init) + epsilon * H0)  # <2>
 
 # TMLE estimate
-tmle_ate <- mean(Q1_star - Q0_star)
+tmle_ate <- mean(Q1_star - Q0_star)  # <3>
 cat("TMLE ATE (with SL):", round(tmle_ate, 4), "\n")
 cat("True ATE:          ", round(true_ate, 4), "\n")
 ```
+1. Fluctuation model: the Super Learner predictions `Q_obs_init` enter as a fixed offset on the logit scale; only the single parameter ε is estimated. A near-zero ε means the SL outcome model was already nearly optimal for the ATE estimand.
+2. Apply ε to the counterfactual Q predictions on the logit scale; `expit()` (the inverse logit) maps back to [0,1] — essential when working with probability outcomes
+3. The substitution estimator: average the difference of targeted counterfactual predictions over all observations, giving the population-level ATE
 
 ## 10.5 Inference via the efficient influence curve
 
@@ -808,16 +821,22 @@ In practice, you will often use the `tmle` package, which handles the full pipel
 library(tmle)
 
 tmle_fit <- tmle(
-  Y = W_sim$Y,
-  A = W_sim$A,
-  W = X_covariates,
-  family = "binomial",
-  Q.SL.library = c("SL.glm", "SL.earth", "SL.ranger", "SL.glmnet"),
-  g.SL.library = c("SL.glm", "SL.earth", "SL.ranger", "SL.glmnet")
+  Y = W_sim$Y,                                                        # <1>
+  A = W_sim$A,                                                        # <2>
+  W = X_covariates,                                                   # <3>
+  family = "binomial",                                                # <4>
+  Q.SL.library = c("SL.glm", "SL.earth", "SL.ranger", "SL.glmnet"), # <5>
+  g.SL.library = c("SL.glm", "SL.earth", "SL.ranger", "SL.glmnet")  # <6>
 )
 
 tmle_fit$estimates$ATE
 ```
+1. Binary outcome vector (0/1); `tmle` internally uses `family` to determine how to fit the Q model
+2. Binary treatment indicator (0/1); must not contain NA values
+3. Covariate matrix or data frame — does not include A or Y; `tmle` adds an intercept internally
+4. `"binomial"` specifies logistic regression for the initial Q model; use `"gaussian"` for continuous outcomes
+5. `Q.SL.library`: Super Learner ensemble for the outcome model $E[Y \mid A, W]$; diverse library with `earth` (MARS) and `ranger` (random forest) reduces misspecification risk
+6. `g.SL.library`: Super Learner ensemble for the propensity score $P(A=1 \mid W)$; can use the same or a different library from Q — a rich library here is especially important if treatment assignment depends on complex covariate patterns
 
 The `tmle` package does everything we did by hand in Sections 10.2–10.5: it fits Super Learner for both nuisance functions, performs the TMLE fluctuation step, and computes EIC-based inference. The hand-coded version from this chapter shows you exactly what those four lines are doing.
 
