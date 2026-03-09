@@ -177,8 +177,9 @@ The clever covariate directs the fluctuation to reduce bias for the specific cau
 
 ```{r}
 # Step 3: Clever covariate at observed treatment
-H <- with(dat, A/ps - (1-A)/(1-ps))
+H <- with(dat, A/ps - (1-A)/(1-ps))  # <1>
 ```
+1. $H(A,W)$ is derived from the efficient influence curve for the ATE. For treated observations ($A=1$) it equals $1/e(W)$; for controls ($A=0$) it equals $-1/(1-e(W))$. This combined form simultaneously handles both arms and directs the fluctuation step specifically toward the ATE estimand rather than any other parameter.
 
 :::{.callout-important}
 ## Step 4: Fit the Fluctuation Model and Update Predictions
@@ -196,9 +197,11 @@ This step ensures the final estimates solve the efficient influence curve equati
 
 ```{r}
 # Step 4: Fluctuation model
-epsilon <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H,
-               family = binomial)$coef
+epsilon <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H,  # <1>
+               family = binomial)$coef                   # <2>
 ```
+1. The `-1` suppresses the intercept; `offset(logit(Qinit))` fixes the initial Q predictions on the logit scale so only the coefficient on `H` (the fluctuation parameter ε) is estimated
+2. Logistic family keeps the update on the probability scale; `.coef` extracts the single ε — a small number close to zero means the initial Q needed little correction
 
 ---
 
@@ -210,17 +213,20 @@ Q1_init <- predict(Qmod, newdata = mutate(dat, A=1), type="response")
 Q0_init <- predict(Qmod, newdata = mutate(dat, A=0), type="response")
 
 # Clever covariates for counterfactual treatment values
-H1 <- 1 / ps
-H0 <- -1 / (1 - ps)
+H1 <- 1 / ps          # <1>
+H0 <- -1 / (1 - ps)   # <1>
 
 # Apply the fluctuation to counterfactual predictions
-Q1_star <- plogis(logit(Q1_init) + epsilon * H1)
-Q0_star <- plogis(logit(Q0_init) + epsilon * H0)
+Q1_star <- plogis(logit(Q1_init) + epsilon * H1)  # <2>
+Q0_star <- plogis(logit(Q0_init) + epsilon * H0)  # <2>
 
 # TMLE ATE estimate
-tmle_ate <- mean(Q1_star) - mean(Q0_star)
+tmle_ate <- mean(Q1_star) - mean(Q0_star)  # <3>
 tmle_ate
 ```
+1. Treatment-arm-specific clever covariates: $H_1(W) = 1/e(W)$ targets the treated potential outcome; $H_0(W) = -1/(1-e(W))$ targets the control potential outcome. These must be evaluated at the *counterfactual* treatment value, not the observed one.
+2. Apply the fluctuation on the logit scale, then `plogis()` maps back to probability — guaranteeing all targeted predictions stay in $[0,1]$, unlike AIPW which can violate these bounds
+3. The TMLE **substitution estimator**: simply take the sample mean of each arm's targeted predictions. No explicit weighting needed — the clever covariate already incorporated the propensity score.
 
 ---
 
@@ -241,14 +247,14 @@ Y_obs <- dat$Y
 # EIC (efficient influence curve) components
 # For treated: use Q1_star; for control: use Q0_star
 # But we need Q* at the OBSERVED A for the residual terms
-Qstar_obs <- ifelse(dat$A == 1, Q1_star, Q0_star)
-H_obs <- ifelse(dat$A == 1, H1, H0)
+Qstar_obs <- ifelse(dat$A == 1, Q1_star, Q0_star)  # <1>
+H_obs <- ifelse(dat$A == 1, H1, H0)                 # <1>
 
 # Efficient influence curve for each observation
-EIC <- H_obs * (Y_obs - Qstar_obs) + Q1_star - Q0_star - tmle_ate
+EIC <- H_obs * (Y_obs - Qstar_obs) + Q1_star - Q0_star - tmle_ate  # <2>
 
 # Standard error and 95% CI
-tmle_se <- sqrt(var(EIC) / n)
+tmle_se <- sqrt(var(EIC) / n)  # <3>
 ci_lower <- tmle_ate - 1.96 * tmle_se
 ci_upper <- tmle_ate + 1.96 * tmle_se
 
@@ -259,6 +265,9 @@ tibble(
   CI_upper = ci_upper
 )
 ```
+1. Select the targeted Q prediction and clever covariate at each observation's *observed* treatment value — needed to form the IPW-weighted residual term that corrects for outcome model error
+2. The EIC has two parts: (a) $H(A,W)(Y - Q^*)$ — an IPW-weighted residual that corrects any outcome model bias, and (b) $(Q_1^* - Q_0^* - \hat\psi)$ — the centered substitution component. When the fluctuation step correctly solved the EIC equation, the sample mean of EIC is exactly zero.
+3. The EIC variance divided by $n$ yields the semiparametric efficient variance — this is valid even when machine learning is used for nuisance models (with appropriate cross-fitting)
 
 :::{.callout-tip}
 ## Interpreting TMLE Inference
@@ -365,31 +374,33 @@ summary(haart_baseline$ps)
 logit <- function(p) log(p / (1 - p))
 
 Q_init <- predict(Q_fit, type = "response")
-H_clever <- with(haart_baseline, ever_haart / ps - (1 - ever_haart) / (1 - ps))
+H_clever <- with(haart_baseline, ever_haart / ps - (1 - ever_haart) / (1 - ps))  # <1>
 
-eps <- coef(glm(haart_baseline$died ~ -1 + offset(logit(Q_init)) + H_clever,
-                family = binomial))
+eps <- coef(glm(haart_baseline$died ~ -1 + offset(logit(Q_init)) + H_clever,  # <2>
+                family = binomial))                                              # <2>
 ```
+1. Clever covariate for the HAART cohort: `ever_haart / ps` for treated and `-(1 - ever_haart) / (1 - ps)` for untreated — the binary indicator selects the correct arm for each observation
+2. Fluctuation model: the `-1` suppresses the intercept; `logit(Q_init)` is a fixed offset (not estimated); only `eps` (ε) is fit — a value near zero means Q was already close to correct
 
 ### Step 4: Update predictions and compute the ATE
 
 ```{r}
-H1 <-  1 / haart_baseline$ps
-H0 <- -1 / (1 - haart_baseline$ps)
+H1 <-  1 / haart_baseline$ps   # <1>
+H0 <- -1 / (1 - haart_baseline$ps)  # <1>
 
-Q1_star <- plogis(logit(haart_baseline$Q1) + eps * H1)
-Q0_star <- plogis(logit(haart_baseline$Q0) + eps * H0)
+Q1_star <- plogis(logit(haart_baseline$Q1) + eps * H1)  # <2>
+Q0_star <- plogis(logit(haart_baseline$Q0) + eps * H0)  # <2>
 
-ate <- mean(Q1_star) - mean(Q0_star)
+ate <- mean(Q1_star) - mean(Q0_star)  # <3>
 
 # EIC-based standard error
 n_obs <- nrow(haart_baseline)
-Qstar_obs <- ifelse(haart_baseline$ever_haart == 1, Q1_star, Q0_star)
-H_obs     <- ifelse(haart_baseline$ever_haart == 1, H1, H0)
-EIC <- H_obs * (haart_baseline$died - Qstar_obs) +
-       Q1_star - Q0_star - ate
+Qstar_obs <- ifelse(haart_baseline$ever_haart == 1, Q1_star, Q0_star)  # <4>
+H_obs     <- ifelse(haart_baseline$ever_haart == 1, H1, H0)            # <4>
+EIC <- H_obs * (haart_baseline$died - Qstar_obs) +                     # <5>
+       Q1_star - Q0_star - ate                                          # <5>
 
-se  <- sqrt(var(EIC) / n_obs)
+se  <- sqrt(var(EIC) / n_obs)  # <6>
 
 tibble(
   ATE      = round(ate, 4),
@@ -398,6 +409,12 @@ tibble(
   CI_upper = round(ate + 1.96 * se, 4)
 )
 ```
+1. Arm-specific clever covariates for updating the counterfactual predictions: $H_1(W) = 1/e(W)$ for the HAART potential outcome, $H_0(W) = -1/(1-e(W))$ for the no-HAART potential outcome
+2. Apply the fluctuation ε on the logit scale to the counterfactual Q predictions; `plogis()` maps back to [0,1] — mortality probability must stay bounded
+3. TMLE substitution estimator: difference in mean targeted counterfactual mortality predictions across the two treatment arms
+4. At each patient's observed treatment value, select the corresponding targeted Q and clever covariate — these are the "observed" residual components of the EIC
+5. EIC for each patient: IPW-weighted residual $(H \cdot (Y - Q^*))$ plus centered substitution component $(Q_1^* - Q_0^* - \hat\psi)$; summing these two pieces is what makes TMLE doubly robust
+6. The EIC-based variance is the semiparametric efficiency bound; `sqrt(var(EIC) / n_obs)` gives the standard error directly from the influence function without bootstrapping
 
 :::{.callout-note}
 ## Interpreting the HAART TMLE Result
@@ -476,14 +493,14 @@ if (requireNamespace("tmle", quietly = TRUE)) {
   library(tmle)
 
   ## Scenario A: correct Q model, misspecified g (intercept only)
-  fit_a <- tmle(Y = Y, A = A, W = data.frame(W = W),
-                Q.SL.library = c("SL.glm", "SL.earth"),
-                g.SL.library  = "SL.mean")
+  fit_a <- tmle(Y = Y, A = A, W = data.frame(W = W),  # <1>
+                Q.SL.library = c("SL.glm", "SL.earth"),  # <2>
+                g.SL.library  = "SL.mean")               # <3>
   cat("Scenario A (correct Q, wrong g):", round(fit_a$estimates$ATE$psi, 3), "\n")
 
   ## Scenario B: misspecified Q (intercept only), correct g
   fit_b <- tmle(Y = Y, A = A, W = data.frame(W = W),
-                Q.SL.library = "SL.mean",
+                Q.SL.library = "SL.mean",                # <4>
                 g.SL.library  = c("SL.glm", "SL.earth"))
   cat("Scenario B (wrong Q, correct g):", round(fit_b$estimates$ATE$psi, 3), "\n")
 
@@ -497,3 +514,7 @@ if (requireNamespace("tmle", quietly = TRUE)) {
   message("Install the 'tmle' package:  install.packages('tmle')")
 }
 ```
+1. `tmle()` from the `tmle` package automates all four TMLE steps; `W` must be a `data.frame` (not a matrix or bare vector)
+2. `Q.SL.library`: the Super Learner library for the outcome model $E[Y \mid A, W]$; `SL.earth` adds MARS splines to capture nonlinearity in the outcome
+3. `g.SL.library = "SL.mean"`: deliberately misspecified propensity score using only an intercept-only model (predicts the marginal mean treatment probability for everyone); this tests whether TMLE remains consistent when Q is correct but g is wrong
+4. `Q.SL.library = "SL.mean"`: deliberately misspecified outcome model; tests whether TMLE remains consistent when g is correct but Q is wrong — both Scenarios A and B should give estimates close to the true ATE = 0.5

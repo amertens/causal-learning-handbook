@@ -150,18 +150,21 @@ dat <- dat %>%
 sl_lib <- c("SL.glm", "SL.ranger", "SL.mean")
 
 tmle_sub <- tmle(
-  Y = dat$Y[dat$age_under75 == 1],
-  A = dat$A[dat$age_under75 == 1],
+  Y = dat$Y[dat$age_under75 == 1],             # <1>
+  A = dat$A[dat$age_under75 == 1],             # <1>
   W = dat %>%
     filter(age_under75 == 1) %>%
-    select(cvd, eGFR),
+    select(cvd, eGFR),                         # <2>
   family = "binomial",
-  Q.SL.library = sl_lib,
-  g.SL.library = sl_lib
+  Q.SL.library = sl_lib,                       # <3>
+  g.SL.library = sl_lib                        # <3>
 )
 
 tmle_sub$estimates$ATE
 ```
+1. Subset Y and A to the target subgroup before passing to `tmle()`; this estimates the **subgroup-specific ATE** $E[Y(1) - Y(0) \mid \text{age} < 75]$ rather than the marginal ATE — the estimand is conditional on being in the subgroup
+2. W contains the **confounders** for the subgroup analysis — notably, the subgrouping variable `age_under75` itself is **excluded** from W; including it would condition the propensity score model on the stratification variable, collapsing variation and potentially destabilizing the estimate
+3. The same SL library is used for both the outcome model (Q) and propensity score (g); in small subgroups you may need to simplify the library or reduce cross-validation folds to prevent empty folds
 
 Interpretation:
 
@@ -245,9 +248,9 @@ Y <- rbinom(n, 1, plogis(-2 + tau_true * A + 0.05 * (X$age - 75) + 0.5 * X$cvd))
 X_mat <- as.matrix(X)
 
 cf <- causal_forest(
-  X = X_mat,
-  Y = Y,
-  W = A
+  X = X_mat,   # <1>
+  Y = Y,       # <2>
+  W = A        # <3>
 )
 
 # Individualized CATE estimates
@@ -255,6 +258,9 @@ tau_hat <- predict(cf)$predictions
 
 summary(tau_hat)
 ```
+1. `X`: covariate matrix that includes all potential effect modifiers — the forest will search for splits across these covariates that maximize treatment effect heterogeneity; unlike TMLE's W, this should include variables you suspect are **moderators** even if they are not confounders
+2. `Y`: outcome vector; `causal_forest` internally uses a Robinson (1988) decomposition — it separately estimates $E[Y \mid X]$ and $E[W \mid X]$ before fitting the heterogeneous treatment effect
+3. `W = A`: the binary treatment indicator (not to be confused with W the confounder matrix); `causal_forest` uses an **honest splitting** approach — each tree splits on X for heterogeneity but estimates treatment effects using held-out data from that split, preventing overfitting
 
 ### Visualizing CATE vs. risk score
 
@@ -332,10 +338,10 @@ sl_lib <- c("SL.glm", "SL.ranger", "SL.mean")
 tmle_ate <- tmle(
   Y = Y,
   A = A,
-  W = X,
+  W = X,                        # <1>
   family = "binomial",
-  Q.SL.library = sl_lib,
-  g.SL.library = sl_lib
+  Q.SL.library = sl_lib,        # <2>
+  g.SL.library = sl_lib         # <2>
 )
 
 tmle_ate$estimates$ATE
@@ -343,6 +349,8 @@ tmle_ate$estimates$ATE
 # Step 2: CATEs with causal forest (already computed as tau_hat)
 summary(tau_hat)
 ```
+1. `W = X` passes the full covariate matrix including potential effect modifiers like `age`, `cvd`, `risk_score`; the TMLE ATE averages over all of these, while the subsequent causal forest step decomposes heterogeneity across them
+2. Using the same `sl_lib` for Q and g is standard when the covariate space is the same; consider richer libraries for g if treatment assignment is more complex (e.g., multiple prescribers, non-random clinic assignment)
 
 - TMLE gives a **population-level effect** (with solid identifiability and efficiency).
 - Causal forest gives **individual-level estimated CATEs** to explore how effects vary.

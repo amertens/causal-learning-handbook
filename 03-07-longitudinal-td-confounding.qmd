@@ -1,4 +1,4 @@
----
+﻿---
 title: "Chapter 3.7: Imperfect Adherence, Time-Varying Confounding, and Longitudinal TMLE"
 subtitle: "An illustrated guide to why conditioning on adherence biases causal effects, and how longitudinal TMLE and LMTP address this"
 format: html
@@ -1029,18 +1029,27 @@ tv_vars <- list(
 # Run LMTP-TMLE
 result_lmtp <- lmtp_tmle(
   data = dat_wide,
-  trt = trt_vars,
+  trt = trt_vars,                                    # <1>
   outcome = "Y",
-  baseline = baseline_vars,
-  time_vary = tv_vars,
-  cens = cens_vars,
-  shift = always_adhere,
+  baseline = baseline_vars,                          # <2>
+  time_vary = tv_vars,                               # <3>
+  cens = cens_vars,                                  # <4>
+  shift = always_adhere,                             # <5>
   outcome_type = "binomial",
-  learners_outcome = c("SL.glm", "SL.glmnet"),
-  learners_trt = c("SL.glm", "SL.glmnet"),
-  folds = 5
+  learners_outcome = c("SL.glm", "SL.glmnet"),       # <6>
+  learners_trt = c("SL.glm", "SL.glmnet"),           # <6>
+  folds = 5                                           # <7>
 )
+```
+1. `trt`: character vector of treatment column names in temporal order (e.g., `c("A_1", ..., "A_6")`); `lmtp` fits a propensity model at each time point conditioning on the cumulative history up to that point
+2. `baseline`: time-fixed covariates measured before treatment initiation; included in every nuisance model at every time point but never intervened upon
+3. `time_vary`: list of character vectors, one per time period, naming the time-varying covariates measured between treatment time points; these are the L nodes that create the treatment-confounder feedback loop
+4. `cens`: character vector of censoring indicator columns (one per time period); `lmtp` models the **censoring mechanism** $P(C=0 \mid A, L, W)$ separately and uses it to construct inverse probability of censoring weights — handling censoring explicitly prevents survival bias
+5. `shift = always_adhere`: the intervention function defined earlier; this is the **defining feature of lmtp** — any R function that maps current data and treatment name to an intervened value, enabling static, dynamic, and stochastic interventions with the same framework
+6. `learners_outcome` and `learners_trt` can differ: using `SL.glmnet` (LASSO) alongside `SL.glm` helps with the high-dimensional history at later time points where many past L and A values enter the propensity model
+7. `folds = 5`: cross-fitting folds; `lmtp` uses cross-fitting by default to allow machine learning in nuisance models while maintaining valid influence-function-based inference
 
+```{r, eval=FALSE}
 # View results
 result_lmtp
 
@@ -1066,13 +1075,16 @@ result_shift <- lmtp_tmle(
   baseline = baseline_vars,
   time_vary = tv_vars,
   cens = cens_vars,
-  shift = shift_adherence,
+  shift = shift_adherence,   # <1>
   outcome_type = "binomial",
   learners_outcome = c("SL.glm", "SL.glmnet"),
   learners_trt = c("SL.glm", "SL.glmnet"),
   folds = 5
 )
+```
+1. `shift = shift_adherence`: a **stochastic intervention** that increments each patient's current adherence probability by 0.20 (capped at 1); unlike the `always_adhere` static intervention, this stays within the support of the observed data by never forcing adherence for patients whose observed probability is near zero — directly addressing positivity violations that arise with static "always treat" regimes
 
+```{r, eval=FALSE}
 result_shift
 ```
 
@@ -1310,11 +1322,11 @@ if (requireNamespace("ltmle", quietly = TRUE)) {
 
   result <- ltmle(
     data = dat,
-    Anodes  = c("A_0", "A_1", "A_2"),
-    Lnodes  = c("L_1", "L_2"),
+    Anodes  = c("A_0", "A_1", "A_2"),                              # <1>
+    Lnodes  = c("L_1", "L_2"),                                     # <2>
     Ynodes  = "Y",
-    abar = list(treatment = c(1, 1, 1), control = c(0, 0, 0)),
-    SL.library = "glm"
+    abar = list(treatment = c(1, 1, 1), control = c(0, 0, 0)),     # <3>
+    SL.library = "glm"                                              # <4>
   )
   cat("LTMLE: always treat vs never treat\n")
   print(summary(result))
@@ -1322,3 +1334,7 @@ if (requireNamespace("ltmle", quietly = TRUE)) {
   message("Install the 'ltmle' package:  install.packages('ltmle')")
 }
 ```
+1. `Anodes`: treatment column names across all three time points; `ltmle` fits $P(A_t \mid \bar{A}_{t-1}, \bar{L}_t, W)$ at each node and uses these to construct the sequential clever covariates for backwards targeting
+2. `Lnodes`: the time-varying confounders that arise **between** treatment time points; specifying these tells `ltmle` to include them in the outcome regressions (to deconfound later treatment) and then integrate them out in the backwards regression (to preserve their role as mediators of prior treatment)
+3. `abar = list(treatment = c(1,1,1), control = c(0,0,0))`: compare "always treat" vs "never treat" across all three time points; `ltmle` runs the full backwards L-TMLE procedure for both regimes and returns the ATE with influence-curve-based confidence intervals
+4. `SL.library = "glm"`: uses plain logistic regression for all nuisance models; replace with a richer library (e.g., `c("SL.glm", "SL.earth", "SL.ranger")`) in production for more flexible estimation
