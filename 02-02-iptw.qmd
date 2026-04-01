@@ -162,21 +162,15 @@ Keep an eye on
 ## Why Stabilized Weights Are Preferred in Practice
 
 
-Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment** -- that is, the overall proportion of patients in the study who received treatment, ignoring their covariates. This simple rescaling brings the weights closer to 1 on average and reduces their variance without introducing bias for the marginal causal effect.
+Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment** --- the overall proportion of patients who received the treatment they actually received, ignoring covariates. This rescaling brings the weights closer to 1 on average and reduces their variance without affecting consistency for the marginal causal effect.
 
-For a binary treatment:
-
-$$
-SW_i = \frac{P(A_i)}{e(W_i)} \text{ if } A_i = 1
-$$
-
-and
+For a binary treatment, the stabilized weight for individual $i$ is:
 
 $$
-SW_i = \frac{P(A_i)}{1 - e(W_i)} \text{ if } A_i = 0
+SW_i = \frac{P(A = 1)}{e(W_i)} \quad \text{if } A_i = 1, \qquad SW_i = \frac{P(A = 0)}{1 - e(W_i)} \quad \text{if } A_i = 0
 $$
 
-Here \( P(A_i) \) is the marginal probability of treatment (estimated as the sample proportion treated).
+where $P(A = 1)$ is the marginal probability of treatment (estimated as the sample proportion treated) and $P(A = 0) = 1 - P(A = 1)$ is the marginal probability of control. Note that the numerator uses the marginal probability of the treatment *actually received* --- $P(A = 1)$ for treated, $P(A = 0)$ for untreated --- not a single value for both groups.
 
 **Why this helps:** Unstabilized weights create a pseudo-population that is larger than the original sample, which inflates standard errors. Stabilized weights preserve the original sample size in expectation, leading to:
 
@@ -184,7 +178,12 @@ Here \( P(A_i) \) is the marginal probability of treatment (estimated as the sam
 - More stable point estimates
 - Better finite-sample performance
 
-In epidemiologic practice, **always prefer stabilized weights** unless you have a specific reason to use unstabilized ones. One such reason: unstabilized weights are needed when you want to estimate the **total number of events** that would occur under each treatment in the pseudo-population, since stabilized weights rescale the population size.
+In epidemiologic practice, **often prefer stabilized weights** for the Horvitz-Thompson estimator. However, the choice is not automatic:
+
+- When fitting a **marginal structural model** (weighted regression with covariates in the numerator), the numerator of the stabilized weight should include those covariates, not just the marginal treatment probability.
+- When the **Hajek estimator** (ratio of weighted sums) is used, stabilization has less impact because the estimator self-normalizes.
+- Unstabilized weights are appropriate when estimating **total counts** of events in the pseudo-population, since stabilization rescales the population size.
+- Always check weight diagnostics (Section 8 below) regardless of whether weights are stabilized.
 
 :::
 
@@ -354,8 +353,8 @@ Truncation (also called "winsorizing") reduces variance at the cost of introduci
 
 **The trade-off in practice:**
 
-- **Without truncation**: unbiased (if the propensity model is correct) but potentially high variance, with confidence intervals that may be uninformatively wide
-- **With truncation**: slightly biased but often lower mean squared error, producing more useful estimates
+- **Without truncation**: consistent and asymptotically unbiased under correct propensity model specification, positivity, and regularity conditions --- but finite-sample bias can remain, and variance may be large enough to render confidence intervals uninformatively wide
+- **With truncation**: introduces bias (the estimator no longer targets the original ATE but implicitly targets a modified estimand defined over the population with sufficient overlap), yet often achieves lower mean squared error
 
 **Common approaches:**
 
@@ -363,7 +362,7 @@ Truncation (also called "winsorizing") reduces variance at the cost of introduci
 - Truncate at fixed values (e.g., cap weights at 10 or 20)
 - Report results with and without truncation as a sensitivity analysis
 
-There is no single "right" truncation threshold. In your manuscripts, always report which threshold you used and show sensitivity to this choice. In [Chapter 4.2: Outcome-Blind Simulation Studies](04-02-outcome-blind-simulations.qmd), we show how to use simulations calibrated to your specific dataset to choose an appropriate truncation level that optimizes the bias-variance trade-off for your analysis.
+There is no single "right" truncation threshold. Truncation is best treated as a **sensitivity analysis**: report results at multiple thresholds (e.g., 1st/99th, 5th/95th percentiles, and untruncated) and examine how conclusions change. Note that under severe truncation, the estimator implicitly targets a modified estimand --- the ATE in the subpopulation with propensity scores bounded away from 0 and 1 --- which may differ from the original population-level ATE. This is not merely a statistical nuisance; it reflects a genuine change in the causal question being answered, and should be reported transparently. For more on modified estimands under practical positivity, see [Chapter 3.2](03-02-positivity-overlap.qmd). In [Chapter 4.2: Outcome-Blind Simulation Studies](04-02-outcome-blind-simulations.qmd), we show how to use simulations calibrated to your specific dataset to choose an appropriate truncation level.
 
 
 :::
@@ -389,7 +388,7 @@ Note that this analysis treats HAART initiation as a single, baseline treatment 
 :::{.callout-tip}
 ## Chapter Takeaways
 
-- IPTW reweights observational data to mimic a randomized trial using propensity scores; always prefer **stabilized weights**
+- IPTW reweights observational data to mimic a randomized trial using propensity scores; **stabilized weights** are often preferred for variance reduction, but the choice depends on the estimator and estimand
 - IPTW depends on a correctly specified treatment model; never skip overlap and weight diagnostics
 - Sensitive to positivity violations; extreme weights can dominate estimates
 - Does not use outcome-model information, motivating **doubly robust** methods (next chapter)

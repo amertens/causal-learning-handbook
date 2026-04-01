@@ -44,11 +44,11 @@ A doubly robust estimator is consistent if **either** the treatment model or the
 
 AIPW adds a correction term to IPTW using the outcome regression. The key insight is that it is constructed so that:
 
-- If the **treatment model** is right, the IPTW component produces an unbiased estimate
-- If the **outcome model** is right, the augmentation (G-computation) component corrects any bias in the weights
-- If **both** are right, the estimator achieves the **semiparametric efficiency bound**, meaning it has the smallest possible variance among all regular asymptotically linear estimators
+- If the **treatment model** is correctly specified (and positivity holds), the IPTW component yields a consistent estimate of the causal effect
+- If the **outcome model** is correctly specified, the augmentation (G-computation) component corrects any remaining bias from the weights
+- If **both** are correctly specified, the estimator achieves the **semiparametric efficiency bound**, meaning it has the smallest possible asymptotic variance among all regular asymptotically linear estimators
 
-In other words, AIPW "augments" the weighted estimator with a bias-correction term derived from the outcome model. This makes the estimator robust to misspecification of either (but not both) nuisance models, hence the name *doubly robust*.
+In other words, AIPW "augments" the weighted estimator with a bias-correction term derived from the outcome model. This makes the estimator consistent under correct specification of either (but not both) nuisance models, plus positivity --- hence the name *doubly robust*. Note that "doubly robust" is a *consistency* property: it guarantees the estimator converges to the truth as $n \to \infty$ under the stated conditions, not that it is unbiased in finite samples.
 :::
 
 ## 2.1 Formula
@@ -134,7 +134,7 @@ Each AIPW component starts with the outcome-model prediction and adds a weighted
 :::{.callout-tip}
 ## Key Idea: Why TMLE Over AIPW?
 
-TMLE offers several advantages over AIPW: predicted probabilities always stay in $[0, 1]$ (AIPW can fall outside), it integrates naturally with ensemble machine learning (SuperLearner), and the fluctuation step solves the efficient influence curve equation by construction, providing a foundation for valid inference.
+TMLE offers several advantages over AIPW: predicted probabilities always stay in $[0, 1]$ (AIPW can fall outside), it integrates naturally with ensemble machine learning (Super Learner), and the fluctuation step solves the efficient influence curve equation by construction, providing a foundation for valid inference under appropriate conditions (correct specification of at least one nuisance model, positivity, and --- when data-adaptive learners are used --- cross-fitting or CV-TMLE to avoid Donsker-class requirements; see @zheng2011crossvalidated).
 :::
 
 ---
@@ -232,13 +232,25 @@ tmle_ate
 
 # 8.1 TMLE Inference: Standard Errors and Confidence Intervals
 
-A major advantage of TMLE is that valid inference follows directly from the **efficient influence curve (EIC)**. The EIC for the ATE at the TMLE fit is:
+A major advantage of TMLE is that inference follows directly from the **efficient influence curve (EIC)**. Using the clever covariate notation from Section 7 --- where $H(A, W) = A/e(W) - (1-A)/(1-e(W))$ --- the EIC for the ATE at the TMLE fit can be written in a single unified form:
 
 $$
-D_i = H_1(W_i)(Y_i - Q_1^*(W_i)) - H_0(W_i)(Y_i - Q_0^*(W_i)) + Q_1^*(W_i) - Q_0^*(W_i) - \hat{\psi}
+D_i = H(A_i, W_i)\big(Y_i - Q^*(A_i, W_i)\big) + Q^*(1, W_i) - Q^*(0, W_i) - \hat{\psi}
 $$
 
-where $\hat{\psi}$ is the TMLE ATE estimate. The variance of the ATE is estimated by the sample variance of the EIC divided by $n$.
+Equivalently, expanding $H$ into its treatment-arm-specific components $H_1(W) = 1/e(W)$ and $H_0(W) = -1/(1-e(W))$ (which already include the sign for each arm):
+
+$$
+D_i = \frac{A_i}{e(W_i)}\big(Y_i - Q_1^*(W_i)\big) - \frac{1-A_i}{1-e(W_i)}\big(Y_i - Q_0^*(W_i)\big) + Q_1^*(W_i) - Q_0^*(W_i) - \hat{\psi}
+$$
+
+where $\hat{\psi}$ is the TMLE ATE estimate. The variance of the ATE is estimated by the sample variance of the EIC divided by $n$: $\hat{\sigma}^2 = \frac{1}{n}\sum_i D_i^2$.
+
+::: {.callout-important}
+## When is EIC-based inference valid?
+
+The EIC-based variance estimator and resulting Wald-type confidence intervals are asymptotically valid when (i) at least one nuisance model is consistently estimated, (ii) positivity holds, and (iii) certain regularity/rate conditions are met. When **data-adaptive or machine learning** methods are used for nuisance estimation, these conditions require **cross-fitting** (sample-splitting) or **CV-TMLE** to avoid empirical process conditions (Donsker class membership) that flexible learners typically violate. In the `tmle3` and `drtmle` R packages, cross-fitting is available; the classic `tmle` package does not cross-fit by default but remains valid when the Super Learner library is not too aggressive (e.g., excludes highly adaptive learners like HAL without cross-fitting). See @zheng2011crossvalidated for the theoretical foundations.
+:::
 
 ```{r}
 # Observed outcomes

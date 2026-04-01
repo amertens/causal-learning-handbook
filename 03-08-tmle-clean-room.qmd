@@ -68,15 +68,15 @@ This question arises in a post-marketing surveillance context where:
 :::{.callout-note}
 ## Why TMLE for Clean-Room?
 
-Traditional regression-based analyses require the analyst to choose a single model specification, a process that invites data-dependent decisions. Every time an analyst looks at the data and adjusts a model, the pre-specification principle is compromised. TMLE with Super Learner sidesteps this problem entirely:
+Traditional regression-based analyses require the analyst to choose a single model specification, a process that invites data-dependent decisions. Every time an analyst looks at the data and adjusts a model, the pre-specification principle is compromised. TMLE with Super Learner reduces reliance on a single parametric model while maintaining a pre-specified workflow:
 
 1. **Pre-specify a learner library, not a single model.** The SAP lists the candidate algorithms. Cross-validation, not the analyst, picks the best combination. No post-hoc model selection is required.
-2. **Double robustness protects you.** Even if the outcome model or the treatment model is misspecified, the estimate remains consistent as long as at least one is correct. This is invaluable when you cannot iterate after seeing the data.
-3. **Influence-curve inference is automatic.** Valid standard errors come directly from the efficient influence curve, with no bootstrap needed and no distributional assumptions beyond the nonparametric model.
+2. **Double robustness provides consistency under partial misspecification.** The TMLE estimate is consistent if at least one of the outcome model or the treatment model is correctly specified (plus positivity). This is a *consistency* property, not a blanket guarantee --- it does not protect against unmeasured confounding or severe positivity violations.
+3. **Influence-curve inference is automatic under regularity conditions.** Standard errors come directly from the efficient influence curve. When data-adaptive learners are used, cross-fitting or CV-TMLE is needed to ensure the regularity conditions hold (see [Chapter 2.3](02-03-doubly-robust-tmle.qmd)).
 4. **Full determinism.** Given the same data, learner library, and random seed, the entire pipeline produces bit-identical results. Every run is reproducible.
 5. **The audit trail writes itself.** Cross-validated learner weights, the fluctuation parameter, and every diagnostic are logged as natural byproducts of the algorithm.
 
-In short, TMLE turns the clean-room constraint from a limitation into a strength: the algorithm makes the decisions that the analyst is not allowed to make.
+TMLE does not eliminate the fundamental threats to causal inference (unmeasured confounding, positivity violations, model extrapolation). What it does is separate the *algorithmic* decisions (model selection, combination weights) from the *substantive* decisions (estimand definition, confounder selection, population definition) that must be made before data access. This separation is what makes it well-suited to clean-room workflows.
 :::
 
 ---
@@ -130,6 +130,25 @@ Results are interpreted according to pre-specified decision rules. Any deviation
 :::
 
 We now walk through each phase.
+
+::: {.callout-important}
+## Regulatory auditability: what must be logged
+
+For FDA-aligned external control arm studies and EMA/NICE RWE submissions, the following items should be captured and archived as part of the analysis audit trail:
+
+| Element | What to record |
+|---------|---------------|
+| **Data access** | Date(s) of data extraction, data source version/snapshot identifier |
+| **Cohort selection** | Inclusion/exclusion criteria, patient flow diagram with counts at each step |
+| **Variable definitions** | Operational definitions for exposure, outcome, covariates, and censoring indicators; mapping from source fields to analysis variables |
+| **Model specification** | Super Learner library (algorithm names and hyperparameters), cross-validation scheme (V-fold number), outcome type, propensity score bounds |
+| **Software environment** | R version, package versions (via `renv::snapshot()` or `sessionInfo()`), operating system |
+| **Random seeds** | All seeds used for cross-validation and any stochastic algorithms |
+| **Code identity** | Git commit hash or code archive hash; deviation log if any manual steps were taken |
+| **Analyst identity** | Names and roles of analysts who accessed the data and executed the code |
+
+The FDA guidance on externally controlled trials [@fda2023external] and the FDA guidance on assessing EHR and claims data [@fda2024ehr] emphasize that the analysis must be reproducible by an independent reviewer given the same data and code. The clean-room workflow facilitates this by separating pre-specification (Phase 1) from execution (Phase 3), creating a natural audit boundary. For structured reporting templates, see [Chapter 1.3](01-03-rwe-protocols-reporting-audit.qmd).
+:::
 
 ---
 
@@ -1073,7 +1092,7 @@ if (tmle_ci[1] > 0) {
 | Pre-specification required | SAP locks the learner library, seed, and analysis code |
 | Must be reproducible | Deterministic given data + seed + code |
 | Model selection bias | Super Learner eliminates manual model selection |
-| Robustness to misspecification | Double robustness protects against either nuisance model being wrong |
+| Robustness to misspecification | Double robustness: consistency if either nuisance model is correct (plus positivity) |
 | Valid inference | Influence-curve standard errors do not require bootstrap |
 | Auditable | Cross-validated learner weights, diagnostics, and the fluctuation parameter are all logged |
 | Transparent | Every step (initial model, clever covariate, targeting, inference) has a clear purpose |
