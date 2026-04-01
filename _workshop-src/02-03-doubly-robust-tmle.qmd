@@ -1,0 +1,532 @@
+---
+title: "Chapter 2.3: Doubly Robust Estimators and Targeted Learning (AIPW + TMLE)"
+format: html
+---
+
+*Estimated reading time: 25 minutes*
+
+# Chapter 2.3: Doubly Robust Estimation and Targeted Learning
+*Bridging outcome modeling and weighting for more robust causal effect estimation*
+
+In previous chapters, you learned:
+
+- **G-computation** depends on correctly modeling the *outcome*
+- **IPTW** depends on correctly modeling the *treatment mechanism*
+
+But what if you could use **both models**, and as long as **either one is correct**, your estimator is still consistent?
+
+This is exactly what **doubly robust estimators** provide.
+
+We explore:
+
+- Why doubly robust estimators matter
+- AIPW (Augmented IPTW)
+- TMLE (Targeted Maximum Likelihood Estimation)
+- How to implement both with tidyverse-friendly R code
+- Why TMLE is preferred in modern causal inference
+
+---
+
+# 1. Why Doubly Robust Estimators?
+
+:::{.callout-tip}
+## Key Idea: Why Doubly Robust Estimators?
+
+A doubly robust estimator is consistent if **either** the treatment model or the outcome model is correctly specified. By combining both sources of information, doubly robust estimators provide **two chances to get it right** and often outperform G-computation or IPTW used alone.
+:::
+
+---
+
+# 2. AIPW: Augmented Inverse Probability Weighting
+
+:::{.callout-note}
+## What Makes AIPW "Doubly Robust"?
+
+AIPW adds a correction term to IPTW using the outcome regression. The key insight is that it is constructed so that:
+
+- If the **treatment model** is correctly specified (and positivity holds), the IPTW component yields a consistent estimate of the causal effect
+- If the **outcome model** is correctly specified, the augmentation (G-computation) component corrects any remaining bias from the weights
+- If **both** are correctly specified, the estimator achieves the **semiparametric efficiency bound**, meaning it has the smallest possible asymptotic variance among all regular asymptotically linear estimators
+
+In other words, AIPW "augments" the weighted estimator with a bias-correction term derived from the outcome model. This makes the estimator consistent under correct specification of either (but not both) nuisance models, plus positivity --- hence the name *doubly robust*. Note that "doubly robust" is a *consistency* property: it guarantees the estimator converges to the truth as $n \to \infty$ under the stated conditions, not that it is unbiased in finite samples.
+:::
+
+## 2.1 Formula
+
+Let:
+
+- $e(W) = P(A = 1 \mid W)$ be the propensity score
+- $m(a, W) = E[Y \mid A = a, W]$ be the outcome regression
+
+Then:
+
+$$
+\hat{\mu}_1 = \frac{1}{n} \sum_i \left[ \frac{A_i Y_i}{e(W_i)} - \frac{A_i - e(W_i)}{e(W_i)} m(1, W_i) \right]
+$$
+
+$$
+\hat{\mu}_0 = \frac{1}{n} \sum_i \left[ \frac{(1-A_i) Y_i}{1 - e(W_i)} + \frac{A_i - e(W_i)}{1 - e(W_i)} m(0, W_i) \right]
+$$
+
+ATE = $\hat{\mu}_1 - \hat{\mu}_0$
+
+---
+
+# 3. Simulated Osteoporosis Dataset
+
+```{r}
+library(tidyverse)
+
+set.seed(2026)
+n <- 4000
+
+age <- rnorm(n, 75, 6)
+cvd <- rbinom(n, 1, plogis(0.12 * (age - 70)))
+
+# Treatment model
+A <- rbinom(n, 1, plogis(-1 + 0.08*(age - 70) + 1.4*cvd))
+
+# Outcome model
+Y <- rbinom(n, 1, plogis(-2 + 0.6*A + 0.10*(age - 70) + 1.0*cvd))
+
+dat <- tibble(age, cvd, A, Y)
+```
+
+---
+
+# 4. Fit Outcome and Propensity Score Models
+
+```{r}
+Qmod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
+gmod <- glm(A ~ age + cvd, family = binomial, data = dat)
+
+dat <- dat %>%
+  mutate(
+    ps = predict(gmod, type = "response"),
+    Q1 = predict(Qmod, newdata = mutate(dat, A=1), type = "response"),
+    Q0 = predict(Qmod, newdata = mutate(dat, A=0), type = "response")
+  )
+```
+
+---
+
+# 5. Compute AIPW Estimator
+
+```{r}
+with(dat, {
+  mu1 <- mean( Q1 + A * (Y - Q1) / ps )
+  mu0 <- mean( Q0 + (1 - A) * (Y - Q0) / (1 - ps) )
+  ate <- mu1 - mu0
+  c(mu1 = mu1, mu0 = mu0, ate = ate)
+})
+```
+
+:::{.callout-tip}
+## Interpreting the AIPW Estimate
+
+Each AIPW component starts with the outcome-model prediction and adds a weighted residual correction. For instance, `Q1 + A * (Y - Q1) / ps` corrects $m(1, W)$ by upweighting the residual $(Y - Q1)$ for treated individuals. This structure gives AIPW its doubly robust property: even if $Q$ is wrong, the IPW correction fixes the bias (and vice versa).
+:::
+
+---
+
+# 6. TMLE: Targeted Maximum Likelihood Estimation
+
+:::{.callout-tip}
+## Key Idea: Why TMLE Over AIPW?
+
+TMLE offers several advantages over AIPW: predicted probabilities always stay in $[0, 1]$ (AIPW can fall outside), it integrates naturally with ensemble machine learning (Super Learner), and the fluctuation step solves the efficient influence curve equation by construction, providing a foundation for valid inference under appropriate conditions (correct specification of at least one nuisance model, positivity, and --- when data-adaptive learners are used --- cross-fitting or CV-TMLE to avoid Donsker-class requirements; see @zheng2011crossvalidated).
+:::
+
+---
+
+# 7. TMLE Step-by-Step
+
+**Step 1: Fit the initial outcome model (Q).** Fit a model for $E[Y \mid A, W]$ and generate initial predictions under both treatment values for each individual: $Q_n^0(1, W_i)$ (predicted outcome if treated) and $Q_n^0(0, W_i)$ (predicted outcome if untreated). These predictions are "initial" because they have not yet been targeted toward the causal parameter of interest.
+
+```{r}
+logit <- function(p) log(p/(1-p))
+expit <- function(x) 1/(1+exp(-x))
+
+# Step 1: Initial Q predictions at observed A
+Qinit <- predict(Qmod, type="response")
+```
+
+**Step 2: Estimate the propensity score.** The propensity score $e(W) = P(A = 1 \mid W)$ is needed to construct the clever covariate in the next step. We already fit this model in Section 4.
+
+```{r}
+# Step 2: Propensity scores (already estimated)
+ps <- dat$ps
+```
+
+:::{.callout-note}
+## Definition: The Clever Covariate
+
+The **clever covariate** $H(A, W)$ is the key ingredient that makes TMLE "targeted." It is derived from the efficient influence curve for the ATE:
+
+$$
+H(A, W) = \frac{A}{e(W)} - \frac{1 - A}{1 - e(W)}
+$$
+
+For computing the counterfactual means, we also need the treatment-specific components:
+
+- $H_1(W) = \frac{1}{e(W)}$ (for the treated potential outcome)
+- $H_0(W) = \frac{-1}{1 - e(W)}$ (for the control potential outcome)
+
+The clever covariate directs the fluctuation to reduce bias for the specific causal estimand we care about, the ATE.
+:::
+
+```{r}
+# Step 3: Clever covariate at observed treatment
+H <- with(dat, A/ps - (1-A)/(1-ps))  # <1>
+```
+1. $H(A,W)$ is derived from the efficient influence curve for the ATE. For treated observations ($A=1$) it equals $1/e(W)$; for controls ($A=0$) it equals $-1/(1-e(W))$. This combined form simultaneously handles both arms and directs the fluctuation step specifically toward the ATE estimand rather than any other parameter.
+
+:::{.callout-important}
+## Step 4: Fit the Fluctuation Model and Update Predictions
+
+This is the critical "targeting" step. We fit a logistic regression of $Y$ on $H$ with the initial logit-predictions as an offset:
+
+$$
+\text{logit}(E[Y \mid A, W]) = \text{logit}(Q_n^0(A, W)) + \epsilon \cdot H(A, W)
+$$
+
+The estimated $\hat{\epsilon}$ is then used to **update** (fluctuate) the initial predictions. Crucially, we must apply this fluctuation to the counterfactual predictions $Q_n^0(1, W)$ and $Q_n^0(0, W)$ using their respective clever covariates $H_1$ and $H_0$.
+
+This step ensures the final estimates solve the efficient influence curve equation, which is what gives TMLE its optimal statistical properties.
+:::
+
+```{r}
+# Step 4: Fluctuation model
+epsilon <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H,  # <1>
+               family = binomial)$coef                   # <2>
+```
+1. The `-1` suppresses the intercept; `offset(logit(Qinit))` fixes the initial Q predictions on the logit scale so only the coefficient on `H` (the fluctuation parameter ε) is estimated
+2. Logistic family keeps the update on the probability scale; `.coef` extracts the single ε — a small number close to zero means the initial Q needed little correction
+
+---
+
+# 8. Counterfactual Predictions for TMLE
+
+```{r}
+# Get initial (pre-fluctuation) predictions under each treatment
+Q1_init <- predict(Qmod, newdata = mutate(dat, A=1), type="response")
+Q0_init <- predict(Qmod, newdata = mutate(dat, A=0), type="response")
+
+# Clever covariates for counterfactual treatment values
+H1 <- 1 / ps          # <1>
+H0 <- -1 / (1 - ps)   # <1>
+
+# Apply the fluctuation to counterfactual predictions
+Q1_star <- plogis(logit(Q1_init) + epsilon * H1)  # <2>
+Q0_star <- plogis(logit(Q0_init) + epsilon * H0)  # <2>
+
+# TMLE ATE estimate
+tmle_ate <- mean(Q1_star) - mean(Q0_star)  # <3>
+tmle_ate
+```
+1. Treatment-arm-specific clever covariates: $H_1(W) = 1/e(W)$ targets the treated potential outcome; $H_0(W) = -1/(1-e(W))$ targets the control potential outcome. These must be evaluated at the *counterfactual* treatment value, not the observed one.
+2. Apply the fluctuation on the logit scale, then `plogis()` maps back to probability — guaranteeing all targeted predictions stay in $[0,1]$, unlike AIPW which can violate these bounds
+3. The TMLE **substitution estimator**: simply take the sample mean of each arm's targeted predictions. No explicit weighting needed — the clever covariate already incorporated the propensity score.
+
+---
+
+# 8.1 TMLE Inference: Standard Errors and Confidence Intervals
+
+A major advantage of TMLE is that inference follows directly from the **efficient influence curve (EIC)**. Using the clever covariate notation from Section 7 --- where $H(A, W) = A/e(W) - (1-A)/(1-e(W))$ --- the EIC for the ATE at the TMLE fit can be written in a single unified form:
+
+$$
+D_i = H(A_i, W_i)\big(Y_i - Q^*(A_i, W_i)\big) + Q^*(1, W_i) - Q^*(0, W_i) - \hat{\psi}
+$$
+
+Equivalently, expanding $H$ into its treatment-arm-specific components $H_1(W) = 1/e(W)$ and $H_0(W) = -1/(1-e(W))$ (which already include the sign for each arm):
+
+$$
+D_i = \frac{A_i}{e(W_i)}\big(Y_i - Q_1^*(W_i)\big) - \frac{1-A_i}{1-e(W_i)}\big(Y_i - Q_0^*(W_i)\big) + Q_1^*(W_i) - Q_0^*(W_i) - \hat{\psi}
+$$
+
+where $\hat{\psi}$ is the TMLE ATE estimate. The variance of the ATE is estimated by the sample variance of the EIC divided by $n$: $\hat{\sigma}^2 = \frac{1}{n}\sum_i D_i^2$.
+
+::: {.callout-important}
+## When is EIC-based inference valid?
+
+The EIC-based variance estimator and resulting Wald-type confidence intervals are asymptotically valid when (i) at least one nuisance model is consistently estimated, (ii) positivity holds, and (iii) certain regularity/rate conditions are met. When **data-adaptive or machine learning** methods are used for nuisance estimation, these conditions require **cross-fitting** (sample-splitting) or **CV-TMLE** to avoid empirical process conditions (Donsker class membership) that flexible learners typically violate. In the `tmle3` and `drtmle` R packages, cross-fitting is available; the classic `tmle` package does not cross-fit by default but remains valid when the Super Learner library is not too aggressive (e.g., excludes highly adaptive learners like HAL without cross-fitting). See @zheng2011crossvalidated for the theoretical foundations.
+:::
+
+```{r}
+# Observed outcomes
+Y_obs <- dat$Y
+
+# EIC (efficient influence curve) components
+# For treated: use Q1_star; for control: use Q0_star
+# But we need Q* at the OBSERVED A for the residual terms
+Qstar_obs <- ifelse(dat$A == 1, Q1_star, Q0_star)  # <1>
+H_obs <- ifelse(dat$A == 1, H1, H0)                 # <1>
+
+# Efficient influence curve for each observation
+EIC <- H_obs * (Y_obs - Qstar_obs) + Q1_star - Q0_star - tmle_ate  # <2>
+
+# Standard error and 95% CI
+tmle_se <- sqrt(var(EIC) / n)  # <3>
+ci_lower <- tmle_ate - 1.96 * tmle_se
+ci_upper <- tmle_ate + 1.96 * tmle_se
+
+tibble(
+  Estimate = tmle_ate,
+  SE = tmle_se,
+  CI_lower = ci_lower,
+  CI_upper = ci_upper
+)
+```
+1. Select the targeted Q prediction and clever covariate at each observation's *observed* treatment value — needed to form the IPW-weighted residual term that corrects for outcome model error
+2. The EIC has two parts: (a) $H(A,W)(Y - Q^*)$ — an IPW-weighted residual that corrects any outcome model bias, and (b) $(Q_1^* - Q_0^* - \hat\psi)$ — the centered substitution component. When the fluctuation step correctly solved the EIC equation, the sample mean of EIC is exactly zero.
+3. The EIC variance divided by $n$ yields the semiparametric efficient variance — this is valid even when machine learning is used for nuisance models (with appropriate cross-fitting)
+
+:::{.callout-tip}
+## Interpreting TMLE Inference
+
+The EIC-based standard error is a key output of TMLE. Because the fluctuation step solves the EIC estimating equation, the resulting confidence interval has correct coverage under standard regularity conditions, even when machine learning is used for the nuisance models (provided cross-fitting or other sample-splitting techniques are employed).
+
+If the confidence interval excludes zero, we have evidence that the treatment has a non-null causal effect on the outcome at the 95% confidence level.
+:::
+
+---
+
+# 9. TMLE + SuperLearner (Recommended)
+
+```{r, eval=FALSE}
+library(SuperLearner)
+
+SL_lib <- c("SL.glm", "SL.glmnet", "SL.ranger", "SL.mean")
+
+Q_SL <- SuperLearner(
+  Y = dat$Y,
+  X = dat %>% select(A, age, cvd),
+  family = binomial(),
+  SL.library = SL_lib
+)
+
+g_SL <- SuperLearner(
+  Y = dat$A,
+  X = dat %>% select(age, cvd),
+  family = binomial(),
+  SL.library = SL_lib
+)
+```
+
+You can plug these flexible nuisance models directly into TMLE. SuperLearner builds an ensemble (weighted combination) of multiple algorithms, reducing the risk that any single model is badly misspecified. When combined with TMLE's fluctuation step, this provides a powerful, data-adaptive approach to causal inference that maintains valid statistical inference.
+
+---
+
+# 10. Comparison: AIPW vs TMLE
+
+### AIPW vs TMLE: Head-to-Head
+
+| Property | AIPW | TMLE |
+|---|---|---|
+| Doubly robust | Yes | Yes |
+| Semiparametrically efficient | Yes (asymptotically) | Yes |
+| Handles ML well | Requires cross-fitting | Yes, with SuperLearner |
+| Predictions bounded in $[0,1]$ | No | Yes |
+| Solves EIC equation | Not guaranteed | Yes, by construction |
+| Implementation complexity | Simple | Moderate |
+
+**Key point.** Both AIPW and TMLE are valid doubly robust estimators. TMLE is generally preferred because it respects the bounds of the parameter space (e.g., probabilities stay in $[0,1]$), integrates naturally with ensemble machine learning, and solves the efficient influence curve equation by construction, giving it better finite-sample performance and more trustworthy inference.
+
+---
+
+# Running Example: Antiretroviral Therapy Cohort
+
+See the [Running Case Study](00-case-study.qmd) for the full data description.
+
+In this section we apply TMLE to the HIV antiretroviral therapy cohort that serves as the running example throughout this handbook. The goal is to estimate the causal effect of ever initiating HAART (`ever_haart`) on mortality (`died`), adjusting for baseline covariates `age`, `sex`, and `cd4_sqrt_baseline`.
+
+TMLE is a natural fit for this dataset because it offers doubly robust protection against model misspecification. In the HAART cohort, the relationship between CD4 count, treatment initiation, and mortality is complex, so having two chances to get the model right (through the outcome regression and the propensity score) is especially valuable. TMLE also keeps predicted probabilities bounded in [0, 1], which matters when mortality risk is the outcome.
+
+This is a **point-treatment** analysis that collapses each patient's longitudinal record into a single baseline snapshot. The original panel data contain time-varying CD4 measurements and treatment switches, but here we simplify to a single treatment indicator (`ever_haart`) and a single outcome (`died`). Longitudinal TMLE, which accounts for time-varying treatment and confounding in the full panel data, is covered in Chapter 3.9.
+
+```{r}
+source("_data/load-haart-cohort.R")
+
+glimpse(haart_baseline)
+```
+
+### Step 1: Fit the initial outcome model
+
+```{r}
+Q_fit <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
+             family = binomial, data = haart_baseline)
+
+haart_baseline <- haart_baseline |>
+  mutate(
+    Q1 = predict(Q_fit,
+                 newdata = mutate(haart_baseline, ever_haart = 1),
+                 type = "response"),
+    Q0 = predict(Q_fit,
+                 newdata = mutate(haart_baseline, ever_haart = 0),
+                 type = "response")
+  )
+```
+
+### Step 2: Fit the propensity score model
+
+```{r}
+g_fit <- glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
+             family = binomial, data = haart_baseline)
+
+haart_baseline <- haart_baseline |>
+  mutate(ps = predict(g_fit, type = "response"))
+
+# Check overlap
+summary(haart_baseline$ps)
+```
+
+### Step 3: Construct the clever covariate and fluctuate
+
+```{r}
+logit <- function(p) log(p / (1 - p))
+
+Q_init <- predict(Q_fit, type = "response")
+H_clever <- with(haart_baseline, ever_haart / ps - (1 - ever_haart) / (1 - ps))  # <1>
+
+eps <- coef(glm(haart_baseline$died ~ -1 + offset(logit(Q_init)) + H_clever,  # <2>
+                family = binomial))                                              # <2>
+```
+1. Clever covariate for the HAART cohort: `ever_haart / ps` for treated and `-(1 - ever_haart) / (1 - ps)` for untreated — the binary indicator selects the correct arm for each observation
+2. Fluctuation model: the `-1` suppresses the intercept; `logit(Q_init)` is a fixed offset (not estimated); only `eps` (ε) is fit — a value near zero means Q was already close to correct
+
+### Step 4: Update predictions and compute the ATE
+
+```{r}
+H1 <-  1 / haart_baseline$ps   # <1>
+H0 <- -1 / (1 - haart_baseline$ps)  # <1>
+
+Q1_star <- plogis(logit(haart_baseline$Q1) + eps * H1)  # <2>
+Q0_star <- plogis(logit(haart_baseline$Q0) + eps * H0)  # <2>
+
+ate <- mean(Q1_star) - mean(Q0_star)  # <3>
+
+# EIC-based standard error
+n_obs <- nrow(haart_baseline)
+Qstar_obs <- ifelse(haart_baseline$ever_haart == 1, Q1_star, Q0_star)  # <4>
+H_obs     <- ifelse(haart_baseline$ever_haart == 1, H1, H0)            # <4>
+EIC <- H_obs * (haart_baseline$died - Qstar_obs) +                     # <5>
+       Q1_star - Q0_star - ate                                          # <5>
+
+se  <- sqrt(var(EIC) / n_obs)  # <6>
+
+tibble(
+  ATE      = round(ate, 4),
+  SE       = round(se, 4),
+  CI_lower = round(ate - 1.96 * se, 4),
+  CI_upper = round(ate + 1.96 * se, 4)
+)
+```
+1. Arm-specific clever covariates for updating the counterfactual predictions: $H_1(W) = 1/e(W)$ for the HAART potential outcome, $H_0(W) = -1/(1-e(W))$ for the no-HAART potential outcome
+2. Apply the fluctuation ε on the logit scale to the counterfactual Q predictions; `plogis()` maps back to [0,1] — mortality probability must stay bounded
+3. TMLE substitution estimator: difference in mean targeted counterfactual mortality predictions across the two treatment arms
+4. At each patient's observed treatment value, select the corresponding targeted Q and clever covariate — these are the "observed" residual components of the EIC
+5. EIC for each patient: IPW-weighted residual $(H \cdot (Y - Q^*))$ plus centered substitution component $(Q_1^* - Q_0^* - \hat\psi)$; summing these two pieces is what makes TMLE doubly robust
+6. The EIC-based variance is the semiparametric efficiency bound; `sqrt(var(EIC) / n_obs)` gives the standard error directly from the influence function without bootstrapping
+
+:::{.callout-note}
+## Interpreting the HAART TMLE Result
+
+A positive ATE would suggest that HAART initiation increases the probability of death in this simple point-treatment model. However, this likely reflects **confounding by indication**: patients with more advanced disease (lower CD4 counts) are both more likely to initiate treatment and more likely to die. The baseline snapshot cannot fully capture the time-varying nature of CD4 decline, treatment initiation, and mortality. Chapter 3.9 addresses this with longitudinal TMLE and marginal structural models that properly handle time-varying confounding.
+:::
+
+---
+
+# 11. Summary
+
+:::{.callout-tip}
+## Key Takeaways
+
+- Doubly robust estimators (AIPW, TMLE) combine outcome and treatment models and are consistent if **either** model is correct
+- TMLE is preferred: bounded predictions, plug-in estimation, natural ML integration, and EIC-based inference
+- Doubly robust estimators are the recommended default for point-treatment causal inference in modern epidemiology
+:::
+
+```{r}
+sessionInfo()
+```
+
+---
+
+## Check your understanding
+
+<details>
+<summary><strong>Q1. What does "doubly robust" mean in practice? Does it mean you can ignore model specification entirely?</strong></summary>
+
+No. "Doubly robust" means the estimator is consistent if *either* the treatment model or the outcome model is correctly specified, but not necessarily if both are wrong. It does not give you license to ignore model specification. If both nuisance models are badly misspecified, the estimator can be biased. In practice, you should still try to specify both models as carefully as possible. The double robustness property is an insurance policy, not a substitute for thoughtful modeling.
+
+</details>
+
+<details>
+<summary><strong>Q2. Why does TMLE use a "clever covariate" derived from the propensity score, and what happens if propensity scores are extreme?</strong></summary>
+
+The clever covariate $H(A, W) = A / e(W) - (1 - A) / (1 - e(W))$ is derived from the efficient influence curve for the ATE. It directs the fluctuation of the initial outcome model toward the specific causal parameter of interest, ensuring that the final estimate solves the EIC estimating equation. If propensity scores are extreme (near 0 or 1), the clever covariate becomes very large, which can destabilize the fluctuation step. This is why practical positivity (adequate overlap in propensity score distributions) is important for TMLE just as it is for IPTW.
+
+</details>
+
+<details>
+<summary><strong>Q3. Your TMLE estimate of a risk probability is 0.85. Could AIPW have produced an estimate above 1.0 for the same data?</strong></summary>
+
+Yes. AIPW is a linear estimator that does not enforce the bounds of the parameter space. Because it adds a weighted residual correction to the outcome-model prediction, the resulting estimate can fall outside $[0, 1]$, especially when propensity scores are extreme and the correction term is large. TMLE avoids this by performing its update on the logistic (log-odds) scale and then back-transforming, which guarantees that predicted probabilities remain in $[0, 1]$. This is one of the key practical advantages of TMLE over AIPW.
+
+</details>
+
+---
+
+## What comes next
+
+This chapter presented the theory and mechanics of AIPW and TMLE. Both estimators rely on nuisance models, and the quality of those models directly affects performance. The next chapter introduces Super Learner, the ensemble machine learning tool that makes nuisance estimation flexible and data-adaptive.
+
+---
+
+## Software Implementation (R)
+
+This example demonstrates the **double robustness** property using the `tmle` package. We deliberately misspecify one nuisance model at a time to show that the TMLE estimate remains consistent as long as at least one model is correct.
+
+- Simulate data with a nonlinear confounder–outcome relationship
+- Scenario A: correct $Q$, wrong $g$ → TMLE consistent
+- Scenario B: wrong $Q$, correct $g$ → TMLE consistent
+- Scenario C: both correct → TMLE efficient
+- Falls back to a manual demonstration if `tmle` is unavailable
+
+```{r}
+#| eval: false
+set.seed(1)
+n <- 1000
+W <- rnorm(n)
+A <- rbinom(n, 1, plogis(0.3 * W + 0.2 * W^2))
+Y <- 0.5 * A + sin(W) + rnorm(n, sd = 0.3)  # true ATE = 0.5
+
+if (requireNamespace("tmle", quietly = TRUE)) {
+  library(tmle)
+
+  ## Scenario A: correct Q model, misspecified g (intercept only)
+  fit_a <- tmle(Y = Y, A = A, W = data.frame(W = W),  # <1>
+                Q.SL.library = c("SL.glm", "SL.earth"),  # <2>
+                g.SL.library  = "SL.mean")               # <3>
+  cat("Scenario A (correct Q, wrong g):", round(fit_a$estimates$ATE$psi, 3), "\n")
+
+  ## Scenario B: misspecified Q (intercept only), correct g
+  fit_b <- tmle(Y = Y, A = A, W = data.frame(W = W),
+                Q.SL.library = "SL.mean",                # <4>
+                g.SL.library  = c("SL.glm", "SL.earth"))
+  cat("Scenario B (wrong Q, correct g):", round(fit_b$estimates$ATE$psi, 3), "\n")
+
+  ## Scenario C: both reasonably specified
+  fit_c <- tmle(Y = Y, A = A, W = data.frame(W = W),
+                Q.SL.library = c("SL.glm", "SL.earth"),
+                g.SL.library  = c("SL.glm", "SL.earth"))
+  cat("Scenario C (both correct):      ", round(fit_c$estimates$ATE$psi, 3), "\n")
+  cat("95% CI:", round(fit_c$estimates$ATE$CI, 3), "\n")
+} else {
+  message("Install the 'tmle' package:  install.packages('tmle')")
+}
+```
+1. `tmle()` from the `tmle` package automates all four TMLE steps; `W` must be a `data.frame` (not a matrix or bare vector)
+2. `Q.SL.library`: the Super Learner library for the outcome model $E[Y \mid A, W]$; `SL.earth` adds MARS splines to capture nonlinearity in the outcome
+3. `g.SL.library = "SL.mean"`: deliberately misspecified propensity score using only an intercept-only model (predicts the marginal mean treatment probability for everyone); this tests whether TMLE remains consistent when Q is correct but g is wrong
+4. `Q.SL.library = "SL.mean"`: deliberately misspecified outcome model; tests whether TMLE remains consistent when g is correct but Q is wrong — both Scenarios A and B should give estimates close to the true ATE = 0.5
