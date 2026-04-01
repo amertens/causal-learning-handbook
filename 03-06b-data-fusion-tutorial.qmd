@@ -1,0 +1,467 @@
+---
+title: "Integrating Randomized and Real-World Data"
+subtitle: "A tutorial on ES-CV-TMLE and A-TMLE for data fusion"
+format: html
+---
+
+*Estimated reading time: 45 minutes*
+
+::: {.callout-note}
+## Learning objectives
+- Explain why naive pooling of RCT and observational data is dangerous and characterize the bias it introduces
+- Define the RCT-ATE estimand and state the identification assumptions required to borrow strength from external data
+- Describe the bias-variance tradeoff that governs when external data help versus hurt
+- Apply the ES-CV-TMLE method to data-adaptively select whether to pool RCT and RWD
+- Apply the A-TMLE method for adaptive bias correction when pooling RCT and RWD
+- Compare the two approaches in terms of when each is preferred and interpret their output
+:::
+
+::: {.callout-important}
+## Sources and scope
+This chapter is a tutorial companion to the methodological papers by Dang et al. (2022) and van der Laan, Qiu, and van der Laan (2024). The methods are implemented in the `EScvtmle` and `atmle` R packages. Code examples use simulated data with known ground truth; real applications require careful attention to the identification assumptions discussed below.
+:::
+
+```{r}
+#| include: false
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4,
+  fig.align = "center"
+)
+```
+
+
+# Why This Chapter Matters
+
+[Chapter 3.6](03-06-rwd-meets-rct-hybrid-designs.qmd) introduced the conceptual framework for combining randomized and observational data. This chapter provides the practical implementation, walking through two state-of-the-art TMLE-based methods for data fusion: **ES-CV-TMLE** (Experiment-Selector Cross-Validated TMLE) and **A-TMLE** (Adaptive TMLE).
+
+The promise of data fusion is simple: a small RCT provides internal validity (unbiased treatment effect estimation), while a large observational dataset provides statistical power (more patients, narrower confidence intervals). If we could safely combine them, we would get the best of both worlds --- unbiased estimates with the precision of a much larger study.
+
+The danger is equally simple: if the observational data are biased (due to unmeasured confounding, different standard of care, or population differences), naive pooling imports that bias into the estimate and can produce confidently wrong conclusions.
+
+The two methods in this chapter address this danger in complementary ways:
+
+- **ES-CV-TMLE** uses cross-validation to decide whether to pool at all, selecting the experiment (RCT-only vs. RCT+RWD) that minimizes an estimated bias-squared-plus-variance criterion.
+- **A-TMLE** directly estimates and corrects the bias from pooling, using the highly adaptive lasso to learn the bias structure without pre-specifying its functional form.
+
+Both methods build on the TMLE framework from [Chapter 2.3](02-03-doubly-robust-tmle.qmd) and the Super Learner machinery from [Chapter 2.5](02-05-superlearner.qmd).
+
+
+# The Danger of Naive Pooling
+
+## A motivating scenario
+
+Suppose you have a small RCT of 400 patients comparing a new diabetes drug to standard of care, with a composite cardiovascular event (MACE) as the primary endpoint. The RCT alone yields a risk difference of $-0.7\%$ with a wide 95% CI of $[-2.0\%, 0.5\%]$ --- not statistically significant.
+
+You also have access to a large claims database (e.g., Optum) with 14,000 patients on the same two treatments. Naive pooling --- simply combining the datasets and running TMLE on the merged data --- might yield a tighter CI. But the claims data has unmeasured confounders: patients who received the new drug may have been healthier, more adherent, or under closer monitoring. If these unmeasured factors differ between treatment groups, the observational treatment effect is biased.
+
+The naive pooled estimate might be $-2.5\%$ with a tight CI of $[-3.5\%, -1.5\%]$ --- statistically significant, but *wrong*. The narrow CI gives false confidence in a biased estimate.
+
+## Formalizing the bias
+
+Let $S$ denote the study indicator ($S = 1$ for RCT, $S = 0$ for RWD), $A$ the treatment, $Y$ the outcome, and $W$ baseline covariates. The **pooled-ATE** estimand is:
+
+$$
+\tilde{\Psi}(P_0) = E\big[E(Y \mid W, A = 1) - E(Y \mid W, A = 0)\big]
+$$
+
+This pools the outcome regression across both studies. When the conditional mean outcome differs between studies --- $E(Y_a \mid S = 1, W) \neq E(Y_a \mid W)$ --- the pooled-ATE is biased for the true treatment effect.
+
+The **RCT-ATE** estimand uses only the trial's outcome model but marginalizes over the broader covariate distribution:
+
+$$
+\Psi(P_0) = E_W\big[E(Y \mid S = 1, W, A = 1) - E(Y \mid S = 1, W, A = 0)\big]
+$$
+
+The **bias** is the difference:
+
+$$
+\Psi^{\#}(P_0) = \tilde{\Psi}(P_0) - \Psi(P_0)
+$$
+
+Both ES-CV-TMLE and A-TMLE target the RCT-ATE $\Psi(P_0)$, either by detecting when $\Psi^{\#}$ is large enough to reject the external data (ES-CV-TMLE) or by directly estimating and subtracting $\Psi^{\#}$ (A-TMLE).
+
+
+# Identification Assumptions
+
+To use external data at all, we need:
+
+1. **Mean exchangeability in the trial**: $E(Y_a \mid S = 1, W, A = a) = E(Y_a \mid S = 1, W)$. This holds by randomization.
+
+2. **Positivity of trial enrollment**: $P(S = 1 \mid W) > 0$ for all covariate strata. The RCT must include patients from every subpopulation represented in the RWD. This is the overlap condition between studies.
+
+3. **Positivity of treatment in the trial**: $0 < P(A = 1 \mid S = 1, W) < 1$. This holds by randomization design.
+
+4. **Mean exchangeability across studies** (the critical assumption): $E(Y_a \mid S = 1, W) = E(Y_a \mid W)$. The treatment effect conditional on covariates is the same in the trial and the real-world population. This fails when unmeasured confounders in the RWD affect outcomes differently than in the trial.
+
+Assumption 4 is the one that makes data fusion dangerous. ES-CV-TMLE and A-TMLE are designed to be robust when this assumption fails: they either detect the violation and fall back to the RCT-only estimate, or they estimate and correct the resulting bias.
+
+
+# The Bias-Variance Tradeoff
+
+The fundamental insight behind both methods is that combining RCT and RWD involves a tradeoff:
+
+- **Variance reduction**: Adding more data reduces the variance of the treatment effect estimate. The RWD contributes information about the outcome regression $E(Y \mid W, A)$, which helps predict outcomes more precisely.
+- **Bias introduction**: If the RWD outcome model differs from the RCT's, pooling introduces bias proportional to $\Psi^{\#}$.
+
+The optimal strategy depends on whether the bias is small enough relative to the variance reduction. If $|\Psi^{\#}|^2 < \text{variance reduction from pooling}$, pooling helps. Otherwise, it hurts.
+
+ES-CV-TMLE and A-TMLE handle this tradeoff differently:
+
+| Feature | ES-CV-TMLE | A-TMLE |
+|---------|-----------|--------|
+| Strategy | Select: pool or not? | Correct: estimate and subtract bias |
+| Selection criterion | Cross-validated bias$^2$ + variance | Adaptive working model via HAL |
+| When external data have small, simple bias | Pools (gains efficiency) | Corrects bias (gains efficiency) |
+| When external data have large bias | Rejects external data | Subtracts bias (falls back to RCT-like width) |
+| When external data have small but complex bias | May not detect it | Still gains efficiency (key advantage) |
+| Negative control outcomes | Supported (improves bias detection) | Not currently implemented |
+
+
+# Setup: Installing the Packages
+
+Both packages are available on GitHub. Install them before proceeding:
+
+```{r}
+#| eval: false
+# Install ES-CV-TMLE
+remotes::install_github("Lauren-EylerDang/EScvtmle")
+
+# Install A-TMLE (requires sl3 from tlverse)
+remotes::install_github("tlverse/sl3")
+remotes::install_github("tq21/atmle")
+```
+
+```{r}
+#| include: false
+#| eval: false
+library(EScvtmle)
+library(atmle)
+```
+
+
+# Method 1: ES-CV-TMLE (Experiment-Selector CV-TMLE)
+
+## How it works
+
+ES-CV-TMLE uses V-fold cross-validation to decide whether pooling helps or hurts (Dang et al. 2022). The algorithm proceeds as follows:
+
+1. **Split** the combined (RCT + RWD) dataset into V cross-validation folds.
+2. **In each training fold**, fit outcome regressions, treatment mechanisms, and study enrollment models. Compute the ATE under two "experiments": (a) RCT data only, (b) RCT + RWD pooled.
+3. **Evaluate** a selection criterion for each experiment: estimated bias$^2$ + variance. The bias is estimated from the discrepancy between the RCT-only and pooled outcome models. Optionally, a negative control outcome (NCO) can sharpen the bias estimate.
+4. **Select** the experiment that minimizes the criterion in each fold.
+5. **In the validation fold**, estimate the ATE using TMLE for the selected experiment.
+6. **Average** across validation folds to produce the final estimate and confidence interval.
+
+The cross-validation is critical: it prevents the selection from overfitting to the training data. The proportion of folds that select pooling provides a useful diagnostic --- if most folds select RCT-only, the external data are likely biased.
+
+## Application: WASH Benefits example
+
+The `EScvtmle` package includes data from the WASH Benefits Bangladesh trial, which studied the effect of sanitation interventions on child growth (length-for-age Z-scores). The dataset includes:
+
+- **Study 1** ($S = 1$): A random sample of 300 observations from the RCT (150 sanitation, 150 control)
+- **Study 2** ($S = 0$, unbiased): Another random sample of 300 from the remaining RCT data, used as an unbiased external dataset
+- **Study 3** ($S = 0$, biased): An observational sample where "treatment" is having an improved latrine at baseline --- likely confounded by socioeconomic status
+
+This setup lets us test ES-CV-TMLE under both unbiased and biased external data.
+
+### Unbiased external data
+
+```{r}
+#| eval: false
+library(EScvtmle)
+
+data(wash)
+
+# Use studies 1 (RCT) and 2 (unbiased external)
+dat_unbiased <- wash[wash$study %in% c(1, 2), ]
+dat_unbiased$study[dat_unbiased$study == 2] <- 0
+
+set.seed(2026)
+results_unbiased <- ES.cvtmle(
+  txinrwd = TRUE,
+  data = dat_unbiased,
+  study = "study",
+  covariates = c("aged", "sex", "momedu", "hfiacat"),
+  treatment_var = "intervention",
+  treatment = 1,
+  outcome = "laz",
+  NCO = "Nlt18scale",
+  pRCT = 0.5,
+  V = 10,
+  Q.SL.library = c("SL.glm", "SL.mean"),
+  g.SL.library = c("SL.glm"),
+  Q.discreteSL = TRUE,
+  g.discreteSL = TRUE,
+  family = "gaussian",
+  family_nco = "gaussian",
+  fluctuation = "logistic",
+  comparisons = list(c(1), c(1, 0)),
+  adjustnco = FALSE,
+  target.gwt = TRUE
+)
+
+# Results
+print(results_unbiased)
+```
+
+Key arguments:
+
+- `txinrwd = TRUE`: The active treatment is available in the external data.
+- `comparisons = list(c(1), c(1, 0))`: Compare two experiments: RCT only ($S = 1$) vs. RCT + RWD ($S \in \{1, 0\}$).
+- `NCO = "Nlt18scale"`: Negative control outcome (household members $\leq 18$) --- should not be affected by sanitation intervention.
+- `V = 10`: 10-fold cross-validation.
+
+With unbiased external data, we expect most folds to select pooling, producing a narrower CI than RCT-only.
+
+### Biased external data
+
+```{r}
+#| eval: false
+# Use studies 1 (RCT) and 3 (biased external)
+dat_biased <- wash[wash$study %in% c(1, 3), ]
+dat_biased$study[dat_biased$study == 3] <- 0
+
+set.seed(2026)
+results_biased <- ES.cvtmle(
+  txinrwd = TRUE,
+  data = dat_biased,
+  study = "study",
+  covariates = c("aged", "sex", "momedu", "hfiacat"),
+  treatment_var = "intervention",
+  treatment = 1,
+  outcome = "laz",
+  NCO = "Nlt18scale",
+  pRCT = 0.5,
+  V = 10,
+  Q.SL.library = c("SL.glm", "SL.mean"),
+  g.SL.library = c("SL.glm"),
+  Q.discreteSL = TRUE,
+  g.discreteSL = TRUE,
+  family = "gaussian",
+  family_nco = "gaussian",
+  fluctuation = "logistic",
+  comparisons = list(c(1), c(1, 0)),
+  adjustnco = TRUE,
+  target.gwt = TRUE
+)
+
+print(results_biased)
+```
+
+With biased external data, we expect most folds to select RCT-only. The `adjustnco = TRUE` flag incorporates the negative control outcome into the bias estimate, which can improve the method's ability to detect bias.
+
+### Interpreting ES-CV-TMLE output
+
+The output includes:
+
+- **`ATE`**: Point estimates under the bias$^2$+variance selector (`b2v`) and the NCO-adjusted selector (`ncobias`).
+- **`CI`**: 95% confidence intervals.
+- **`proportionselected`**: The fraction of cross-validation folds that selected each experiment. A high proportion selecting RCT-only signals that the external data are likely biased.
+- **`g`**: Propensity score values --- check for near-zero values indicating positivity violations.
+
+
+# Method 2: A-TMLE (Adaptive TMLE)
+
+## How it works
+
+A-TMLE takes a different approach: instead of deciding whether to pool, it always pools but adaptively estimates and corrects the bias (van der Laan, Qiu, and van der Laan 2024). The key innovation is that efficiency gains depend on the **complexity** of the bias, not just its magnitude.
+
+The algorithm:
+
+1. **Estimate the pooled-ATE** $\tilde{\Psi}$ using standard TMLE on the combined RCT + RWD data.
+2. **Estimate the bias** $\Psi^{\#}$ using a flexible working model. A-TMLE uses the highly adaptive lasso (HAL) to learn the bias structure data-adaptively, without pre-specifying its functional form.
+3. **Correct**: The final estimate is $\hat{\Psi} = \hat{\tilde{\Psi}} - \hat{\Psi}^{\#}$.
+
+The targeting step ensures the final estimator solves the efficient influence function equation, providing valid inference (confidence intervals and p-values) regardless of whether the bias working model is correctly specified.
+
+**Why HAL?** The highly adaptive lasso can approximate any cadlag function, so it can capture complex bias patterns (interactions, nonlinearities) without the analyst having to specify them. If the bias is zero, HAL shrinks $\hat{\Psi}^{\#}$ toward zero, and the estimator achieves the efficiency of pooling. If the bias is large, $\hat{\Psi}^{\#}$ captures it, and the estimator falls back toward the RCT-only estimate.
+
+## Application: Simulated RCT + RWD
+
+The `atmle` package includes a sample dataset for demonstration:
+
+```{r}
+#| eval: false
+library(atmle)
+library(sl3)
+
+# Load built-in sample data
+data(sample_data)
+
+# Define Super Learner library
+sl_lib <- list(
+  Lrnr_glm$new(),
+  Lrnr_xgboost$new()
+)
+
+# Standard (non-adaptive) TMLE for comparison
+set.seed(2026)
+tmle_res <- nonparametric(
+  data = mydata,
+  S = "S",
+  W = c("W1", "W2", "W3", "W4"),
+  A = "A",
+  Y = "Y",
+  family = "gaussian",
+  Pi_method = sl_lib,
+  g_method = "glm",
+  Q_method = sl_lib,
+  Q_pooling = TRUE,
+  v_folds = 5
+)
+
+# A-TMLE with HAL-based bias correction
+set.seed(2026)
+atmle_res <- atmle(
+  data = mydata,
+  S = "S",
+  W = c("W1", "W2", "W3", "W4"),
+  A = "A",
+  Y = "Y",
+  family = "gaussian",
+  theta_method = sl_lib,
+  Pi_method = sl_lib,
+  g_method = sl_lib,
+  theta_tilde_method = sl_lib,
+  bias_working_model = "HAL",
+  pooled_working_model = "HAL",
+  enumerate_basis_args = list(
+    max_degree = 3,
+    smoothness_orders = 1
+  ),
+  v_folds = 5
+)
+```
+
+Key arguments:
+
+- `S = "S"`: Study indicator (1 = RCT, 0 = RWD).
+- `theta_method`, `Pi_method`, `g_method`, `theta_tilde_method`: Super Learner libraries for the outcome regression, study enrollment score, treatment mechanism, and marginal outcome, respectively.
+- `bias_working_model = "HAL"`: Use the highly adaptive lasso to learn the bias structure.
+- `enumerate_basis_args`: Control the complexity of the HAL basis functions (higher `max_degree` allows more complex bias patterns).
+
+### Comparing results
+
+```{r}
+#| eval: false
+# Compare standard TMLE vs A-TMLE
+cat("Standard TMLE (pooled, no bias correction):\n")
+cat("  Estimate:", round(tmle_res$psi_pooled_W, 4), "\n")
+cat("  95% CI: [", round(tmle_res$lower_pooled_W, 4), ",",
+    round(tmle_res$upper_pooled_W, 4), "]\n\n")
+
+cat("A-TMLE (bias-corrected):\n")
+cat("  Pooled-ATE estimate:", round(atmle_res$psi_tilde_est, 4), "\n")
+cat("  Estimated bias:", round(atmle_res$psi_pound_est, 4), "\n")
+cat("  Corrected estimate:", round(atmle_res$est, 4), "\n")
+cat("  95% CI: [", round(atmle_res$lower, 4), ",",
+    round(atmle_res$upper, 4), "]\n")
+```
+
+### Interpreting A-TMLE output
+
+- **`est`**: The bias-corrected ATE estimate $\hat{\Psi} = \hat{\tilde{\Psi}} - \hat{\Psi}^{\#}$.
+- **`psi_tilde_est`**: The pooled-ATE before bias correction.
+- **`psi_pound_est`**: The estimated bias. If this is near zero, pooling was safe. If it is large, A-TMLE corrected for substantial external data bias.
+- **`lower`, `upper`**: 95% confidence interval based on the efficient influence curve.
+- **`eic`**: The efficient influence curve values, useful for diagnostics.
+
+
+# When to Use Which Method
+
+Both methods are valid approaches to data fusion. The choice depends on the setting:
+
+**Prefer ES-CV-TMLE when:**
+
+- You have a **negative control outcome** available. ES-CV-TMLE can use NCOs to improve bias detection, which is especially valuable when the bias is subtle.
+- The decision is **binary**: either the external data are trustworthy or they are not. ES-CV-TMLE makes this choice explicitly.
+- You want a **transparent** decision that is easy to communicate to regulators: "the algorithm selected RCT-only in 8 of 10 folds, indicating the external data are biased."
+
+**Prefer A-TMLE when:**
+
+- The bias may be **small but complex** (e.g., it varies across covariate strata). A-TMLE can still gain efficiency even with complex bias patterns, because it learns the bias function rather than testing a global null.
+- You want to **always use the external data** to improve precision, rather than making a binary pool/reject decision.
+- The RCT is **very small** and you need every bit of efficiency gain. A-TMLE's continuous bias correction can extract more precision than ES-CV-TMLE's binary selection.
+
+In practice, running both methods and comparing their results provides a useful robustness check. If they agree, you can be more confident in the conclusions. If they disagree substantially, the bias structure deserves closer investigation.
+
+
+# Practical Recommendations
+
+Based on the methodological literature and the FIORD meeting recommendations (Qiu 2024), we highlight several practical considerations:
+
+## Pre-processing: matching for overlap
+
+Before applying either method, ensure that the RCT and RWD populations have adequate covariate overlap. A recommended strategy:
+
+1. **Apply RCT inclusion/exclusion criteria** to the RWD to ensure basic comparability.
+2. **Estimate the trial enrollment score** $\hat{\Pi}(1 \mid W) = \hat{P}(S = 1 \mid W)$ using the combined data.
+3. **Match** each RCT patient with $K$ external patients on the enrollment score (e.g., $K = 3$ nearest-neighbor matching).
+4. **Within the matched sample**, estimate the RWD propensity score and optionally apply additional matching.
+
+This two-stage matching makes the trial enrollment score and the RWD propensity score approximately constant across the analysis sample, which improves the finite-sample robustness of both ES-CV-TMLE and A-TMLE.
+
+## Diagnostics
+
+After fitting either method, check:
+
+- **Propensity score overlap**: Plot $\hat{P}(S = 1 \mid W)$ --- if the RCT and RWD populations have minimal overlap, the external data cannot help and may introduce instability.
+- **Estimated bias magnitude**: A-TMLE reports $\hat{\Psi}^{\#}$ directly. For ES-CV-TMLE, the proportion of folds selecting RCT-only is a proxy for bias severity.
+- **Influence function values**: Extreme values suggest near-positivity violations or highly influential observations.
+
+## Sensitivity analysis
+
+Even with these methods, the analyst should report:
+
+- The **RCT-only estimate** as a benchmark. If the data-fusion estimate deviates substantially from the RCT-only result, investigate why.
+- Results under **different Super Learner libraries** to assess model dependence. For guidance on learner library sensitivity, see [Chapter 3.12](03-12-sensitivity-analysis.qmd).
+- The **proportion of external data retained** after matching, and how results change with stricter or looser matching thresholds.
+
+
+# Summary
+
+Data fusion is a powerful tool for improving the precision of treatment effect estimates, but it requires methods that protect against bias from unmeasured confounding in the external data. ES-CV-TMLE and A-TMLE provide complementary approaches:
+
+- **ES-CV-TMLE** (Dang et al. 2022) uses cross-validated experiment selection to make a data-adaptive choice between RCT-only and pooled analysis, minimizing an estimated bias$^2$+variance criterion.
+- **A-TMLE** (van der Laan, Qiu, and van der Laan 2024) directly estimates and corrects the bias using the highly adaptive lasso, gaining efficiency whenever the bias is learnable regardless of its complexity.
+
+Both methods build on the TMLE framework, inherit its double robustness and asymptotic efficiency properties, and provide valid inference through influence-curve-based standard errors. They represent the current state of the art for principled integration of randomized and real-world evidence.
+
+
+---
+
+## Check your understanding
+
+<details>
+<summary><strong>Q1. Why is naive pooling of RCT and RWD dangerous, even when the RWD sample is much larger?</strong></summary>
+
+Because the observational data may contain unmeasured confounding that biases the treatment effect estimate. Naive pooling imports this bias into the combined estimate. The larger RWD sample dominates the pooled analysis, so the bias from the RWD overwhelms the unbiased signal from the small RCT. The resulting confidence interval is narrow (because of the large sample size) but centered on a biased estimate --- producing *confident wrong answers*.
+
+</details>
+
+<details>
+<summary><strong>Q2. What is the key difference between the ES-CV-TMLE and A-TMLE strategies?</strong></summary>
+
+ES-CV-TMLE makes a **binary decision**: pool or do not pool, based on a cross-validated bias$^2$+variance criterion. A-TMLE takes a **continuous approach**: it always pools but estimates and subtracts the bias using a flexible working model (HAL). A-TMLE can gain efficiency even when the bias is small but complex (varying across covariate strata), whereas ES-CV-TMLE may fail to detect such bias and either incorrectly pool or conservatively reject.
+
+</details>
+
+<details>
+<summary><strong>Q3. Why is the trial enrollment score $P(S = 1 \mid W)$ important for data fusion?</strong></summary>
+
+The trial enrollment score determines the overlap between RCT and RWD populations. If $P(S = 1 \mid W) \approx 0$ for some covariate strata, those strata have no representation in the RCT, so the treatment effect for those patients cannot be learned from the trial. Borrowing strength from RWD for these strata requires the (untestable) assumption that the treatment effect is the same in the trial and the real world. Making the enrollment score approximately constant through matching reduces dependence on this assumption and improves finite-sample performance.
+
+</details>
+
+---
+
+## Sources and further reading
+
+- Dang LE, Tager I, Petersen ML (2022). A cross-validated targeted maximum likelihood estimator for data-adaptive experiment selection applied to the augmentation of RCT control arms with external data. *arXiv:2210.05802*.
+- van der Laan L, Qiu S, van der Laan MJ (2024). Adaptive-TMLE for the average treatment effect based on randomized controlled trial augmented with real-world data. *arXiv:2405.07186*. Published in *Journal of Causal Inference*, 2025.
+- Qiu S (2024). Optimizing data integration with an estimator-robust design. Presented at the FIORD meeting, Bethesda, MD, November 2024.
+- `EScvtmle` R package: [GitHub](https://github.com/Lauren-EylerDang/EScvtmle)
+- `atmle` R package: [GitHub](https://github.com/tq21/atmle)
