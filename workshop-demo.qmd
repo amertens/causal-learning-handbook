@@ -1,6 +1,6 @@
 ---
-title: "G-Computation Workshop Demo"
-subtitle: "Interactive code cells powered by WebR"
+title: "Interactive Workshop Demo"
+subtitle: "Causal inference code cells powered by WebR"
 format: html
 engine: knitr
 filters:
@@ -9,6 +9,11 @@ webr:
   show-startup-message: false
   packages:
     - ggplot2
+    - lmtp
+    - SuperLearner
+  repos:
+    - https://nt-williams.r-universe.dev
+    - https://imbs-hl.r-universe.dev
 ---
 
 This is a proof-of-concept demonstrating interactive R code cells in the browser.
@@ -98,12 +103,91 @@ hist(dat$ps[dat$A == 0], breaks = 20, main = "Control",
 
 ---
 
+## Beyond G-Computation: LMTP for Modified Treatment Policies
+
+The `lmtp` package is available in WebR via [r-universe](https://nt-williams.r-universe.dev). This means you can run modified treatment policy estimators directly in the browser.
+
+### Define a shift intervention and estimate its effect
+
+```{webr-r}
+library(lmtp)
+
+# Simulate longitudinal data (2 time points)
+set.seed(42)
+n <- 200
+W <- rnorm(n)
+A_1 <- rnorm(n, mean = 2 + 0.3 * W)
+A_2 <- rnorm(n, mean = 2 + 0.3 * W + 0.2 * A_1)
+Y <- rbinom(n, 1, plogis(-2 + 0.5 * A_1 + 0.5 * A_2 + 0.3 * W))
+
+dat_lmtp <- data.frame(W = W, A_1 = A_1, A_2 = A_2, Y = Y)
+
+# Define a shift: decrease treatment by 0.5 at each time point
+shift_down <- function(data, trt) {
+  data[[trt]] - 0.5
+}
+
+# Estimate effect of the shift vs natural value
+fit <- lmtp_tmle(
+  data = dat_lmtp,
+  trt = c("A_1", "A_2"),
+  outcome = "Y",
+  baseline = "W",
+  shift = shift_down,
+  mtp = TRUE,
+  outcome_type = "binomial",
+  learners_outcome = c("SL.glm", "SL.mean"),
+  learners_trt = c("SL.glm", "SL.mean"),
+  folds = 2
+)
+
+fit
+```
+
+### Try different shift magnitudes
+
+Edit the shift function to explore how the effect changes. What happens with a larger shift (e.g., -1.0)?
+
+```{webr-r}
+# Try a different shift magnitude
+shift_large <- function(data, trt) {
+  data[[trt]] - 1.0
+}
+
+fit_large <- lmtp_tmle(
+  data = dat_lmtp,
+  trt = c("A_1", "A_2"),
+  outcome = "Y",
+  baseline = "W",
+  shift = shift_large,
+  mtp = TRUE,
+  outcome_type = "binomial",
+  learners_outcome = c("SL.glm", "SL.mean"),
+  learners_trt = c("SL.glm", "SL.mean"),
+  folds = 2
+)
+
+# Compare
+cat("Small shift (-0.5):", round(fit$theta, 4), "\n")
+cat("Large shift (-1.0):", round(fit_large$theta, 4), "\n")
+```
+
+---
+
 ## How this works
 
 - Code runs entirely **in your browser** via WebAssembly (no server needed)
 - You can edit any code cell and re-run it
 - Results update in real time
-- Base R and select packages (ggplot2, etc.) are available
-- Complex packages (tmle, SuperLearner, lmtp) are not yet available in WebR
+- Packages load from [r-universe](https://r-universe.dev) WebAssembly binaries --- including `lmtp`, `SuperLearner`, and the `tlverse` ecosystem
+- For the full static handbook with all chapters and pre-computed results, see the [main site](../index.html)
 
-For the full static handbook with all chapters and pre-computed results, see the [main site](../index.html).
+## Available packages for interactive exercises
+
+| Package | Available | Source |
+|---------|-----------|--------|
+| Base R, ggplot2, dplyr | Yes | Standard WebR repo |
+| `SuperLearner` | Yes | CRAN via WebR |
+| `lmtp` | Yes | `nt-williams.r-universe.dev` |
+| `sl3`, `tmle3`, `hal9001` | Yes | `tlverse.r-universe.dev` |
+| `tmle` (classic) | Yes | CRAN via WebR |
