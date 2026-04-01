@@ -128,6 +128,7 @@ Y <- dat$y
 Let's verify the nonlinearity is real by comparing a simple GLM to the truth.
 
 ```{r}
+#| interactive: true
 glm_fit <- glm(y ~ age + bmi + sbp + smoker + cvd, family = binomial, data = dat)
 
 dat <- dat %>%
@@ -159,6 +160,7 @@ Each learner is a function that takes training data and returns a fitted model, 
 ```{r}
 #| message: false
 #| warning: false
+#| interactive: true
 
 # Learner 1: Simple logistic regression (main terms only)
 fit_glm <- function(Y_train, X_train) {
@@ -204,6 +206,7 @@ predict_rf <- function(model, X_new) {
 ## 4.2 Create cross-validation folds
 
 ```{r}
+#| interactive: true
 V <- 10  # number of folds
 fold_ids <- sample(rep(1:V, length.out = n))
 
@@ -215,6 +218,7 @@ table(fold_ids)
 This is the core of the algorithm: for each fold, train on the remaining data and predict on the held-out fold.
 
 ```{r}
+#| interactive: true
 # Collect learner info
 learners <- list(
   list(name = "GLM",    fit = fit_glm,   predict = predict_glm),
@@ -250,6 +254,7 @@ for (v in 1:V) {
 Let's inspect the cross-validated predictions.
 
 ```{r}
+#| interactive: true
 head(Z)
 ```
 
@@ -264,6 +269,7 @@ Every prediction in the matrix $\mathbf{Z}$ was made when the corresponding obse
 Before combining, let's see how each individual learner performs.
 
 ```{r}
+#| interactive: true
 # Cross-validated MSE (Brier score for binary outcomes)
 cv_risk <- colMeans((Y - Z)^2)
 cv_risk
@@ -275,6 +281,7 @@ cv_logloss
 ```
 
 ```{r}
+#| interactive: true
 tibble(
   Learner = names(cv_risk),
   `CV MSE (Brier)` = round(cv_risk, 4),
@@ -296,6 +303,7 @@ The metalearner finds the optimal weighted combination of the candidates. We use
 The non-negativity constraint ensures that no learner gets a negative weight (which would mean *anti-correlating* with the outcome — hard to interpret and unstable in practice).
 
 ```{r}
+#| interactive: true
 library(nnls)
 
 nnls_fit <- nnls(Z, Y)
@@ -312,6 +320,7 @@ These are the Super Learner weights. Each weight tells you how much the ensemble
 ## 4.6 Refit on full data and form the ensemble
 
 ```{r}
+#| interactive: true
 # Refit each learner on the full dataset
 full_models <- lapply(learners, function(l) l$fit(Y, W))
 
@@ -330,6 +339,7 @@ head(sl_predictions)
 ## 4.7 Compare the ensemble to individual learners
 
 ```{r}
+#| interactive: true
 # Cross-validated predictions from the SL ensemble
 sl_cv_preds <- Z %*% alpha
 
@@ -399,6 +409,7 @@ When Super Learner predictions feed into TMLE or AIPW, we need well-calibrated *
 Now that you understand every step, let's see how the `SuperLearner` package does the same thing in a few lines.
 
 ```{r}
+#| interactive: true
 library(SuperLearner)
 
 set.seed(2026)
@@ -431,6 +442,7 @@ sl_fit
 Compare the package output to our hand-coded version:
 
 ```{r}
+#| interactive: true
 tibble(
   Learner = c("GLM", "Mean", "LASSO", "RF"),
   `Hand-coded weight` = round(alpha, 4),
@@ -469,6 +481,7 @@ Super Learner allows different **loss functions**, which define what "best predi
 - **Recommended for nuisance functions in causal inference** (both propensity scores and binary outcome regressions)
 
 ```{r}
+#| interactive: true
 sl_loglik <- SuperLearner(
   Y = Y,
   X = X_df,
@@ -523,6 +536,7 @@ The log-likelihood metalearner is almost always the right choice for binary nuis
 ## 8.1 What learners are available?
 
 ```{r}
+#| interactive: true
 # List all built-in SL wrappers
 listWrappers("SL")
 ```
@@ -532,6 +546,7 @@ listWrappers("SL")
 A powerful feature of Super Learner is that you can include **multiple versions of the same algorithm** with different tuning parameters. Rather than tuning each learner separately, you let the metalearner figure out which version is best.
 
 ```{r}
+#| interactive: true
 # Custom random forest with different mtry values
 SL.ranger.mtry2 <- function(..., mtry = 2) SL.ranger(..., mtry = mtry)  # <1>
 SL.ranger.mtry4 <- function(..., mtry = 4) SL.ranger(..., mtry = mtry)  # <1>
@@ -604,6 +619,7 @@ SL_lib_screen <- list(
 How do we know if Super Learner is actually better than its best component? The `CV.SuperLearner` function adds an **outer layer** of cross-validation to produce an honest estimate of Super Learner's performance.
 
 ```{r}
+#| interactive: true
 set.seed(2026)
 
 cv_sl <- CV.SuperLearner(
@@ -619,6 +635,7 @@ summary(cv_sl)
 ```
 
 ```{r}
+#| interactive: true
 plot(cv_sl) +
   theme_minimal() +
   labs(
@@ -723,6 +740,7 @@ round(coef(Q_sl), 4)
 ## 10.3 Generate predictions for TMLE
 
 ```{r}
+#| interactive: true
 logit <- function(p) log(p / (1 - p))
 expit <- function(x) 1 / (1 + exp(-x))
 
@@ -753,6 +771,7 @@ cat("G-computation ATE (SL, before targeting):", round(gcomp_ate, 4), "\n")
 This is the same fluctuation step from [Chapter 2.3](02-03-doubly-robust-tmle.qmd), now using Super Learner for the initial estimates.
 
 ```{r}
+#| interactive: true
 # Clever covariate
 H1 <- 1 / ps_hat
 H0 <- -1 / (1 - ps_hat)
@@ -781,6 +800,7 @@ cat("True ATE:          ", round(true_ate, 4), "\n")
 ## 10.5 Inference via the efficient influence curve
 
 ```{r}
+#| interactive: true
 Q_star_obs <- ifelse(W_sim$A == 1, Q1_star, Q0_star)
 
 EIC <- H_obs * (W_sim$Y - Q_star_obs) + Q1_star - Q0_star - tmle_ate

@@ -94,6 +94,7 @@ We model the probability of receiving treatment given covariates.
 In practice, one might use logistic regression, SuperLearner, or other ML. Here we start with logistic regression for clarity.
 
 ```{r}
+#| interactive: true
 ps_mod <- glm(ever_haart ~ age + sex + cd4_sqrt_baseline, family = binomial, data = dat)
 broom::tidy(ps_mod, conf.int = TRUE) |> knitr::kable(digits = 3, caption = "Propensity score model coefficients")
 
@@ -112,6 +113,7 @@ dat %>%
 We can visualize the propensity score distribution.
 
 ```{r}
+#| interactive: true
 ggplot(dat, aes(x = ps, fill = factor(ever_haart))) +
   geom_density(alpha = 0.4) +
   labs(
@@ -144,6 +146,7 @@ As a rule of thumb, be concerned if propensity scores for either group pile up n
 **Definition.** Unstabilized weights are the simplest form of IPTW weights. For each individual, the weight is the inverse of the probability of receiving the treatment they actually received: for the treated ($A = 1$), $w_i = 1 / e(W_i)$; for the untreated ($A = 0$), $w_i = 1 / (1 - e(W_i))$. These weights create a pseudo-population where treatment is independent of measured confounders, but they can be highly variable when some propensity scores are close to 0 or 1.
 
 ```{r}
+#| interactive: true
 dat <- dat %>%
   mutate(
     w_ipw = if_else(ever_haart == 1, 1 / ps, 1 / (1 - ps))
@@ -188,6 +191,7 @@ In epidemiologic practice, **often prefer stabilized weights** for the Horvitz-T
 :::
 
 ```{r}
+#| interactive: true
 pA <- mean(dat$ever_haart)
 
 dat <- dat %>%
@@ -213,6 +217,7 @@ There are several equivalent ways to use the weights.
 Estimated risk under treatment
 
 ```{r}
+#| interactive: true
 risk1_ipw <- with(dat, sum(sw_ipw * died * (ever_haart == 1)) / sum(sw_ipw * (ever_haart == 1)))
 risk0_ipw <- with(dat, sum(sw_ipw * died * (ever_haart == 0)) / sum(sw_ipw * (ever_haart == 0)))
 
@@ -265,6 +270,7 @@ Interpretation
 We can compare the IPTW ATE to the g computation ATE from the previous chapter.
 
 ```{r}
+#| interactive: true
 # g computation
 g_mod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline, family = binomial, data = dat)
 p1_g <- predict(g_mod, newdata = dat %>% mutate(ever_haart = 1), type = "response")
@@ -304,6 +310,7 @@ To assess positivity, plot propensity score densities by treatment group (as in 
 ### 8.2 Check weights
 
 ```{r}
+#| interactive: true
 dat %>%
   summarize(
     min_w = min(sw_ipw),
@@ -330,6 +337,7 @@ When you see extreme weights, consider: (1) improving your propensity score mode
 You can truncate weights at a chosen percentile, for example the 1st and 99th percentiles.
 
 ```{r}
+#| interactive: true
 lower <- quantile(dat$sw_ipw, 0.01)
 upper <- quantile(dat$sw_ipw, 0.99)
 

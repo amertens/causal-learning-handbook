@@ -159,6 +159,7 @@ dat <- tibble(age, bmi, hba1c, cvd, egfr, statin, A, Y)
 We compute the true ATE from the data-generating process:
 
 ```{r}
+#| interactive: true
 # True potential outcomes from the structural model
 p1_true <- plogis(-3.2 + -0.40 * 1 + 0.04 * (age - 62) + 0.02 * (bmi - 31) +
                     0.10 * (hba1c - 8.2) + 1.00 * cvd + -0.01 * (egfr - 80) +
@@ -179,6 +180,7 @@ cat("True risk under sulfonylurea: ", round(mean(p0_true), 4), "\n")
 ### Inspect the data
 
 ```{r}
+#| interactive: true
 dat %>%
   group_by(A) %>%
   summarise(
@@ -205,6 +207,7 @@ Notice the imbalances: dapagliflozin patients are younger, have higher eGFR, and
 We start with what many analysts would try first: a simple comparison of MACE rates by treatment group. This establishes the baseline from which all other methods improve.
 
 ```{r}
+#| interactive: true
 # Unadjusted risk difference
 risk_A1 <- mean(dat$Y[dat$A == 1])
 risk_A0 <- mean(dat$Y[dat$A == 0])
@@ -217,6 +220,7 @@ cat("True ATE:                  ", round(true_ate, 4), "\n")
 ```
 
 ```{r}
+#| interactive: true
 # Unadjusted logistic regression
 naive_mod <- glm(Y ~ A, family = binomial, data = dat)
 broom::tidy(naive_mod, conf.int = TRUE) |> knitr::kable(digits = 3, caption = "Unadjusted logistic regression coefficients")
@@ -237,6 +241,7 @@ G-computation directly implements the identification formula by modeling $E[Y \m
 **Step 1: Fit the Outcome Model.** Fit a model for $E[Y \mid A, W]$, the expected outcome given treatment and confounders. This model will be used to predict what would happen to each patient under each treatment scenario.
 
 ```{r}
+#| interactive: true
 # Parametric outcome model (logistic regression)
 # We include main effects and key interactions
 q_mod <- glm(Y ~ A + age + bmi + hba1c + cvd + egfr + statin +
@@ -247,6 +252,7 @@ q_mod <- glm(Y ~ A + age + bmi + hba1c + cvd + egfr + statin +
 **Step 2: Predict Counterfactual Outcomes.** Ask: "What would this patient's outcome be if they received dapagliflozin? And if they received sulfonylurea?" We generate these predictions for *every* patient, regardless of what they actually received.
 
 ```{r}
+#| interactive: true
 # Create counterfactual datasets
 dat1 <- dat %>% mutate(A = 1)
 dat0 <- dat %>% mutate(A = 0)
@@ -259,6 +265,7 @@ Q0 <- predict(q_mod, newdata = dat0, type = "response")
 **Step 3: Standardize (Average Over the Population).** Average the predicted outcomes across all patients. This implements the G-computation formula: $E_W[E[Y \mid A=a, W]]$.
 
 ```{r}
+#| interactive: true
 gcomp_risk1 <- mean(Q1)
 gcomp_risk0 <- mean(Q0)
 gcomp_ate   <- gcomp_risk1 - gcomp_risk0
@@ -306,6 +313,7 @@ IPTW takes a different approach: instead of modeling the outcome, it models trea
 **Step 1: Estimate the Propensity Score.** The propensity score $g(W) = P(A = 1 \mid W)$ answers: given a patient's covariates, how likely were they to receive dapagliflozin? We use this to reweight the data so that treatment looks "as-if-randomized."
 
 ```{r}
+#| interactive: true
 # Propensity score model
 g_mod <- glm(A ~ age + bmi + hba1c + cvd + egfr + statin +
                I(age^2) + age:cvd,
@@ -321,6 +329,7 @@ summary(dat$ps)
 ### Step 2: Assess propensity score overlap
 
 ```{r}
+#| interactive: true
 ggplot(dat, aes(x = ps, fill = factor(A, labels = c("Sulfonylurea", "Dapagliflozin")))) +
   geom_density(alpha = 0.45) +
   labs(
@@ -338,6 +347,7 @@ Good overlap means every type of patient has some chance of getting either drug.
 ### Step 3: Construct stabilized weights
 
 ```{r}
+#| interactive: true
 # Marginal treatment probability
 p_A <- mean(dat$A)
 
@@ -353,6 +363,7 @@ dat <- dat %>%
 ### Step 4: Diagnose weights
 
 ```{r}
+#| interactive: true
 # Weight diagnostics
 dat %>%
   group_by(A) %>%
@@ -369,6 +380,7 @@ dat %>%
 ```
 
 ```{r}
+#| interactive: true
 # Weight distribution plot
 ggplot(dat, aes(x = sw, fill = factor(A, labels = c("Sulfonylurea", "Dapagliflozin")))) +
   geom_histogram(bins = 50, alpha = 0.6, position = "identity") +
@@ -392,6 +404,7 @@ ggplot(dat, aes(x = sw, fill = factor(A, labels = c("Sulfonylurea", "Dapaglifloz
 ### Step 5: Check covariate balance after weighting
 
 ```{r}
+#| interactive: true
 # Standardized mean differences: unweighted vs weighted
 compute_smd <- function(data, var, trt, weights = NULL) {
   if (is.null(weights)) weights <- rep(1, nrow(data))
@@ -436,6 +449,7 @@ The dashed line at 0.1 is a common threshold. After weighting, all covariates sh
 ### Step 6: Estimate the ATE
 
 ```{r}
+#| interactive: true
 # Hajek (ratio) estimator with stabilized weights
 risk1_iptw <- with(dat, sum(sw * Y * (A == 1)) / sum(sw * (A == 1)))
 risk0_iptw <- with(dat, sum(sw * Y * (A == 0)) / sum(sw * (A == 0)))
@@ -452,6 +466,7 @@ cat("True ATE:                 ", round(true_ate, 4), "\n")
 If weights are extreme, truncation can improve stability at the cost of a small amount of bias:
 
 ```{r}
+#| interactive: true
 # Truncate at 1st and 99th percentiles
 trunc_lower <- quantile(dat$sw, 0.01)
 trunc_upper <- quantile(dat$sw, 0.99)
@@ -481,6 +496,7 @@ What if we could use BOTH the outcome model and the treatment model, and as long
 AIPW combines the outcome model and the treatment model. It is **doubly robust**: consistent if either model is correct. The formula starts with the G-computation prediction and adds a weighted residual correction from the propensity score. If the outcome model is already good, the correction is small; if the outcome model is poor but the propensity score is accurate, the correction rescues the estimate.
 
 ```{r}
+#| interactive: true
 # Using models from previous steps:
 # Q1, Q0 = predicted outcomes from g-computation
 # ps     = propensity scores from IPTW
@@ -505,6 +521,7 @@ cat("True ATE:                 ", round(true_ate, 4), "\n")
 The efficient influence curve (EIC) for the ATE gives us individual-level "scores" that measure each observation's contribution to the estimate. The variance of these scores provides valid standard errors.
 
 ```{r}
+#| interactive: true
 # Efficient influence curve for ATE
 eic <- with(dat,
   (A / ps) * (Y - Q1) + Q1 - mu1_aipw -
@@ -548,6 +565,7 @@ The targeting step is what makes TMLE special. It uses the **clever covariate**,
 **Step 1: Initial Outcome Model.** This is the same as G-computation: fit $E[Y \mid A, W]$. Think of this as your "first draft" of the outcome model. It does not need to be perfect; the targeting step will correct it.
 
 ```{r}
+#| interactive: true
 # Same as g-computation: fit E[Y | A, W]
 q_init <- glm(Y ~ A + age + bmi + hba1c + cvd + egfr + statin +
                 A:cvd + I(age^2),
@@ -562,6 +580,7 @@ QA_init <- predict(q_init, type = "response")  # predictions at observed A
 **Step 2: Estimate the Propensity Score.** Same as IPTW: model the probability of treatment given confounders. We bound the scores away from 0 and 1 to prevent numerical instability.
 
 ```{r}
+#| interactive: true
 # Same model as IPTW
 g_fit <- glm(A ~ age + bmi + hba1c + cvd + egfr + statin +
                I(age^2) + age:cvd,
@@ -580,6 +599,7 @@ The clever covariate $H(A, W)$ is the bridge between the treatment model and the
 :::
 
 ```{r}
+#| interactive: true
 # Clever covariate for each observation at their OBSERVED treatment
 H_A <- dat$A / ps_tmle - (1 - dat$A) / (1 - ps_tmle)
 
@@ -597,6 +617,7 @@ This is **the key step** that makes TMLE different from every other estimator. W
 :::
 
 ```{r}
+#| interactive: true
 logit <- function(p) log(p / (1 - p))
 
 # Fluctuation model: logit(Y) ~ offset(logit(Q_init)) + H
@@ -612,6 +633,7 @@ cat("Epsilon (fluctuation parameter):", round(epsilon, 5), "\n")
 **Step 5: Update Predictions.** Apply the fluctuation to get the **targeted** predictions. Because we use the inverse-logit function (`plogis`), predictions are guaranteed to stay in [0, 1], the natural bounds for a probability.
 
 ```{r}
+#| interactive: true
 # Apply the fluctuation to counterfactual predictions
 Q1_star <- plogis(logit(Q1_init) + epsilon * H_1)
 Q0_star <- plogis(logit(Q0_init) + epsilon * H_0)
@@ -620,6 +642,7 @@ Q0_star <- plogis(logit(Q0_init) + epsilon * H_0)
 **Step 6: Compute the TMLE Estimate.** Average the targeted predictions across the population, just like the final step of G-computation, but now using the **updated** $\hat{Q}^*$ that has been targeted for our specific estimand.
 
 ```{r}
+#| interactive: true
 tmle_risk1 <- mean(Q1_star)
 tmle_risk0 <- mean(Q0_star)
 tmle_ate   <- tmle_risk1 - tmle_risk0
@@ -637,6 +660,7 @@ The EIC gives each observation a "score" measuring its contribution to the estim
 :::
 
 ```{r}
+#| interactive: true
 # EIC evaluated at the TMLE estimates
 eic_tmle <- with(dat,
   (A / ps_tmle) * (Y - Q1_star) + Q1_star - tmle_risk1 -
@@ -656,6 +680,7 @@ cat("TMLE ATE:", round(tmle_ate, 4),
 **Key point.** A correctly implemented TMLE solves the efficient influence curve equation, meaning the sample mean of the EIC should be approximately zero. This is how you know the targeting step worked correctly.
 
 ```{r}
+#| interactive: true
 cat("Mean of EIC:", round(mean(eic_tmle), 8), "\n")
 cat("(Should be very close to zero)\n")
 ```
@@ -667,6 +692,7 @@ cat("(Should be very close to zero)\n")
 # 5. Comparing All Estimators
 
 ```{r}
+#| interactive: true
 results <- tibble(
   Method  = c("Naive", "G-computation", "IPTW", "IPTW (truncated)", "AIPW", "TMLE"),
   ATE     = c(naive_rd, gcomp_ate, iptw_ate, iptw_ate_trunc, aipw_ate, tmle_ate),
@@ -680,6 +706,7 @@ results %>%
 ```
 
 ```{r}
+#| interactive: true
 # Visualize the comparison
 plot_df <- results %>%
   filter(!is.na(SE)) %>%
@@ -715,6 +742,7 @@ Good estimation is nothing without good diagnostics. **Never report a causal est
 If the propensity score distributions for treated and untreated overlap well, the positivity assumption is plausible. **Gaps** indicate regions where one treatment is rarely or never prescribed. All methods will struggle there, but IPTW is especially vulnerable.
 
 ```{r}
+#| interactive: true
 ggplot(dat, aes(x = ps_tmle, fill = factor(A, labels = c("Sulfonylurea", "Dapagliflozin")))) +
   geom_histogram(bins = 40, alpha = 0.55, position = "identity") +
   labs(
@@ -732,6 +760,7 @@ ggplot(dat, aes(x = ps_tmle, fill = factor(A, labels = c("Sulfonylurea", "Dapagl
 **Key point.** Stabilized weights should center around 1. Very large weights (> 10) indicate practical positivity violations, meaning patients who almost never receive their observed treatment. These patients dominate IPTW estimates and destabilize the clever covariate in TMLE.
 
 ```{r}
+#| interactive: true
 cat("--- Unstabilized weight summary ---\n")
 summary(dat$w_unstab)
 cat("\n--- Stabilized weight summary ---\n")
@@ -747,6 +776,7 @@ The clever covariate drives the TMLE targeting step. Extreme values indicate pot
 :::
 
 ```{r}
+#| interactive: true
 clever_cov_df <- tibble(
   H = H_A,
   treatment = factor(dat$A, labels = c("Sulfonylurea", "Dapagliflozin"))
@@ -771,6 +801,7 @@ The EIC values reveal **influential observations**. A well-behaved TMLE has EIC 
 :::
 
 ```{r}
+#| interactive: true
 eic_df <- tibble(eic = eic_tmle)
 
 ggplot(eic_df, aes(x = eic)) +
@@ -793,6 +824,7 @@ cat("EIC mean:", round(mean(eic_tmle), 6), "\n")
 **Key point.** One of TMLE's advantages: because the targeting step uses a logistic fluctuation, predictions are guaranteed to stay in [0, 1]. Compare the initial and targeted ranges. The targeting step may shift predictions, but never outside the natural bounds.
 
 ```{r}
+#| interactive: true
 cat("--- Predicted outcome range (initial model) ---\n")
 cat("Q1 range:", round(range(Q1_init), 4), "\n")
 cat("Q0 range:", round(range(Q0_init), 4), "\n")
