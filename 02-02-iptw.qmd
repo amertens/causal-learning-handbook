@@ -3,7 +3,7 @@ title: "Chapter 2.2: Inverse Probability of Treatment Weighting (IPTW)"
 format: html
 ---
 
-*Estimated reading time: 25 minutes*
+*Estimated reading time: 40 minutes*
 
 # Chapter 2.2: Inverse Probability of Treatment Weighting
 
@@ -77,10 +77,11 @@ This is called a **Horvitz-Thompson type** estimator because it has the same str
 
 We use the HIV antiretroviral therapy cohort from `_data/load-haart-cohort.R`, the same dataset used throughout the handbook: ever initiating HAART (`ever_haart`, A=1) vs never initiating HAART (A=0) for mortality (`died`), with confounding by age, sex, and baseline CD4 count (`cd4_sqrt_baseline`).
 
-```{r}
+```{webr-r}
 library(tidyverse)
 
-source("_data/load-haart-cohort.R")
+download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")
+source("load-haart-cohort.R")
 dat <- as_tibble(haart_baseline)
 dat %>% head()
 ```
@@ -93,8 +94,7 @@ We model the probability of receiving treatment given covariates.
 
 In practice, one might use logistic regression, SuperLearner, or other ML. Here we start with logistic regression for clarity.
 
-```{r}
-#| interactive: true
+```{webr-r}
 ps_mod <- glm(ever_haart ~ age + sex + cd4_sqrt_baseline, family = binomial, data = dat)
 broom::tidy(ps_mod, conf.int = TRUE) |> knitr::kable(digits = 3, caption = "Propensity score model coefficients")
 
@@ -112,8 +112,7 @@ dat %>%
 
 We can visualize the propensity score distribution.
 
-```{r}
-#| interactive: true
+```{webr-r}
 ggplot(dat, aes(x = ps, fill = factor(ever_haart))) +
   geom_density(alpha = 0.4) +
   labs(
@@ -145,8 +144,7 @@ As a rule of thumb, be concerned if propensity scores for either group pile up n
 
 **Definition.** Unstabilized weights are the simplest form of IPTW weights. For each individual, the weight is the inverse of the probability of receiving the treatment they actually received: for the treated ($A = 1$), $w_i = 1 / e(W_i)$; for the untreated ($A = 0$), $w_i = 1 / (1 - e(W_i))$. These weights create a pseudo-population where treatment is independent of measured confounders, but they can be highly variable when some propensity scores are close to 0 or 1.
 
-```{r}
-#| interactive: true
+```{webr-r}
 dat <- dat %>%
   mutate(
     w_ipw = if_else(ever_haart == 1, 1 / ps, 1 / (1 - ps))
@@ -190,8 +188,7 @@ In epidemiologic practice, **often prefer stabilized weights** for the Horvitz-T
 
 :::
 
-```{r}
-#| interactive: true
+```{webr-r}
 pA <- mean(dat$ever_haart)
 
 dat <- dat %>%
@@ -216,8 +213,7 @@ There are several equivalent ways to use the weights.
 
 Estimated risk under treatment
 
-```{r}
-#| interactive: true
+```{webr-r}
 risk1_ipw <- with(dat, sum(sw_ipw * died * (ever_haart == 1)) / sum(sw_ipw * (ever_haart == 1)))
 risk0_ipw <- with(dat, sum(sw_ipw * died * (ever_haart == 0)) / sum(sw_ipw * (ever_haart == 0)))
 
@@ -230,6 +226,8 @@ This matches the formula
 $$
 \hat E[Y(1)] = \frac{\sum_i SW_i Y_i I(A_i = 1)}{\sum_i SW_i I(A_i = 1)}
 $$
+
+This is the Hajek (self-normalized) estimator, which divides by the sum of weights rather than by $n$. The Horvitz-Thompson estimator divides by $n$ instead. The Hajek estimator is preferred in practice because it is more stable and does not require weights to sum to $n$.
 
 :::{.callout-note}
 ## Getting Confidence Intervals from IPTW
@@ -246,7 +244,7 @@ The weighted regression approach in the next section demonstrates option 2.
 
 We can also fit a weighted regression with treatment as the only predictor.
 
-```{r, eval=FALSE}
+```{webr-r, eval=FALSE}
 library(sandwich)
 library(lmtest)
 
@@ -260,7 +258,7 @@ coeftest(fit_ipw, cov_ipw)
 
 Interpretation
 
-- The coefficient of `ever_haart` (on the log odds scale) now estimates a marginal effect in the pseudo population
+- The coefficient of `ever_haart` (on the log odds scale) estimates a marginal log-odds ratio in the pseudo-population. Note that this is on the odds ratio scale, not the risk difference scale. To obtain the marginal risk difference, predict from the weighted model under each treatment value and average, as shown in the g-computation chapter.
 - You can compute marginal risk differences or ratios by predicting from the model at `ever_haart=1` and `ever_haart=0` and standardizing
 
 ---
@@ -269,8 +267,7 @@ Interpretation
 
 We can compare the IPTW ATE to the g computation ATE from the previous chapter.
 
-```{r}
-#| interactive: true
+```{webr-r}
 # g computation
 g_mod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline, family = binomial, data = dat)
 p1_g <- predict(g_mod, newdata = dat %>% mutate(ever_haart = 1), type = "response")
@@ -309,8 +306,7 @@ To assess positivity, plot propensity score densities by treatment group (as in 
 
 ### Check weights
 
-```{r}
-#| interactive: true
+```{webr-r}
 dat %>%
   summarize(
     min_w = min(sw_ipw),
@@ -336,8 +332,7 @@ When you see extreme weights, consider: (1) improving your propensity score mode
 
 You can truncate weights at a chosen percentile, for example the 1st and 99th percentiles.
 
-```{r}
-#| interactive: true
+```{webr-r}
 lower <- quantile(dat$sw_ipw, 0.01)
 upper <- quantile(dat$sw_ipw, 0.99)
 

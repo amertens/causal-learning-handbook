@@ -238,14 +238,14 @@ window.Quarto = {
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="./02-05-superlearner.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Chapter 2.5: Super Learner: Ensemble Machine Learning for Causal Inference</span></span></a>
+  <a href="./02-04-superlearner.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">8</span>&nbsp; <span class="chapter-title">Chapter 2.4: Super Learner: Ensemble Machine Learning for Causal Inference</span></span></a>
   </div>
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="./02-04-tmle-teaching-examples.html" class="sidebar-item-text sidebar-link">
- <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Chapter 2.4: From Question to Estimate: TMLE in Practice</span></span></a>
+  <a href="./02-05-tmle-teaching-examples.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text"><span class="chapter-number">9</span>&nbsp; <span class="chapter-title">Chapter 2.5: From Question to Estimate: TMLE in Practice</span></span></a>
   </div>
 </li>
       </ul>
@@ -497,7 +497,7 @@ window.Quarto = {
 </header>
 
 
-<p><em>Estimated reading time: 35 minutes</em></p>
+<p><em>Estimated reading time: 55 minutes</em></p>
 <div class="callout callout-style-default callout-note callout-titled">
 <div class="callout-header d-flex align-content-center">
 <div class="callout-icon-container">
@@ -522,10 +522,10 @@ Learning objectives
 <p>Chapter 3.3 introduced a distribution-shift intervention using quantile mapping to compare two antiretroviral drugs under a common adherence distribution. That approach is one principled way to operationalize the question “what if Drug B patients adhered like Drug A patients?” But it is not the only way. Different shift functions encode different assumptions about what “adhering like Drug A” means, and they answer subtly different causal questions.</p>
 <p>This supplement implements four approaches on the same simulated data:</p>
 <ol type="1">
-<li><strong>Marginal quantile mapping</strong> — map Drug B adherence to the Drug A distribution via the empirical CDF.</li>
-<li><strong>Conditional distribution mapping</strong> — same idea, but condition on baseline covariates so the mapping respects patient characteristics.</li>
-<li><strong>Mean-calibrated additive shift</strong> — add a constant to Drug B adherence so its mean matches Drug A’s.</li>
-<li><strong>Fixed additive shift</strong> — increase every patient’s adherence by a small fixed amount, regardless of drug.</li>
+<li><strong>Marginal quantile mapping</strong>: map Drug B adherence to the Drug A distribution via the empirical CDF.</li>
+<li><strong>Conditional distribution mapping</strong>: same idea, but condition on baseline covariates so the mapping respects patient characteristics.</li>
+<li><strong>Mean-calibrated additive shift</strong>: add a constant to Drug B adherence so its mean matches Drug A’s.</li>
+<li><strong>Fixed additive shift</strong>: increase every patient’s adherence by a small fixed amount, regardless of drug.</li>
 </ol>
 <p>Each approach defines a different modified treatment policy for <code>lmtp</code>. We run all four, compare estimates, and explain what scientific question each one answers.</p>
 </section>
@@ -740,7 +740,7 @@ d_1(a_{it}) = F_{A|D=A}^{-1}\big(F_{A|D=B}(a_{it})\big)
 </section>
 <section id="what-question-it-answers" class="level2" data-number="22.2">
 <h2 data-number="22.2" class="anchored" data-anchor-id="what-question-it-answers"><span class="header-section-number">22.2</span> What question it answers</h2>
-<p><em>What would happen to Drug B patients’ outcomes if their entire adherence distribution — the shape, spread, and location — were transplanted from the Drug A population?</em></p>
+<p><em>What would happen to Drug B patients’ outcomes if their entire adherence distribution (the shape, spread, and location) were transplanted from the Drug A population?</em></p>
 <p>This captures both the higher mean and any differences in variance or skewness between the two distributions. It asks for a wholesale distributional replacement.</p>
 </section>
 <section id="implementation" class="level2" data-number="22.3">
@@ -811,7 +811,7 @@ d_1(a_{it}) = F_{A|D=A}^{-1}\big(F_{A|D=B}(a_{it})\big)
 </section>
 <section id="interpretation" class="level2" data-number="22.4">
 <h2 data-number="22.4" class="anchored" data-anchor-id="interpretation"><span class="header-section-number">22.4</span> Interpretation</h2>
-<p>A negative contrast means the adherence distribution shift reduces virologic failure. The magnitude tells you how much of the Drug A advantage is explained by adherence differences. However, this approach ignores that the adherence gap may differ across patient subgroups — an older patient’s adherence gap between drugs may not be the same as a younger patient’s. Approach 2 addresses this.</p>
+<p>A negative contrast means the adherence distribution shift reduces virologic failure. The magnitude tells you how much of the Drug A advantage is explained by adherence differences. However, this approach ignores that the adherence gap may differ across patient subgroups; an older patient’s adherence gap between drugs may not be the same as a younger patient’s. Approach 2 addresses this.</p>
 <hr>
 </section>
 </section>
@@ -819,8 +819,8 @@ d_1(a_{it}) = F_{A|D=A}^{-1}\big(F_{A|D=B}(a_{it})\big)
 <h1 data-number="23"><span class="header-section-number">23</span> Approach 2: Conditional Distribution Mapping</h1>
 <section id="how-it-works-1" class="level2" data-number="23.1">
 <h2 data-number="23.1" class="anchored" data-anchor-id="how-it-works-1"><span class="header-section-number">23.1</span> How it works</h2>
-<p>The marginal quantile map treats all Drug B patients as exchangeable within the Drug B group. But adherence depends on patient characteristics — older patients, those with lower CD4, those with higher viral load may adhere differently. A more principled mapping conditions on covariates, so that the quantile lookup reflects each patient’s clinical profile.</p>
-<p>The idea is the same as approach 1 — find a patient’s percentile rank in the Drug B distribution and map it to the corresponding percentile in the Drug A distribution — but now both the CDF and quantile function are conditional on covariates. We estimate these using <strong>conditional quantile regression</strong> via the <code>quantreg</code> package, fitting separate models at a grid of quantile levels (<span class="math inline">\(\tau = 0.05, 0.10, \ldots, 0.95\)</span>) for each drug. This avoids the normality assumption that a location-scale model would impose, which matters because adherence is bounded on [0,1] and often skewed.</p>
+<p>The marginal quantile map treats all Drug B patients as exchangeable within the Drug B group. But adherence depends on patient characteristics: older patients, those with lower CD4, those with higher viral load may adhere differently. A more principled mapping conditions on covariates, so that the quantile lookup reflects each patient’s clinical profile.</p>
+<p>The idea is the same as approach 1 (find a patient’s percentile rank in the Drug B distribution and map it to the corresponding percentile in the Drug A distribution), but now both the CDF and quantile function are conditional on covariates. We estimate these using <strong>conditional quantile regression</strong> via the <code>quantreg</code> package, fitting separate models at a grid of quantile levels (<span class="math inline">\(\tau = 0.05, 0.10, \ldots, 0.95\)</span>) for each drug. This avoids the normality assumption that a location-scale model would impose, which matters because adherence is bounded on [0,1] and often skewed.</p>
 <p>For a Drug B patient with covariates <span class="math inline">\(X\)</span> and observed adherence <span class="math inline">\(a_t\)</span>:</p>
 <ol type="1">
 <li>Evaluate the fitted Drug B conditional quantiles <span class="math inline">\(\hat{Q}_{B}(\tau \mid X)\)</span> across the grid and find the <span class="math inline">\(\tau^*\)</span> where <span class="math inline">\(a_t\)</span> falls (by interpolation).</li>
@@ -968,8 +968,8 @@ d_1(a_{it}) = F_{A|D=A}^{-1}\big(F_{A|D=B}(a_{it})\big)
 </section>
 <section id="interpretation-1" class="level2" data-number="23.4">
 <h2 data-number="23.4" class="anchored" data-anchor-id="interpretation-1"><span class="header-section-number">23.4</span> Interpretation</h2>
-<p>If the conditional and marginal approaches give similar results, the adherence gap between drugs is roughly constant across patient subgroups. If they diverge, the marginal approach is masking heterogeneity — the adherence shift matters more for some patients than others. The conditional approach is generally preferred when covariate-adherence relationships differ meaningfully between drugs, because it avoids shifting patients to implausible adherence levels given their clinical profile.</p>
-<p>The quantile regression approach has two advantages over a simpler location-scale normal model. First, it makes no distributional assumption on the residuals — important because adherence is bounded on [0,1] and often skewed. Second, it allows the variance and shape of the conditional adherence distribution to vary with covariates, not just the mean. The cost is computational: we fit <span class="math inline">\(2 \times T \times |\tau\text{-grid}|\)</span> quantile regressions. Quantile crossing (where predicted quantiles are not monotone) is handled by sorting, which is a standard practical fix.</p>
+<p>If the conditional and marginal approaches give similar results, the adherence gap between drugs is roughly constant across patient subgroups. If they diverge, the marginal approach is masking heterogeneity: the adherence shift matters more for some patients than others. The conditional approach is generally preferred when covariate-adherence relationships differ meaningfully between drugs, because it avoids shifting patients to implausible adherence levels given their clinical profile.</p>
+<p>The quantile regression approach has two advantages over a simpler location-scale normal model. First, it makes no distributional assumption on the residuals, which is important because adherence is bounded on [0,1] and often skewed. Second, it allows the variance and shape of the conditional adherence distribution to vary with covariates, not just the mean. The cost is computational: we fit <span class="math inline">\(2 \times T \times |\tau\text{-grid}|\)</span> quantile regressions. Quantile crossing (where predicted quantiles are not monotone) is handled by sorting, which is a standard practical fix.</p>
 <hr>
 </section>
 </section>
@@ -1201,8 +1201,8 @@ Figure&nbsp;26.1: Estimated change in virologic failure rate under four adherenc
 <section id="what-the-results-show" class="level1" data-number="27">
 <h1 data-number="27"><span class="header-section-number">27</span> What the Results Show</h1>
 <p>Under observed adherence, the estimated virologic failure rate is about 22%. All four shift interventions reduce it, but by different amounts and with different precision.</p>
-<p>The two approaches that most aggressively reshape the Drug B adherence distribution — marginal quantile mapping and the mean-calibrated additive shift — produce the largest reductions, bringing the estimated failure rate down to roughly 5–6% (contrasts of –17 and –16 percentage points, both with 95% CIs excluding zero). These two agree closely despite using very different mechanics, which suggests that in this simulation the adherence gap between drugs is fairly uniform across the distribution and the shape difference between Drug A and Drug B adherence matters less than the location difference.</p>
-<p>The conditional distribution mapping — now implemented with conditional quantile regression rather than a normal location-scale model — may produce a different estimate than the marginal approach. Because it conditions on covariates, the shift is more patient-specific: it only moves each Drug B patient’s adherence to what the conditional quantile model predicts they would have achieved under Drug A given their clinical profile. For patients whose covariates predict similar adherence under both drugs, the shift is small. The quantile regression avoids the normality assumption, so the mapping better respects the bounded, potentially skewed shape of real adherence distributions.</p>
+<p>The two approaches that most aggressively reshape the Drug B adherence distribution (marginal quantile mapping and the mean-calibrated additive shift) produce the largest reductions, bringing the estimated failure rate down to roughly 5–6% (contrasts of –17 and –16 percentage points, both with 95% CIs excluding zero). These two agree closely despite using very different mechanics, which suggests that in this simulation the adherence gap between drugs is fairly uniform across the distribution and the shape difference between Drug A and Drug B adherence matters less than the location difference.</p>
+<p>The conditional distribution mapping, now implemented with conditional quantile regression rather than a normal location-scale model, may produce a different estimate than the marginal approach. Because it conditions on covariates, the shift is more patient-specific: it only moves each Drug B patient’s adherence to what the conditional quantile model predicts they would have achieved under Drug A given their clinical profile. For patients whose covariates predict similar adherence under both drugs, the shift is small. The quantile regression avoids the normality assumption, so the mapping better respects the bounded, potentially skewed shape of real adherence distributions.</p>
 <p>The fixed additive shift (+10 percentage points for everyone) yields a –10 percentage point reduction, also with a CI approaching zero. This is a smaller intervention than the cross-drug shifts (the Drug A–Drug B gap is about 23–28 percentage points per visit), so the smaller effect is expected. But it answers a different, more directly actionable question: a realistic adherence support program that raises compliance by 10 points across the board would cut failure rates nearly in half.</p>
 <p>The key takeaway is that a substantial portion of the outcome gap between Drug A and Drug B in this simulation is mediated by adherence. The marginal and mean-calibrated approaches suggest that if Drug B patients could adhere at Drug A levels, their failure rates would approach Drug A’s observed rate. The conditional approach is more conservative but still shows a meaningful benefit, and the fixed shift confirms that even a modest, universal adherence improvement would meaningfully reduce virologic failure.</p>
 <section id="connecting-shifts-to-the-forgiveness-curve" class="level2" data-number="27.1">
@@ -1215,10 +1215,10 @@ r_d(a) = P\big(Y = 1 \mid \text{do}(\bar{A} = a), D = d\big)
 <p>The four shift approaches relate to this curve as follows:</p>
 <p><strong>Fixed additive shift</strong> moves each patient along the x-axis of the forgiveness curve by a constant <span class="math inline">\(\delta\)</span>. The LMTP contrast integrates the slope of the curve over the observed adherence distribution, weighted by the shift magnitude. This tells you the marginal benefit of a small adherence improvement, averaged over the patient population. It is a local derivative-like quantity when <span class="math inline">\(\delta\)</span> is small.</p>
 <p><strong>Mean-calibrated additive shift</strong> also moves along the x-axis, but by a drug-specific amount calibrated to close the mean adherence gap. It integrates over a larger portion of the curve but still preserves the shape of Drug B’s adherence distribution. The contrast captures how much of the outcome gap between drugs is explained by the <em>location</em> difference in adherence distributions.</p>
-<p><strong>Marginal quantile mapping</strong> transforms the entire shape of Drug B’s adherence distribution to match Drug A’s. This is not a simple translation along the x-axis — it changes the variance, skewness, and tail behavior. The contrast captures the full distributional difference in adherence, integrating the forgiveness curve under a reshaped distribution.</p>
+<p><strong>Marginal quantile mapping</strong> transforms the entire shape of Drug B’s adherence distribution to match Drug A’s. This is not a simple translation along the x-axis; it changes the variance, skewness, and tail behavior. The contrast captures the full distributional difference in adherence, integrating the forgiveness curve under a reshaped distribution.</p>
 <p><strong>Conditional quantile mapping</strong> does the same distributional transformation, but conditions on patient covariates. This produces a patient-specific shift that respects heterogeneity in adherence-drug relationships.</p>
 <p>The forgiveness curve itself can be traced directly using <strong>static L-TMLE</strong> at a grid of fixed PDC thresholds. The V4 fine-grid LTMLE analysis does this with 13 sliding bins, estimating <span class="math inline">\(r_d(a)\)</span> at PDC levels from 0.50 to 0.95 in 3–4 percentage-point increments. This traces the curve rather than summarizing it with a single contrast.</p>
-<p><strong>Where the curve is well-estimated.</strong> The forgiveness curve can only be reliably estimated where there is adequate positivity — enough patients maintaining each PDC level given their covariate history. In the V4 simulation, the curve is well-estimated for PDC <span class="math inline">\(\geq 0.70\)</span>, where both drugs have substantial density. Below 0.70, positivity breaks down because few patients sustain very low adherence for extended periods (patients who disengage tend to be censored). The LMTP shift approaches have an advantage here: because they stay close to the observed distribution, they avoid the low-positivity region where static regimes fail.</p>
+<p><strong>Where the curve is well-estimated.</strong> The forgiveness curve can only be reliably estimated where there is adequate positivity (enough patients maintaining each PDC level given their covariate history). In the V4 simulation, the curve is well-estimated for PDC <span class="math inline">\(\geq 0.70\)</span>, where both drugs have substantial density. Below 0.70, positivity breaks down because few patients sustain very low adherence for extended periods (patients who disengage tend to be censored). The LMTP shift approaches have an advantage here: because they stay close to the observed distribution, they avoid the low-positivity region where static regimes fail.</p>
 <p>The forgiveness curve is thus the unifying object that connects all the estimands in this chapter and in Chapter 3.3. The different shift approaches are different ways of summarizing the same underlying causal surface, chosen based on the scientific question and the positivity constraints of the data.</p>
 </section>
 <section id="mediation-perspective" class="level2" data-number="27.2">
@@ -1243,13 +1243,13 @@ Informal vs.&nbsp;formal mediation
 <p>The direct effect captures pharmacological differences between drugs (potency, resistance barrier, half-life) that affect outcomes regardless of adherence. The indirect effect captures the pathway where drug assignment affects adherence (e.g., through pill burden or side effects), which in turn affects outcomes.</p>
 <p>The quantile-matching approach provides an informal controlled direct effect (CDE). By matching Drug B’s adherence distribution to Drug A’s, we are holding the adherence pathway constant and asking what outcome difference remains. If the total observed difference between drugs is <span class="math inline">\(\Delta_{\text{total}}\)</span> and the difference under matched adherence is <span class="math inline">\(\Delta_{\text{matched}}\)</span>, then:</p>
 <ul>
-<li><span class="math inline">\(\Delta_{\text{matched}}\)</span> approximates the direct (pharmacological) effect — the outcome difference when both drugs have the same adherence distribution.</li>
-<li><span class="math inline">\(\Delta_{\text{total}} - \Delta_{\text{matched}}\)</span> approximates the adherence-mediated component — how much of the drug difference operates through the adherence pathway.</li>
+<li><span class="math inline">\(\Delta_{\text{matched}}\)</span> approximates the direct (pharmacological) effect: the outcome difference when both drugs have the same adherence distribution.</li>
+<li><span class="math inline">\(\Delta_{\text{total}} - \Delta_{\text{matched}}\)</span> approximates the adherence-mediated component: how much of the drug difference operates through the adherence pathway.</li>
 </ul>
 <p>This decomposition is <em>informal</em> because a formal causal mediation analysis requires additional assumptions beyond those needed for the shift analysis:</p>
 <ol type="1">
 <li><p><strong>No unmeasured mediator-outcome confounders</strong> affected by treatment. In our setting, this means no unmeasured common cause of adherence and failure that is also affected by drug assignment. Time-varying confounders like CD4 and viral load are measured, but there may be unmeasured factors (e.g., motivation, social support) that affect both adherence and outcomes.</p></li>
-<li><p><strong>Cross-world independence.</strong> The formal natural indirect effect requires a “cross-world” counterfactual — the outcome under Drug A with the adherence one would have had under Drug B — which involves quantities from two different interventional worlds simultaneously. This is a stronger assumption than anything required for the shift analysis alone.</p></li>
+<li><p><strong>Cross-world independence.</strong> The formal natural indirect effect requires a “cross-world” counterfactual (the outcome under Drug A with the adherence one would have had under Drug B), which involves quantities from two different interventional worlds simultaneously. This is a stronger assumption than anything required for the shift analysis alone.</p></li>
 </ol>
 <p>Despite these caveats, the shift framework provides valuable intuition about the relative importance of adherence versus pharmacology in explaining drug differences. In the V4 talk companion results, the quantile-matched comparison shows that a substantial portion of Drug A’s observed advantage comes from its better adherence profile, while a residual direct effect remains that reflects genuine pharmacological differences in forgiveness at low adherence levels.</p>
 <p>For a formal mediation analysis using stochastic interventions, see Diaz and Hejazi (2020), who develop identification and estimation results for natural direct and indirect effects under stochastic interventions, using the same <code>lmtp</code> infrastructure.</p>
@@ -1340,7 +1340,7 @@ Informal vs.&nbsp;formal mediation
 </tbody>
 </table>
 <p>All three approaches are functions of the same counterfactual risk surface <span class="math inline">\(P(Y \mid \text{do}(\bar{A}), D)\)</span>. The static regime evaluates this surface at fixed points; the additive shift integrates it under a translated distribution; and the quantile match integrates it under a reshaped distribution. The choice depends on whether the goal is to map the full dose-response relationship (static), evaluate a realistic policy (additive shift), or decompose the drug comparison (quantile match).</p>
-<p>For a comparative effectiveness study, approaches 1 or 2 are most appropriate. Approach 2 is preferred when adherence depends strongly on patient characteristics that differ between drug groups. For health policy planning, approach 4 is the most directly useful. Approach 3 is a middle ground — a cross-drug comparison using the simplest possible shift function.</p>
+<p>For a comparative effectiveness study, approaches 1 or 2 are most appropriate. Approach 2 is preferred when adherence depends strongly on patient characteristics that differ between drug groups. For health policy planning, approach 4 is the most directly useful. Approach 3 is a middle ground: a cross-drug comparison using the simplest possible shift function.</p>
 <p>In all cases, the validity of the estimate depends on the same identification assumptions: consistency, sequential exchangeability, and positivity. The shift-based approaches (especially 3 and 4) have better positivity properties than static interventions like “always adhere,” because they keep the shifted values close to the observed distribution.</p>
 </section>
 <section id="check-your-understanding" class="level2" data-number="28.1">
@@ -1857,7 +1857,7 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 <span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a><span class="an">format:</span><span class="co"> html</span></span>
 <span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
 <span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>*Estimated reading time: 35 minutes*</span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>*Estimated reading time: 55 minutes*</span>
 <span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a>::: {.callout-note}</span>
 <span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a><span class="fu">## Learning objectives</span></span>

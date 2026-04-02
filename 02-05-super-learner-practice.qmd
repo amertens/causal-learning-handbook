@@ -91,7 +91,7 @@ The key insight is that **Step 3 uses honest, out-of-fold predictions**. This pr
 
 We use a dataset where the true outcome is a nonlinear function of covariates with interactions, so that simple GLMs will struggle. This mirrors real-world settings where nuisance functions have complex forms.
 
-```{r}
+```{webr-r}
 library(tidyverse)
 
 set.seed(2026)
@@ -125,7 +125,7 @@ Y <- dat$y
 
 Let's verify the nonlinearity is real by comparing a simple GLM to the truth.
 
-```{r}
+```{webr-r}
 glm_fit <- glm(y ~ age + bmi + sbp + smoker + cvd, family = binomial, data = dat)
 
 dat <- dat %>%
@@ -154,7 +154,7 @@ Before using any package, let's implement Super Learner ourselves. This makes th
 
 Each learner is a function that takes training data and returns a fitted model, plus a predict method. We wrap four algorithms in a consistent interface.
 
-```{r}
+```{webr-r}
 #| message: false
 #| warning: false
 
@@ -201,7 +201,7 @@ predict_rf <- function(model, X_new) {
 
 ## 4.2 Create cross-validation folds
 
-```{r}
+```{webr-r}
 V <- 10  # number of folds
 fold_ids <- sample(rep(1:V, length.out = n))
 
@@ -212,7 +212,7 @@ table(fold_ids)
 
 This is the core of the algorithm: for each fold, train on the remaining data and predict on the held-out fold.
 
-```{r}
+```{webr-r}
 # Collect learner info
 learners <- list(
   list(name = "GLM",    fit = fit_glm,   predict = predict_glm),
@@ -247,7 +247,7 @@ for (v in 1:V) {
 
 Let's inspect the cross-validated predictions.
 
-```{r}
+```{webr-r}
 head(Z)
 ```
 
@@ -261,7 +261,7 @@ Every prediction in the matrix $\mathbf{Z}$ was made when the corresponding obse
 
 Before combining, let's see how each individual learner performs.
 
-```{r}
+```{webr-r}
 # Cross-validated MSE (Brier score for binary outcomes)
 cv_risk <- colMeans((Y - Z)^2)
 cv_risk
@@ -272,7 +272,7 @@ cv_logloss <- -colMeans(Y * log(pmax(Z, 1e-10)) +
 cv_logloss
 ```
 
-```{r}
+```{webr-r}
 tibble(
   Learner = names(cv_risk),
   `CV MSE (Brier)` = round(cv_risk, 4),
@@ -293,7 +293,7 @@ The metalearner finds the optimal weighted combination of the candidates. We use
 
 The non-negativity constraint ensures that no learner gets a negative weight (which would mean *anti-correlating* with the outcome — hard to interpret and unstable in practice).
 
-```{r}
+```{webr-r}
 library(nnls)
 
 nnls_fit <- nnls(Z, Y)
@@ -309,7 +309,7 @@ These are the Super Learner weights. Each weight tells you how much the ensemble
 
 ## 4.6 Refit on full data and form the ensemble
 
-```{r}
+```{webr-r}
 # Refit each learner on the full dataset
 full_models <- lapply(learners, function(l) l$fit(Y, W))
 
@@ -327,7 +327,7 @@ head(sl_predictions)
 
 ## 4.7 Compare the ensemble to individual learners
 
-```{r}
+```{webr-r}
 # Cross-validated predictions from the SL ensemble
 sl_cv_preds <- Z %*% alpha
 
@@ -396,7 +396,7 @@ When Super Learner predictions feed into TMLE or AIPW, we need well-calibrated *
 
 Now that you understand every step, let's see how the `SuperLearner` package does the same thing in a few lines.
 
-```{r}
+```{webr-r}
 library(SuperLearner)
 
 set.seed(2026)
@@ -422,7 +422,7 @@ sl_fit
 
 Compare the package output to our hand-coded version:
 
-```{r}
+```{webr-r}
 tibble(
   Learner = c("GLM", "Mean", "LASSO", "RF"),
   `Hand-coded weight` = round(alpha, 4),
@@ -460,7 +460,7 @@ Super Learner allows different **loss functions**, which define what "best predi
 - Strongly penalizes confident but wrong predictions
 - **Recommended for nuisance functions in causal inference** (both propensity scores and binary outcome regressions)
 
-```{r}
+```{webr-r}
 sl_loglik <- SuperLearner(
   Y = Y,
   X = X_df,
@@ -513,7 +513,7 @@ The log-likelihood metalearner is almost always the right choice for binary nuis
 
 ## 8.1 What learners are available?
 
-```{r}
+```{webr-r}
 # List all built-in SL wrappers
 listWrappers("SL")
 ```
@@ -522,7 +522,7 @@ listWrappers("SL")
 
 A powerful feature of Super Learner is that you can include **multiple versions of the same algorithm** with different tuning parameters. Rather than tuning each learner separately, you let the metalearner figure out which version is best.
 
-```{r}
+```{webr-r}
 # Custom random forest with different mtry values
 SL.ranger.mtry2 <- function(..., mtry = 2) SL.ranger(..., mtry = mtry)
 SL.ranger.mtry4 <- function(..., mtry = 4) SL.ranger(..., mtry = mtry)
@@ -592,7 +592,7 @@ SL_lib_screen <- list(
 
 How do we know if Super Learner is actually better than its best component? The `CV.SuperLearner` function adds an **outer layer** of cross-validation to produce an honest estimate of Super Learner's performance.
 
-```{r}
+```{webr-r}
 set.seed(2026)
 
 cv_sl <- CV.SuperLearner(
@@ -607,7 +607,7 @@ cv_sl <- CV.SuperLearner(
 summary(cv_sl)
 ```
 
-```{r}
+```{webr-r}
 plot(cv_sl) +
   theme_minimal() +
   labs(
@@ -638,7 +638,7 @@ We have been building prediction tools. Now let's connect them to the estimators
 
 ## 10.1 Simulated treatment–outcome data
 
-```{r}
+```{webr-r}
 set.seed(2026)
 n <- 3000
 
@@ -679,7 +679,7 @@ cat("True ATE:", round(true_ate, 4), "\n")
 
 ## 10.2 Estimate nuisance functions with Super Learner
 
-```{r}
+```{webr-r}
 X_covariates <- W_sim %>% select(age, bmi, sbp, smoker, cvd) %>% as.data.frame()
 X_with_A     <- W_sim %>% select(age, bmi, sbp, smoker, cvd, A) %>% as.data.frame()
 
@@ -711,7 +711,7 @@ round(coef(Q_sl), 4)
 
 ## 10.3 Generate predictions for TMLE
 
-```{r}
+```{webr-r}
 logit <- function(p) log(p / (1 - p))
 expit <- function(x) 1 / (1 + exp(-x))
 
@@ -740,7 +740,7 @@ cat("G-computation ATE (SL, before targeting):", round(gcomp_ate, 4), "\n")
 
 This is the same fluctuation step from [Chapter 2.3](02-03-doubly-robust-tmle.qmd), now using Super Learner for the initial estimates.
 
-```{r}
+```{webr-r}
 # Clever covariate
 H1 <- 1 / ps_hat
 H0 <- -1 / (1 - ps_hat)
@@ -765,7 +765,7 @@ cat("True ATE:          ", round(true_ate, 4), "\n")
 
 ## 10.5 Inference via the efficient influence curve
 
-```{r}
+```{webr-r}
 Q_star_obs <- ifelse(W_sim$A == 1, Q1_star, Q0_star)
 
 EIC <- H_obs * (W_sim$Y - Q_star_obs) + Q1_star - Q0_star - tmle_ate
@@ -945,6 +945,6 @@ Normalization is not strictly required by the theory, but it is standard practic
 
 This chapter equipped you with the core prediction engine that powers modern causal estimators. The next chapter puts all the pieces together: g-computation, IPTW, AIPW, TMLE, and Super Learner, applied progressively to a single pharmacoepidemiology dataset so you can see how each method builds on the one before it.
 
-```{r}
+```{webr-r}
 sessionInfo()
 ```

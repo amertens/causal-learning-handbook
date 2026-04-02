@@ -4,7 +4,7 @@ subtitle: "A worked HIV cohort example with CD4 as the time-dependent confounder
 format: html
 ---
 
-*Estimated reading time: 45 minutes*
+*Estimated reading time: 55 minutes*
 
 ::: {.callout-note}
 ## Learning objectives
@@ -135,18 +135,21 @@ cat("\nOverall virologic failure rate:", round(mean(Y), 3), "\n")
 
 ## The true causal effect
 
-Because we control the data-generating process, we can compute the true counterfactual outcomes by simulation, giving us a benchmark.
+Because we control the data-generating process, we can compute the true counterfactual outcomes analytically. The marginal expectation under always-treat integrates over the distribution of $L_1$ under $A_1 = 1$: since $L_1 \mid A_1=1, W \sim N(0.5W + 0.7, 1)$, we can use a large Monte Carlo sample with a fresh seed to get a stable benchmark.
 
 ```{r}
-set.seed(2026)
+# Use a separate seed and large MC sample to avoid dependence on the data
+set.seed(9999)
+n_mc <- 100000
+W_mc <- rep(W, length.out = n_mc)
 
 # Counterfactual under (A1=1, A2=1): always high adherence
-L1_cf11 <- rnorm(n, mean = 0.5 * W + 0.7 * 1, sd = 1)
-Y_cf11  <- plogis(-0.5 - 0.5 * 1 - 0.6 * 1 - 0.3 * L1_cf11 + 0.4 * W)
+L1_cf11 <- rnorm(n_mc, mean = 0.5 * W_mc + 0.7 * 1, sd = 1)
+Y_cf11  <- plogis(-0.5 - 0.5 * 1 - 0.6 * 1 - 0.3 * L1_cf11 + 0.4 * W_mc)
 
 # Counterfactual under (A1=0, A2=0): never high adherence
-L1_cf00 <- rnorm(n, mean = 0.5 * W + 0.7 * 0, sd = 1)
-Y_cf00  <- plogis(-0.5 - 0.5 * 0 - 0.6 * 0 - 0.3 * L1_cf00 + 0.4 * W)
+L1_cf00 <- rnorm(n_mc, mean = 0.5 * W_mc + 0.7 * 0, sd = 1)
+Y_cf00  <- plogis(-0.5 - 0.5 * 0 - 0.6 * 0 - 0.3 * L1_cf00 + 0.4 * W_mc)
 
 true_EY_11 <- mean(Y_cf11)
 true_EY_00 <- mean(Y_cf00)
@@ -306,7 +309,10 @@ This is the inverse cumulative probability of following the full regime. Fit the
 
 ```{r}
 # Clever covariate at time 2
-H2 <- (dat$A1 == 1 & dat$A2 == 1) / (g1_hat * g2_hat)
+# Use g2 evaluated at the *intervention* value A1=1 (g2_under_a1),
+# not the observed-data g2_hat. For patients who followed the regime
+# (A1=1), these are identical; for others, the indicator zeroes out H2.
+H2 <- (dat$A1 == 1 & dat$A2 == 1) / (g1_hat * g2_under_a1)
 
 # Initial predictions at observed treatment values
 QA_init_t2 <- predict(Q2_mod, type = "response")

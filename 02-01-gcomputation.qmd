@@ -3,7 +3,7 @@ title: "Chapter 2.1: Outcome Modeling and Standardization (G-Computation)"
 format: html
 ---
 
-*Estimated reading time: 20 minutes*
+*Estimated reading time: 25 minutes*
 
 # Chapter 2.1: Outcome Modeling and Standardization
 *G-computation as a foundation for causal estimation*
@@ -25,10 +25,11 @@ G-computation estimates causal effects by predicting what *would* happen to ever
 
 We use the shared HIV antiretroviral therapy cohort introduced in the case study. This dataset follows HIV-positive patients from seroconversion, tracking HAART initiation and mortality. Here we collapse the longitudinal data to a point-treatment snapshot: A = `ever_haart` (1 = initiated HAART at any point, 0 = never initiated), Y = `died` (1 = died, 0 = alive at end of follow-up), with confounders age, sex, and baseline CD4 count (square-root transformed).
 
-```{r}
+```{webr-r}
 library(tidyverse)
 
-source("_data/load-haart-cohort.R")
+download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")
+source("load-haart-cohort.R")
 dat <- as_tibble(haart_baseline)
 ```
 
@@ -42,8 +43,7 @@ Treatment is strongly confounded by baseline CD4 count and age, making this a go
 
 We fit a logistic regression model predicting the outcome from treatment and confounders:
 
-```{r}
-#| interactive: true
+```{webr-r}
 mod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
            family = binomial, data = dat)
 broom::tidy(mod, conf.int = TRUE) |> knitr::kable(digits = 3, caption = "Outcome model coefficients")
@@ -55,8 +55,7 @@ broom::tidy(mod, conf.int = TRUE) |> knitr::kable(digits = 3, caption = "Outcome
 
 This is where g-computation earns its name. We ask two "what if" questions for *every single person* in the dataset, regardless of what treatment they actually received: what if this person had been treated ($A=1$)? What if untreated ($A=0$)?
 
-```{r}
-#| interactive: true
+```{webr-r}
 # create counterfactual datasets
 dat1 <- dat %>% mutate(ever_haart = 1)
 dat0 <- dat %>% mutate(ever_haart = 0)
@@ -73,8 +72,7 @@ Here `p1[i]` and `p0[i]` are the predicted outcomes for person *i* under treatme
 
 Averaging the counterfactual predictions over the *entire population* converts model-based predictions into a **causal** estimate: a standardized (marginal) risk difference, the same quantity a well-randomized trial would yield.
 
-```{r}
-#| interactive: true
+```{webr-r}
 risk1 <- mean(p1)
 risk0 <- mean(p0)
 ate  <- risk1 - risk0
@@ -85,18 +83,17 @@ knitr::kable(data.frame(risk1 = risk1, risk0 = risk0, ate = ate))
 Interpret the result as: “If the entire population had initiated HAART rather than not, the estimated change in mortality risk would be X percentage points.”
 :::
 
-### Beyond the Risk Difference: Relative Risk and Population Attributable Risk
+### Beyond the Risk Difference: Relative Risk and Population Attributable Fraction
 
 One of the strengths of g-computation is that once you have the counterfactual predictions `p1` and `p0`, you can compute *any* contrast --- not just the risk difference. This flexibility is difficult to achieve with a single regression coefficient.
 
-```{r}
-#| interactive: true
+```{webr-r}
 # Relative risk (risk ratio)
 rr <- risk1 / risk0
 
-# Population attributable risk (PAR):
-# What fraction of cases in the population are attributable to treatment?
-# PAR = (P(Y=1) - P(Y(0)=1)) / P(Y=1)
+# Population attributable fraction (causal):
+# What fraction of cases would be eliminated if all were untreated?
+# PAF = (P(Y=1) - P(Y(0)=1)) / P(Y=1)
 overall_risk <- mean(dat$died)
 par_frac <- (overall_risk - risk0) / overall_risk
 
@@ -106,7 +103,7 @@ knitr::kable(data.frame(
 ))
 ```
 
-The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **population attributable fraction** tells you what proportion of observed cases would be eliminated if the entire population had received control instead of treatment. Neither of these is directly available from a single logistic regression coefficient --- you would need to exponentiate and back-transform, making strong assumptions about the scale. With g-computation, you compute them directly from the predicted counterfactual risks.
+The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **population attributable fraction (causal)** tells you what proportion of observed cases would be eliminated if the entire population had received control instead of treatment. Under the identification assumptions (exchangeability, positivity, consistency), this formula has a causal interpretation: it estimates the fraction of cases that would be eliminated if the entire population had been untreated. This differs from the traditional epidemiologic PAF formula, which uses observed prevalence and does not require causal assumptions but also does not have a causal interpretation. Neither of these measures is directly available from a single logistic regression coefficient --- you would need to exponentiate and back-transform, making strong assumptions about the scale. With g-computation, you compute them directly from the predicted counterfactual risks.
 
 
 # Why G-Computation Works
@@ -148,11 +145,13 @@ G-computation rests entirely on the outcome model $E[Y \mid A, W]$. If that mode
 
 If some strata almost never receive a treatment, g-computation *extrapolates* into regions with little observed data. R will return a number, but it may be meaningless. Check propensity scores for values near 0 or 1:
 
-```{r}
+```{webr-r}
 ps <- predict(glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
                    family = binomial, data = dat), type = "response")
 summary(ps)
 ```
+
+G-computation handles near-positivity violations differently from IPTW. Where IPTW produces extreme weights for observations with propensity scores near 0 or 1, g-computation instead extrapolates from the fitted outcome model. This may be more or less reliable depending on how well the model captures the true outcome surface in sparse regions of the covariate space. The extrapolation is implicit and may not produce visible warnings.
 :::
 
 ---
@@ -163,7 +162,7 @@ summary(ps)
 
 **Practical note.** The biggest limitation of g-computation with logistic regression is that you must get the functional form right. A powerful alternative is to replace the parametric model with a data-adaptive learner (random forests, gradient boosting, GAMs, or a SuperLearner ensemble), reducing reliance on parametric assumptions. In later chapters we systematically integrate SuperLearner with **TMLE**.
 
-```{r, eval=F}
+```{webr-r, eval=F}
 library(SuperLearner)
 
 sl_mod <- SuperLearner(
@@ -187,7 +186,7 @@ mean(p1_sl - p0_sl)
 
 A key limitation of g-computation is that it provides a **point estimate but no standard error or confidence interval** from the procedure itself. Unlike a regression model, which produces standard errors from the Fisher information matrix, g-computation's standardization step has no closed-form variance formula in general. To obtain confidence intervals, you must use the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.
 
-```{r, eval=FALSE}
+```{webr-r, eval=FALSE}
 # Bootstrap confidence interval for g-computation
 set.seed(42)
 n_boot <- 500
