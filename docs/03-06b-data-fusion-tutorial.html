@@ -520,6 +520,19 @@ window.Quarto = {
 </header>
 
 
+<div class="callout callout-style-default callout-warning callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+In development
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>This chapter is under active development. Content may be incomplete, change substantially, or contain placeholder material.</p>
+</div>
+</div>
 <p><em>Estimated reading time: 40 minutes</em></p>
 <div class="callout callout-style-default callout-note callout-titled">
 <div class="callout-header d-flex align-content-center">
@@ -1515,477 +1528,483 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 <span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="an">format:</span><span class="co"> html</span></span>
 <span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
 <span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>*Estimated reading time: 40 minutes*</span>
-<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>::: {.callout-note}</span>
-<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a><span class="fu">## Learning objectives</span></span>
-<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Explain why naive pooling of RCT and observational data is dangerous and characterize the bias it introduces</span>
-<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Define the RCT-ATE estimand and state the identification assumptions required to borrow strength from external data</span>
-<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Describe the bias-variance tradeoff that governs when external data help versus hurt</span>
-<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Apply the ES-CV-TMLE method to data-adaptively select whether to pool RCT and RWD</span>
-<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Apply the A-TMLE method for adaptive bias correction when pooling RCT and RWD</span>
-<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Compare the two approaches in terms of when each is preferred and interpret their output</span>
-<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>::: {.callout-important}</span>
-<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and scope</span></span>
-<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>This chapter is a tutorial companion to the methodological papers by Dang et al. (2022) and van der Laan, Qiu, and van der Laan (2024). The methods are implemented in the <span class="in">`EScvtmle`</span> and <span class="in">`atmle`</span> R packages. Code examples use simulated data with known ground truth; real applications require careful attention to the identification assumptions discussed below.</span>
-<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a><span class="co">#| include: false</span></span>
-<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span>opts_chunk<span class="sc">$</span><span class="fu">set</span>(</span>
-<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a>  <span class="at">collapse =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a>  <span class="at">comment =</span> <span class="st">"#&gt;"</span>,</span>
-<span id="cb6-31"><a href="#cb6-31" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.width =</span> <span class="dv">7</span>,</span>
-<span id="cb6-32"><a href="#cb6-32" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.height =</span> <span class="dv">4</span>,</span>
-<span id="cb6-33"><a href="#cb6-33" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.align =</span> <span class="st">"center"</span></span>
-<span id="cb6-34"><a href="#cb6-34" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb6-35"><a href="#cb6-35" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb6-36"><a href="#cb6-36" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-37"><a href="#cb6-37" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-38"><a href="#cb6-38" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why This Chapter Matters</span></span>
-<span id="cb6-39"><a href="#cb6-39" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-40"><a href="#cb6-40" aria-hidden="true" tabindex="-1"></a><span class="co">[</span><span class="ot">Chapter 3.6</span><span class="co">](03-06-rwd-meets-rct-hybrid-designs.qmd)</span> introduced the conceptual framework for combining randomized and observational data. This chapter provides the practical implementation, walking through two state-of-the-art TMLE-based methods for data fusion: **ES-CV-TMLE** (Experiment-Selector Cross-Validated TMLE) and **A-TMLE** (Adaptive TMLE).</span>
-<span id="cb6-41"><a href="#cb6-41" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-42"><a href="#cb6-42" aria-hidden="true" tabindex="-1"></a>The promise of data fusion is simple: a small RCT provides internal validity (unbiased treatment effect estimation), while a large observational dataset provides statistical power (more patients, narrower confidence intervals). If we could safely combine them, we would get the best of both worlds: unbiased estimates with the precision of a much larger study.</span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>::: {.callout-warning}</span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="fu">## In development</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>This chapter is under active development. Content may be incomplete, change substantially, or contain placeholder material.</span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>*Estimated reading time: 40 minutes*</span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>::: {.callout-note}</span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a><span class="fu">## Learning objectives</span></span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Explain why naive pooling of RCT and observational data is dangerous and characterize the bias it introduces</span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Define the RCT-ATE estimand and state the identification assumptions required to borrow strength from external data</span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Describe the bias-variance tradeoff that governs when external data help versus hurt</span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Apply the ES-CV-TMLE method to data-adaptively select whether to pool RCT and RWD</span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Apply the A-TMLE method for adaptive bias correction when pooling RCT and RWD</span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Compare the two approaches in terms of when each is preferred and interpret their output</span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a>::: {.callout-important}</span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and scope</span></span>
+<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a>This chapter is a tutorial companion to the methodological papers by Dang et al. (2022) and van der Laan, Qiu, and van der Laan (2024). The methods are implemented in the <span class="in">`EScvtmle`</span> and <span class="in">`atmle`</span> R packages. Code examples use simulated data with known ground truth; real applications require careful attention to the identification assumptions discussed below.</span>
+<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-32"><a href="#cb6-32" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb6-33"><a href="#cb6-33" aria-hidden="true" tabindex="-1"></a><span class="co">#| include: false</span></span>
+<span id="cb6-34"><a href="#cb6-34" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span>opts_chunk<span class="sc">$</span><span class="fu">set</span>(</span>
+<span id="cb6-35"><a href="#cb6-35" aria-hidden="true" tabindex="-1"></a>  <span class="at">collapse =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb6-36"><a href="#cb6-36" aria-hidden="true" tabindex="-1"></a>  <span class="at">comment =</span> <span class="st">"#&gt;"</span>,</span>
+<span id="cb6-37"><a href="#cb6-37" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.width =</span> <span class="dv">7</span>,</span>
+<span id="cb6-38"><a href="#cb6-38" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.height =</span> <span class="dv">4</span>,</span>
+<span id="cb6-39"><a href="#cb6-39" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.align =</span> <span class="st">"center"</span></span>
+<span id="cb6-40"><a href="#cb6-40" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb6-41"><a href="#cb6-41" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb6-42"><a href="#cb6-42" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb6-43"><a href="#cb6-43" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-44"><a href="#cb6-44" aria-hidden="true" tabindex="-1"></a>The danger is equally simple: if the observational data are biased (due to unmeasured confounding, different standard of care, or population differences), naive pooling imports that bias into the estimate and can produce confidently wrong conclusions. The target estimand throughout is the treatment effect in the trial-eligible population, estimated with improved precision by borrowing information from the external data.</span>
+<span id="cb6-44"><a href="#cb6-44" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why This Chapter Matters</span></span>
 <span id="cb6-45"><a href="#cb6-45" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-46"><a href="#cb6-46" aria-hidden="true" tabindex="-1"></a>The two methods in this chapter address this danger in complementary ways:</span>
+<span id="cb6-46"><a href="#cb6-46" aria-hidden="true" tabindex="-1"></a><span class="co">[</span><span class="ot">Chapter 3.6</span><span class="co">](03-06-rwd-meets-rct-hybrid-designs.qmd)</span> introduced the conceptual framework for combining randomized and observational data. This chapter provides the practical implementation, walking through two state-of-the-art TMLE-based methods for data fusion: **ES-CV-TMLE** (Experiment-Selector Cross-Validated TMLE) and **A-TMLE** (Adaptive TMLE).</span>
 <span id="cb6-47"><a href="#cb6-47" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-48"><a href="#cb6-48" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**ES-CV-TMLE** <span class="co">[</span><span class="ot">@dang2022escvtmle</span><span class="co">]</span> uses cross-validation to decide whether to pool at all, selecting the experiment (RCT-only vs. RCT+RWD) that minimizes an estimated bias-squared-plus-variance criterion.</span>
-<span id="cb6-49"><a href="#cb6-49" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**A-TMLE** <span class="co">[</span><span class="ot">@vanderLaan2025atmle</span><span class="co">]</span> directly estimates and corrects the bias from pooling, using the highly adaptive lasso to learn the bias structure without pre-specifying its functional form.</span>
-<span id="cb6-50"><a href="#cb6-50" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-51"><a href="#cb6-51" aria-hidden="true" tabindex="-1"></a>Both methods build on the TMLE framework from <span class="co">[</span><span class="ot">Chapter 2.3</span><span class="co">](02-03-doubly-robust-tmle.qmd)</span> and the Super Learner machinery from <span class="co">[</span><span class="ot">Chapter 2.5</span><span class="co">](02-04-superlearner.qmd)</span>.</span>
-<span id="cb6-52"><a href="#cb6-52" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-48"><a href="#cb6-48" aria-hidden="true" tabindex="-1"></a>The promise of data fusion is simple: a small RCT provides internal validity (unbiased treatment effect estimation), while a large observational dataset provides statistical power (more patients, narrower confidence intervals). If we could safely combine them, we would get the best of both worlds: unbiased estimates with the precision of a much larger study.</span>
+<span id="cb6-49"><a href="#cb6-49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-50"><a href="#cb6-50" aria-hidden="true" tabindex="-1"></a>The danger is equally simple: if the observational data are biased (due to unmeasured confounding, different standard of care, or population differences), naive pooling imports that bias into the estimate and can produce confidently wrong conclusions. The target estimand throughout is the treatment effect in the trial-eligible population, estimated with improved precision by borrowing information from the external data.</span>
+<span id="cb6-51"><a href="#cb6-51" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-52"><a href="#cb6-52" aria-hidden="true" tabindex="-1"></a>The two methods in this chapter address this danger in complementary ways:</span>
 <span id="cb6-53"><a href="#cb6-53" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-54"><a href="#cb6-54" aria-hidden="true" tabindex="-1"></a><span class="fu"># The Danger of Naive Pooling</span></span>
-<span id="cb6-55"><a href="#cb6-55" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-56"><a href="#cb6-56" aria-hidden="true" tabindex="-1"></a><span class="fu">## A motivating scenario</span></span>
-<span id="cb6-57"><a href="#cb6-57" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-58"><a href="#cb6-58" aria-hidden="true" tabindex="-1"></a>Suppose you have a small RCT of 400 patients comparing a new diabetes drug to standard of care, with a composite cardiovascular event (MACE) as the primary endpoint. The RCT alone yields a risk difference of $-0.7\%$ with a wide 95% CI of $<span class="co">[</span><span class="ot">-2.0\%, 0.5\%</span><span class="co">]</span>$, not statistically significant.</span>
+<span id="cb6-54"><a href="#cb6-54" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**ES-CV-TMLE** <span class="co">[</span><span class="ot">@dang2022escvtmle</span><span class="co">]</span> uses cross-validation to decide whether to pool at all, selecting the experiment (RCT-only vs. RCT+RWD) that minimizes an estimated bias-squared-plus-variance criterion.</span>
+<span id="cb6-55"><a href="#cb6-55" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**A-TMLE** <span class="co">[</span><span class="ot">@vanderLaan2025atmle</span><span class="co">]</span> directly estimates and corrects the bias from pooling, using the highly adaptive lasso to learn the bias structure without pre-specifying its functional form.</span>
+<span id="cb6-56"><a href="#cb6-56" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-57"><a href="#cb6-57" aria-hidden="true" tabindex="-1"></a>Both methods build on the TMLE framework from <span class="co">[</span><span class="ot">Chapter 2.3</span><span class="co">](02-03-doubly-robust-tmle.qmd)</span> and the Super Learner machinery from <span class="co">[</span><span class="ot">Chapter 2.5</span><span class="co">](02-04-superlearner.qmd)</span>.</span>
+<span id="cb6-58"><a href="#cb6-58" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb6-59"><a href="#cb6-59" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-60"><a href="#cb6-60" aria-hidden="true" tabindex="-1"></a>You also have access to a large claims database (e.g., Optum) with 14,000 patients on the same two treatments. Naive pooling (simply combining the datasets and running TMLE on the merged data) might yield a tighter CI. But the claims data has unmeasured confounders: patients who received the new drug may have been healthier, more adherent, or under closer monitoring. If these unmeasured factors differ between treatment groups, the observational treatment effect is biased.</span>
+<span id="cb6-60"><a href="#cb6-60" aria-hidden="true" tabindex="-1"></a><span class="fu"># The Danger of Naive Pooling</span></span>
 <span id="cb6-61"><a href="#cb6-61" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-62"><a href="#cb6-62" aria-hidden="true" tabindex="-1"></a>The naive pooled estimate might be $-2.5\%$ with a tight CI of $<span class="co">[</span><span class="ot">-3.5\%, -1.5\%</span><span class="co">]</span>$, statistically significant, but *wrong*. The narrow CI gives false confidence in a biased estimate.</span>
+<span id="cb6-62"><a href="#cb6-62" aria-hidden="true" tabindex="-1"></a><span class="fu">## A motivating scenario</span></span>
 <span id="cb6-63"><a href="#cb6-63" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-64"><a href="#cb6-64" aria-hidden="true" tabindex="-1"></a><span class="fu">## Formalizing the bias</span></span>
+<span id="cb6-64"><a href="#cb6-64" aria-hidden="true" tabindex="-1"></a>Suppose you have a small RCT of 400 patients comparing a new diabetes drug to standard of care, with a composite cardiovascular event (MACE) as the primary endpoint. The RCT alone yields a risk difference of $-0.7\%$ with a wide 95% CI of $<span class="co">[</span><span class="ot">-2.0\%, 0.5\%</span><span class="co">]</span>$, not statistically significant.</span>
 <span id="cb6-65"><a href="#cb6-65" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-66"><a href="#cb6-66" aria-hidden="true" tabindex="-1"></a>Let $S$ denote the study indicator ($S = 1$ for RCT, $S = 0$ for RWD), $A$ the treatment, $Y$ the outcome, and $W$ baseline covariates. The **pooled-ATE** estimand is:</span>
+<span id="cb6-66"><a href="#cb6-66" aria-hidden="true" tabindex="-1"></a>You also have access to a large claims database (e.g., Optum) with 14,000 patients on the same two treatments. Naive pooling (simply combining the datasets and running TMLE on the merged data) might yield a tighter CI. But the claims data has unmeasured confounders: patients who received the new drug may have been healthier, more adherent, or under closer monitoring. If these unmeasured factors differ between treatment groups, the observational treatment effect is biased.</span>
 <span id="cb6-67"><a href="#cb6-67" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-68"><a href="#cb6-68" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb6-69"><a href="#cb6-69" aria-hidden="true" tabindex="-1"></a>\tilde{\Psi}(P_0) = E\big<span class="co">[</span><span class="ot">E(Y \mid W, A = 1) - E(Y \mid W, A = 0)\big</span><span class="co">]</span></span>
-<span id="cb6-70"><a href="#cb6-70" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb6-68"><a href="#cb6-68" aria-hidden="true" tabindex="-1"></a>The naive pooled estimate might be $-2.5\%$ with a tight CI of $<span class="co">[</span><span class="ot">-3.5\%, -1.5\%</span><span class="co">]</span>$, statistically significant, but *wrong*. The narrow CI gives false confidence in a biased estimate.</span>
+<span id="cb6-69"><a href="#cb6-69" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-70"><a href="#cb6-70" aria-hidden="true" tabindex="-1"></a><span class="fu">## Formalizing the bias</span></span>
 <span id="cb6-71"><a href="#cb6-71" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-72"><a href="#cb6-72" aria-hidden="true" tabindex="-1"></a>This pools the outcome regression across both studies. When the conditional mean outcome differs between studies ($E(Y_a \mid S = 1, W) \neq E(Y_a \mid W)$), the pooled-ATE is biased for the true treatment effect.</span>
+<span id="cb6-72"><a href="#cb6-72" aria-hidden="true" tabindex="-1"></a>Let $S$ denote the study indicator ($S = 1$ for RCT, $S = 0$ for RWD), $A$ the treatment, $Y$ the outcome, and $W$ baseline covariates. The **pooled-ATE** estimand is:</span>
 <span id="cb6-73"><a href="#cb6-73" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-74"><a href="#cb6-74" aria-hidden="true" tabindex="-1"></a>The **RCT-ATE** estimand uses only the trial's outcome model but marginalizes over the broader covariate distribution:</span>
-<span id="cb6-75"><a href="#cb6-75" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-74"><a href="#cb6-74" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb6-75"><a href="#cb6-75" aria-hidden="true" tabindex="-1"></a>\tilde{\Psi}(P_0) = E\big<span class="co">[</span><span class="ot">E(Y \mid W, A = 1) - E(Y \mid W, A = 0)\big</span><span class="co">]</span></span>
 <span id="cb6-76"><a href="#cb6-76" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb6-77"><a href="#cb6-77" aria-hidden="true" tabindex="-1"></a>\Psi(P_0) = E_W\big<span class="co">[</span><span class="ot">E(Y \mid S = 1, W, A = 1) - E(Y \mid S = 1, W, A = 0)\big</span><span class="co">]</span></span>
-<span id="cb6-78"><a href="#cb6-78" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb6-77"><a href="#cb6-77" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-78"><a href="#cb6-78" aria-hidden="true" tabindex="-1"></a>This pools the outcome regression across both studies. When the conditional mean outcome differs between studies ($E(Y_a \mid S = 1, W) \neq E(Y_a \mid W)$), the pooled-ATE is biased for the true treatment effect.</span>
 <span id="cb6-79"><a href="#cb6-79" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-80"><a href="#cb6-80" aria-hidden="true" tabindex="-1"></a>The **bias** is the difference:</span>
+<span id="cb6-80"><a href="#cb6-80" aria-hidden="true" tabindex="-1"></a>The **RCT-ATE** estimand uses only the trial's outcome model but marginalizes over the broader covariate distribution:</span>
 <span id="cb6-81"><a href="#cb6-81" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb6-82"><a href="#cb6-82" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb6-83"><a href="#cb6-83" aria-hidden="true" tabindex="-1"></a>\Psi^{<span class="sc">\#</span>}(P_0) = \tilde{\Psi}(P_0) - \Psi(P_0)</span>
+<span id="cb6-83"><a href="#cb6-83" aria-hidden="true" tabindex="-1"></a>\Psi(P_0) = E_W\big<span class="co">[</span><span class="ot">E(Y \mid S = 1, W, A = 1) - E(Y \mid S = 1, W, A = 0)\big</span><span class="co">]</span></span>
 <span id="cb6-84"><a href="#cb6-84" aria-hidden="true" tabindex="-1"></a>$$</span>
 <span id="cb6-85"><a href="#cb6-85" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-86"><a href="#cb6-86" aria-hidden="true" tabindex="-1"></a>Both ES-CV-TMLE and A-TMLE target the RCT-ATE $\Psi(P_0)$, either by detecting when $\Psi^{<span class="sc">\#</span>}$ is large enough to reject the external data (ES-CV-TMLE) or by directly estimating and subtracting $\Psi^{<span class="sc">\#</span>}$ (A-TMLE).</span>
+<span id="cb6-86"><a href="#cb6-86" aria-hidden="true" tabindex="-1"></a>The **bias** is the difference:</span>
 <span id="cb6-87"><a href="#cb6-87" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-88"><a href="#cb6-88" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-89"><a href="#cb6-89" aria-hidden="true" tabindex="-1"></a><span class="fu"># Identification Assumptions</span></span>
-<span id="cb6-90"><a href="#cb6-90" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-91"><a href="#cb6-91" aria-hidden="true" tabindex="-1"></a>To use external data at all, we need:</span>
-<span id="cb6-92"><a href="#cb6-92" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-93"><a href="#cb6-93" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**Mean exchangeability in the trial**: $E(Y_a \mid S = 1, W, A = a) = E(Y_a \mid S = 1, W)$. This holds by randomization.</span>
+<span id="cb6-88"><a href="#cb6-88" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb6-89"><a href="#cb6-89" aria-hidden="true" tabindex="-1"></a>\Psi^{<span class="sc">\#</span>}(P_0) = \tilde{\Psi}(P_0) - \Psi(P_0)</span>
+<span id="cb6-90"><a href="#cb6-90" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb6-91"><a href="#cb6-91" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-92"><a href="#cb6-92" aria-hidden="true" tabindex="-1"></a>Both ES-CV-TMLE and A-TMLE target the RCT-ATE $\Psi(P_0)$, either by detecting when $\Psi^{<span class="sc">\#</span>}$ is large enough to reject the external data (ES-CV-TMLE) or by directly estimating and subtracting $\Psi^{<span class="sc">\#</span>}$ (A-TMLE).</span>
+<span id="cb6-93"><a href="#cb6-93" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb6-94"><a href="#cb6-94" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-95"><a href="#cb6-95" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**Positivity of trial enrollment**: $P(S = 1 \mid W) &gt; 0$ for all covariate strata. The RCT must include patients from every subpopulation represented in the RWD. This is the overlap condition between studies.</span>
+<span id="cb6-95"><a href="#cb6-95" aria-hidden="true" tabindex="-1"></a><span class="fu"># Identification Assumptions</span></span>
 <span id="cb6-96"><a href="#cb6-96" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-97"><a href="#cb6-97" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Positivity of treatment in the trial**: $0 &lt; P(A = 1 \mid S = 1, W) &lt; 1$. This holds by randomization design.</span>
+<span id="cb6-97"><a href="#cb6-97" aria-hidden="true" tabindex="-1"></a>To use external data at all, we need:</span>
 <span id="cb6-98"><a href="#cb6-98" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-99"><a href="#cb6-99" aria-hidden="true" tabindex="-1"></a><span class="ss">4. </span>**Mean exchangeability across studies** (the critical assumption): $E(Y_a \mid S = 1, W) = E(Y_a \mid W)$. The treatment effect conditional on covariates is the same in the trial and the real-world population. This fails when unmeasured confounders in the RWD affect outcomes differently than in the trial. For example, if trial patients receive more intensive monitoring that independently reduces MACE risk, then the outcome model differs between trial and real-world settings even after conditioning on measured covariates.</span>
+<span id="cb6-99"><a href="#cb6-99" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**Mean exchangeability in the trial**: $E(Y_a \mid S = 1, W, A = a) = E(Y_a \mid S = 1, W)$. This holds by randomization.</span>
 <span id="cb6-100"><a href="#cb6-100" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-101"><a href="#cb6-101" aria-hidden="true" tabindex="-1"></a>Assumption 4 is the one that makes data fusion dangerous. ES-CV-TMLE and A-TMLE are designed to be robust when this assumption fails: they either detect the violation and fall back to the RCT-only estimate, or they estimate and correct the resulting bias.</span>
+<span id="cb6-101"><a href="#cb6-101" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**Positivity of trial enrollment**: $P(S = 1 \mid W) &gt; 0$ for all covariate strata. The RCT must include patients from every subpopulation represented in the RWD. This is the overlap condition between studies.</span>
 <span id="cb6-102"><a href="#cb6-102" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-103"><a href="#cb6-103" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-104"><a href="#cb6-104" aria-hidden="true" tabindex="-1"></a><span class="fu"># The Bias-Variance Tradeoff</span></span>
-<span id="cb6-105"><a href="#cb6-105" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-106"><a href="#cb6-106" aria-hidden="true" tabindex="-1"></a>The fundamental insight behind both methods is that combining RCT and RWD involves a tradeoff:</span>
-<span id="cb6-107"><a href="#cb6-107" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-108"><a href="#cb6-108" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Variance reduction**: Adding more data reduces the variance of the treatment effect estimate. The RWD contributes information about the outcome regression $E(Y \mid W, A)$, which helps predict outcomes more precisely.</span>
-<span id="cb6-109"><a href="#cb6-109" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Bias introduction**: If the RWD outcome model differs from the RCT's, pooling introduces bias proportional to $\Psi^{<span class="sc">\#</span>}$.</span>
-<span id="cb6-110"><a href="#cb6-110" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-111"><a href="#cb6-111" aria-hidden="true" tabindex="-1"></a>The optimal strategy depends on whether the bias is small enough relative to the variance reduction. If $|\Psi^{<span class="sc">\#</span>}|^2 &lt; \text{variance reduction from pooling}$, pooling helps. Otherwise, it hurts.</span>
-<span id="cb6-112"><a href="#cb6-112" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-113"><a href="#cb6-113" aria-hidden="true" tabindex="-1"></a>ES-CV-TMLE and A-TMLE handle this tradeoff differently:</span>
-<span id="cb6-114"><a href="#cb6-114" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-115"><a href="#cb6-115" aria-hidden="true" tabindex="-1"></a>| Feature | ES-CV-TMLE | A-TMLE |</span>
-<span id="cb6-116"><a href="#cb6-116" aria-hidden="true" tabindex="-1"></a>|---------|-----------|--------|</span>
-<span id="cb6-117"><a href="#cb6-117" aria-hidden="true" tabindex="-1"></a>| Strategy | Select: pool or not? | Correct: estimate and subtract bias |</span>
-<span id="cb6-118"><a href="#cb6-118" aria-hidden="true" tabindex="-1"></a>| Selection criterion | Cross-validated bias$^2$ + variance | Adaptive working model via HAL |</span>
-<span id="cb6-119"><a href="#cb6-119" aria-hidden="true" tabindex="-1"></a>| When external data have small, simple bias | Pools (gains efficiency) | Corrects bias (gains efficiency) |</span>
-<span id="cb6-120"><a href="#cb6-120" aria-hidden="true" tabindex="-1"></a>| When external data have large bias | Rejects external data | Subtracts bias (falls back to RCT-like width) |</span>
-<span id="cb6-121"><a href="#cb6-121" aria-hidden="true" tabindex="-1"></a>| When external data have small but complex bias | May not detect it | Still gains efficiency (key advantage) |</span>
-<span id="cb6-122"><a href="#cb6-122" aria-hidden="true" tabindex="-1"></a>| Negative control outcomes | Supported (improves bias detection) | Not currently implemented |</span>
-<span id="cb6-123"><a href="#cb6-123" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-124"><a href="#cb6-124" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-125"><a href="#cb6-125" aria-hidden="true" tabindex="-1"></a><span class="fu"># Setup: Installing the Packages</span></span>
-<span id="cb6-126"><a href="#cb6-126" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-127"><a href="#cb6-127" aria-hidden="true" tabindex="-1"></a>Both packages are available on GitHub. Install them before proceeding:</span>
-<span id="cb6-128"><a href="#cb6-128" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-131"><a href="#cb6-131" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb6-132"><a href="#cb6-132" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
-<span id="cb6-133"><a href="#cb6-133" aria-hidden="true" tabindex="-1"></a><span class="co"># Install ES-CV-TMLE</span></span>
-<span id="cb6-134"><a href="#cb6-134" aria-hidden="true" tabindex="-1"></a>remotes<span class="sc">::</span><span class="fu">install_github</span>(<span class="st">"Lauren-EylerDang/EScvtmle"</span>)</span>
-<span id="cb6-135"><a href="#cb6-135" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-136"><a href="#cb6-136" aria-hidden="true" tabindex="-1"></a><span class="co"># Install A-TMLE (requires sl3 from tlverse)</span></span>
-<span id="cb6-137"><a href="#cb6-137" aria-hidden="true" tabindex="-1"></a>remotes<span class="sc">::</span><span class="fu">install_github</span>(<span class="st">"tlverse/sl3"</span>)</span>
-<span id="cb6-138"><a href="#cb6-138" aria-hidden="true" tabindex="-1"></a>remotes<span class="sc">::</span><span class="fu">install_github</span>(<span class="st">"tq21/atmle"</span>)</span>
-<span id="cb6-139"><a href="#cb6-139" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb6-140"><a href="#cb6-140" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-143"><a href="#cb6-143" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb6-144"><a href="#cb6-144" aria-hidden="true" tabindex="-1"></a><span class="co">#| include: false</span></span>
-<span id="cb6-145"><a href="#cb6-145" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
-<span id="cb6-146"><a href="#cb6-146" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(EScvtmle)</span>
-<span id="cb6-147"><a href="#cb6-147" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(atmle)</span>
-<span id="cb6-148"><a href="#cb6-148" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb6-149"><a href="#cb6-149" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-150"><a href="#cb6-150" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-151"><a href="#cb6-151" aria-hidden="true" tabindex="-1"></a><span class="fu"># Method 1: ES-CV-TMLE (Experiment-Selector CV-TMLE)</span></span>
-<span id="cb6-152"><a href="#cb6-152" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-153"><a href="#cb6-153" aria-hidden="true" tabindex="-1"></a><span class="fu">## How it works</span></span>
-<span id="cb6-154"><a href="#cb6-154" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-155"><a href="#cb6-155" aria-hidden="true" tabindex="-1"></a>ES-CV-TMLE uses V-fold cross-validation to decide whether pooling helps or hurts (Dang et al. 2022). The algorithm proceeds as follows:</span>
+<span id="cb6-103"><a href="#cb6-103" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Positivity of treatment in the trial**: $0 &lt; P(A = 1 \mid S = 1, W) &lt; 1$. This holds by randomization design.</span>
+<span id="cb6-104"><a href="#cb6-104" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-105"><a href="#cb6-105" aria-hidden="true" tabindex="-1"></a><span class="ss">4. </span>**Mean exchangeability across studies** (the critical assumption): $E(Y_a \mid S = 1, W) = E(Y_a \mid W)$. The treatment effect conditional on covariates is the same in the trial and the real-world population. This fails when unmeasured confounders in the RWD affect outcomes differently than in the trial. For example, if trial patients receive more intensive monitoring that independently reduces MACE risk, then the outcome model differs between trial and real-world settings even after conditioning on measured covariates.</span>
+<span id="cb6-106"><a href="#cb6-106" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-107"><a href="#cb6-107" aria-hidden="true" tabindex="-1"></a>Assumption 4 is the one that makes data fusion dangerous. ES-CV-TMLE and A-TMLE are designed to be robust when this assumption fails: they either detect the violation and fall back to the RCT-only estimate, or they estimate and correct the resulting bias.</span>
+<span id="cb6-108"><a href="#cb6-108" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-109"><a href="#cb6-109" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-110"><a href="#cb6-110" aria-hidden="true" tabindex="-1"></a><span class="fu"># The Bias-Variance Tradeoff</span></span>
+<span id="cb6-111"><a href="#cb6-111" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-112"><a href="#cb6-112" aria-hidden="true" tabindex="-1"></a>The fundamental insight behind both methods is that combining RCT and RWD involves a tradeoff:</span>
+<span id="cb6-113"><a href="#cb6-113" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-114"><a href="#cb6-114" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Variance reduction**: Adding more data reduces the variance of the treatment effect estimate. The RWD contributes information about the outcome regression $E(Y \mid W, A)$, which helps predict outcomes more precisely.</span>
+<span id="cb6-115"><a href="#cb6-115" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Bias introduction**: If the RWD outcome model differs from the RCT's, pooling introduces bias proportional to $\Psi^{<span class="sc">\#</span>}$.</span>
+<span id="cb6-116"><a href="#cb6-116" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-117"><a href="#cb6-117" aria-hidden="true" tabindex="-1"></a>The optimal strategy depends on whether the bias is small enough relative to the variance reduction. If $|\Psi^{<span class="sc">\#</span>}|^2 &lt; \text{variance reduction from pooling}$, pooling helps. Otherwise, it hurts.</span>
+<span id="cb6-118"><a href="#cb6-118" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-119"><a href="#cb6-119" aria-hidden="true" tabindex="-1"></a>ES-CV-TMLE and A-TMLE handle this tradeoff differently:</span>
+<span id="cb6-120"><a href="#cb6-120" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-121"><a href="#cb6-121" aria-hidden="true" tabindex="-1"></a>| Feature | ES-CV-TMLE | A-TMLE |</span>
+<span id="cb6-122"><a href="#cb6-122" aria-hidden="true" tabindex="-1"></a>|---------|-----------|--------|</span>
+<span id="cb6-123"><a href="#cb6-123" aria-hidden="true" tabindex="-1"></a>| Strategy | Select: pool or not? | Correct: estimate and subtract bias |</span>
+<span id="cb6-124"><a href="#cb6-124" aria-hidden="true" tabindex="-1"></a>| Selection criterion | Cross-validated bias$^2$ + variance | Adaptive working model via HAL |</span>
+<span id="cb6-125"><a href="#cb6-125" aria-hidden="true" tabindex="-1"></a>| When external data have small, simple bias | Pools (gains efficiency) | Corrects bias (gains efficiency) |</span>
+<span id="cb6-126"><a href="#cb6-126" aria-hidden="true" tabindex="-1"></a>| When external data have large bias | Rejects external data | Subtracts bias (falls back to RCT-like width) |</span>
+<span id="cb6-127"><a href="#cb6-127" aria-hidden="true" tabindex="-1"></a>| When external data have small but complex bias | May not detect it | Still gains efficiency (key advantage) |</span>
+<span id="cb6-128"><a href="#cb6-128" aria-hidden="true" tabindex="-1"></a>| Negative control outcomes | Supported (improves bias detection) | Not currently implemented |</span>
+<span id="cb6-129"><a href="#cb6-129" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-130"><a href="#cb6-130" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-131"><a href="#cb6-131" aria-hidden="true" tabindex="-1"></a><span class="fu"># Setup: Installing the Packages</span></span>
+<span id="cb6-132"><a href="#cb6-132" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-133"><a href="#cb6-133" aria-hidden="true" tabindex="-1"></a>Both packages are available on GitHub. Install them before proceeding:</span>
+<span id="cb6-134"><a href="#cb6-134" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-137"><a href="#cb6-137" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb6-138"><a href="#cb6-138" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
+<span id="cb6-139"><a href="#cb6-139" aria-hidden="true" tabindex="-1"></a><span class="co"># Install ES-CV-TMLE</span></span>
+<span id="cb6-140"><a href="#cb6-140" aria-hidden="true" tabindex="-1"></a>remotes<span class="sc">::</span><span class="fu">install_github</span>(<span class="st">"Lauren-EylerDang/EScvtmle"</span>)</span>
+<span id="cb6-141"><a href="#cb6-141" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-142"><a href="#cb6-142" aria-hidden="true" tabindex="-1"></a><span class="co"># Install A-TMLE (requires sl3 from tlverse)</span></span>
+<span id="cb6-143"><a href="#cb6-143" aria-hidden="true" tabindex="-1"></a>remotes<span class="sc">::</span><span class="fu">install_github</span>(<span class="st">"tlverse/sl3"</span>)</span>
+<span id="cb6-144"><a href="#cb6-144" aria-hidden="true" tabindex="-1"></a>remotes<span class="sc">::</span><span class="fu">install_github</span>(<span class="st">"tq21/atmle"</span>)</span>
+<span id="cb6-145"><a href="#cb6-145" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb6-146"><a href="#cb6-146" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-149"><a href="#cb6-149" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb6-150"><a href="#cb6-150" aria-hidden="true" tabindex="-1"></a><span class="co">#| include: false</span></span>
+<span id="cb6-151"><a href="#cb6-151" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
+<span id="cb6-152"><a href="#cb6-152" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(EScvtmle)</span>
+<span id="cb6-153"><a href="#cb6-153" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(atmle)</span>
+<span id="cb6-154"><a href="#cb6-154" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb6-155"><a href="#cb6-155" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb6-156"><a href="#cb6-156" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-157"><a href="#cb6-157" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**Split** the combined (RCT + RWD) dataset into V cross-validation folds.</span>
-<span id="cb6-158"><a href="#cb6-158" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**In each training fold**, fit outcome regressions, treatment mechanisms, and study enrollment models. Compute the ATE under two "experiments": (a) RCT data only, (b) RCT + RWD pooled.</span>
-<span id="cb6-159"><a href="#cb6-159" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Evaluate** a selection criterion for each experiment: estimated bias$^2$ + variance. The bias is estimated from the discrepancy between the RCT-only and pooled outcome models. Optionally, a negative control outcome (NCO) can sharpen the bias estimate.</span>
-<span id="cb6-160"><a href="#cb6-160" aria-hidden="true" tabindex="-1"></a><span class="ss">4. </span>**Select** the experiment that minimizes the criterion in each fold.</span>
-<span id="cb6-161"><a href="#cb6-161" aria-hidden="true" tabindex="-1"></a><span class="ss">5. </span>**In the validation fold**, estimate the ATE using TMLE for the selected experiment.</span>
-<span id="cb6-162"><a href="#cb6-162" aria-hidden="true" tabindex="-1"></a><span class="ss">6. </span>**Average** across validation folds to produce the final estimate and confidence interval.</span>
-<span id="cb6-163"><a href="#cb6-163" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-164"><a href="#cb6-164" aria-hidden="true" tabindex="-1"></a>The cross-validation is critical: it prevents the selection from overfitting to the training data. The proportion of folds that select pooling provides a useful diagnostic: if most folds select RCT-only, the external data are likely biased.</span>
-<span id="cb6-165"><a href="#cb6-165" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-166"><a href="#cb6-166" aria-hidden="true" tabindex="-1"></a><span class="fu">## Application: WASH Benefits example</span></span>
-<span id="cb6-167"><a href="#cb6-167" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-168"><a href="#cb6-168" aria-hidden="true" tabindex="-1"></a>The <span class="in">`EScvtmle`</span> package includes data from the WASH Benefits Bangladesh trial, which studied the effect of sanitation interventions on child growth (length-for-age Z-scores). The dataset includes:</span>
+<span id="cb6-157"><a href="#cb6-157" aria-hidden="true" tabindex="-1"></a><span class="fu"># Method 1: ES-CV-TMLE (Experiment-Selector CV-TMLE)</span></span>
+<span id="cb6-158"><a href="#cb6-158" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-159"><a href="#cb6-159" aria-hidden="true" tabindex="-1"></a><span class="fu">## How it works</span></span>
+<span id="cb6-160"><a href="#cb6-160" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-161"><a href="#cb6-161" aria-hidden="true" tabindex="-1"></a>ES-CV-TMLE uses V-fold cross-validation to decide whether pooling helps or hurts (Dang et al. 2022). The algorithm proceeds as follows:</span>
+<span id="cb6-162"><a href="#cb6-162" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-163"><a href="#cb6-163" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**Split** the combined (RCT + RWD) dataset into V cross-validation folds.</span>
+<span id="cb6-164"><a href="#cb6-164" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**In each training fold**, fit outcome regressions, treatment mechanisms, and study enrollment models. Compute the ATE under two "experiments": (a) RCT data only, (b) RCT + RWD pooled.</span>
+<span id="cb6-165"><a href="#cb6-165" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Evaluate** a selection criterion for each experiment: estimated bias$^2$ + variance. The bias is estimated from the discrepancy between the RCT-only and pooled outcome models. Optionally, a negative control outcome (NCO) can sharpen the bias estimate.</span>
+<span id="cb6-166"><a href="#cb6-166" aria-hidden="true" tabindex="-1"></a><span class="ss">4. </span>**Select** the experiment that minimizes the criterion in each fold.</span>
+<span id="cb6-167"><a href="#cb6-167" aria-hidden="true" tabindex="-1"></a><span class="ss">5. </span>**In the validation fold**, estimate the ATE using TMLE for the selected experiment.</span>
+<span id="cb6-168"><a href="#cb6-168" aria-hidden="true" tabindex="-1"></a><span class="ss">6. </span>**Average** across validation folds to produce the final estimate and confidence interval.</span>
 <span id="cb6-169"><a href="#cb6-169" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-170"><a href="#cb6-170" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Study 1** ($S = 1$): A random sample of 300 observations from the RCT (150 sanitation, 150 control)</span>
-<span id="cb6-171"><a href="#cb6-171" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Study 2** ($S = 0$, unbiased): Another random sample of 300 from the remaining RCT data, used as an unbiased external dataset</span>
-<span id="cb6-172"><a href="#cb6-172" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Study 3** ($S = 0$, biased): An observational sample where "treatment" is having an improved latrine at baseline, likely confounded by socioeconomic status</span>
+<span id="cb6-170"><a href="#cb6-170" aria-hidden="true" tabindex="-1"></a>The cross-validation is critical: it prevents the selection from overfitting to the training data. The proportion of folds that select pooling provides a useful diagnostic: if most folds select RCT-only, the external data are likely biased.</span>
+<span id="cb6-171"><a href="#cb6-171" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-172"><a href="#cb6-172" aria-hidden="true" tabindex="-1"></a><span class="fu">## Application: WASH Benefits example</span></span>
 <span id="cb6-173"><a href="#cb6-173" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-174"><a href="#cb6-174" aria-hidden="true" tabindex="-1"></a>This setup lets us test ES-CV-TMLE under both unbiased and biased external data.</span>
+<span id="cb6-174"><a href="#cb6-174" aria-hidden="true" tabindex="-1"></a>The <span class="in">`EScvtmle`</span> package includes data from the WASH Benefits Bangladesh trial, which studied the effect of sanitation interventions on child growth (length-for-age Z-scores). The dataset includes:</span>
 <span id="cb6-175"><a href="#cb6-175" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-176"><a href="#cb6-176" aria-hidden="true" tabindex="-1"></a><span class="fu">### Unbiased external data</span></span>
-<span id="cb6-177"><a href="#cb6-177" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-180"><a href="#cb6-180" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb6-181"><a href="#cb6-181" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
-<span id="cb6-182"><a href="#cb6-182" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(EScvtmle)</span>
+<span id="cb6-176"><a href="#cb6-176" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Study 1** ($S = 1$): A random sample of 300 observations from the RCT (150 sanitation, 150 control)</span>
+<span id="cb6-177"><a href="#cb6-177" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Study 2** ($S = 0$, unbiased): Another random sample of 300 from the remaining RCT data, used as an unbiased external dataset</span>
+<span id="cb6-178"><a href="#cb6-178" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Study 3** ($S = 0$, biased): An observational sample where "treatment" is having an improved latrine at baseline, likely confounded by socioeconomic status</span>
+<span id="cb6-179"><a href="#cb6-179" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-180"><a href="#cb6-180" aria-hidden="true" tabindex="-1"></a>This setup lets us test ES-CV-TMLE under both unbiased and biased external data.</span>
+<span id="cb6-181"><a href="#cb6-181" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-182"><a href="#cb6-182" aria-hidden="true" tabindex="-1"></a><span class="fu">### Unbiased external data</span></span>
 <span id="cb6-183"><a href="#cb6-183" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-184"><a href="#cb6-184" aria-hidden="true" tabindex="-1"></a><span class="fu">data</span>(wash)</span>
-<span id="cb6-185"><a href="#cb6-185" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-186"><a href="#cb6-186" aria-hidden="true" tabindex="-1"></a><span class="co"># Use studies 1 (RCT) and 2 (unbiased external)</span></span>
-<span id="cb6-187"><a href="#cb6-187" aria-hidden="true" tabindex="-1"></a>dat_unbiased <span class="ot">&lt;-</span> wash[wash<span class="sc">$</span>study <span class="sc">%in%</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>), ]</span>
-<span id="cb6-188"><a href="#cb6-188" aria-hidden="true" tabindex="-1"></a>dat_unbiased<span class="sc">$</span>study[dat_unbiased<span class="sc">$</span>study <span class="sc">==</span> <span class="dv">2</span>] <span class="ot">&lt;-</span> <span class="dv">0</span></span>
+<span id="cb6-186"><a href="#cb6-186" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb6-187"><a href="#cb6-187" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
+<span id="cb6-188"><a href="#cb6-188" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(EScvtmle)</span>
 <span id="cb6-189"><a href="#cb6-189" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-190"><a href="#cb6-190" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2026</span>)</span>
-<span id="cb6-191"><a href="#cb6-191" aria-hidden="true" tabindex="-1"></a>results_unbiased <span class="ot">&lt;-</span> <span class="fu">ES.cvtmle</span>(</span>
-<span id="cb6-192"><a href="#cb6-192" aria-hidden="true" tabindex="-1"></a>  <span class="at">txinrwd =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb6-193"><a href="#cb6-193" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat_unbiased,</span>
-<span id="cb6-194"><a href="#cb6-194" aria-hidden="true" tabindex="-1"></a>  <span class="at">study =</span> <span class="st">"study"</span>,</span>
-<span id="cb6-195"><a href="#cb6-195" aria-hidden="true" tabindex="-1"></a>  <span class="at">covariates =</span> <span class="fu">c</span>(<span class="st">"aged"</span>, <span class="st">"sex"</span>, <span class="st">"momedu"</span>, <span class="st">"hfiacat"</span>),</span>
-<span id="cb6-196"><a href="#cb6-196" aria-hidden="true" tabindex="-1"></a>  <span class="at">treatment_var =</span> <span class="st">"intervention"</span>,</span>
-<span id="cb6-197"><a href="#cb6-197" aria-hidden="true" tabindex="-1"></a>  <span class="at">treatment =</span> <span class="dv">1</span>,</span>
-<span id="cb6-198"><a href="#cb6-198" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome =</span> <span class="st">"laz"</span>,</span>
-<span id="cb6-199"><a href="#cb6-199" aria-hidden="true" tabindex="-1"></a>  <span class="at">NCO =</span> <span class="st">"Nlt18scale"</span>,</span>
-<span id="cb6-200"><a href="#cb6-200" aria-hidden="true" tabindex="-1"></a>  <span class="at">pRCT =</span> <span class="fl">0.5</span>,</span>
-<span id="cb6-201"><a href="#cb6-201" aria-hidden="true" tabindex="-1"></a>  <span class="at">V =</span> <span class="dv">10</span>,</span>
-<span id="cb6-202"><a href="#cb6-202" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
-<span id="cb6-203"><a href="#cb6-203" aria-hidden="true" tabindex="-1"></a>  <span class="at">g.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>),</span>
-<span id="cb6-204"><a href="#cb6-204" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q.discreteSL =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb6-205"><a href="#cb6-205" aria-hidden="true" tabindex="-1"></a>  <span class="at">g.discreteSL =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb6-206"><a href="#cb6-206" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="st">"gaussian"</span>,</span>
-<span id="cb6-207"><a href="#cb6-207" aria-hidden="true" tabindex="-1"></a>  <span class="at">family_nco =</span> <span class="st">"gaussian"</span>,</span>
-<span id="cb6-208"><a href="#cb6-208" aria-hidden="true" tabindex="-1"></a>  <span class="at">fluctuation =</span> <span class="st">"logistic"</span>,</span>
-<span id="cb6-209"><a href="#cb6-209" aria-hidden="true" tabindex="-1"></a>  <span class="at">comparisons =</span> <span class="fu">list</span>(<span class="fu">c</span>(<span class="dv">1</span>), <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">0</span>)),</span>
-<span id="cb6-210"><a href="#cb6-210" aria-hidden="true" tabindex="-1"></a>  <span class="at">adjustnco =</span> <span class="cn">FALSE</span>,</span>
-<span id="cb6-211"><a href="#cb6-211" aria-hidden="true" tabindex="-1"></a>  <span class="at">target.gwt =</span> <span class="cn">TRUE</span></span>
-<span id="cb6-212"><a href="#cb6-212" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb6-213"><a href="#cb6-213" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-214"><a href="#cb6-214" aria-hidden="true" tabindex="-1"></a><span class="co"># Results</span></span>
-<span id="cb6-215"><a href="#cb6-215" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(results_unbiased)</span>
-<span id="cb6-216"><a href="#cb6-216" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb6-217"><a href="#cb6-217" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-218"><a href="#cb6-218" aria-hidden="true" tabindex="-1"></a>Key arguments:</span>
+<span id="cb6-190"><a href="#cb6-190" aria-hidden="true" tabindex="-1"></a><span class="fu">data</span>(wash)</span>
+<span id="cb6-191"><a href="#cb6-191" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-192"><a href="#cb6-192" aria-hidden="true" tabindex="-1"></a><span class="co"># Use studies 1 (RCT) and 2 (unbiased external)</span></span>
+<span id="cb6-193"><a href="#cb6-193" aria-hidden="true" tabindex="-1"></a>dat_unbiased <span class="ot">&lt;-</span> wash[wash<span class="sc">$</span>study <span class="sc">%in%</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>), ]</span>
+<span id="cb6-194"><a href="#cb6-194" aria-hidden="true" tabindex="-1"></a>dat_unbiased<span class="sc">$</span>study[dat_unbiased<span class="sc">$</span>study <span class="sc">==</span> <span class="dv">2</span>] <span class="ot">&lt;-</span> <span class="dv">0</span></span>
+<span id="cb6-195"><a href="#cb6-195" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-196"><a href="#cb6-196" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2026</span>)</span>
+<span id="cb6-197"><a href="#cb6-197" aria-hidden="true" tabindex="-1"></a>results_unbiased <span class="ot">&lt;-</span> <span class="fu">ES.cvtmle</span>(</span>
+<span id="cb6-198"><a href="#cb6-198" aria-hidden="true" tabindex="-1"></a>  <span class="at">txinrwd =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb6-199"><a href="#cb6-199" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat_unbiased,</span>
+<span id="cb6-200"><a href="#cb6-200" aria-hidden="true" tabindex="-1"></a>  <span class="at">study =</span> <span class="st">"study"</span>,</span>
+<span id="cb6-201"><a href="#cb6-201" aria-hidden="true" tabindex="-1"></a>  <span class="at">covariates =</span> <span class="fu">c</span>(<span class="st">"aged"</span>, <span class="st">"sex"</span>, <span class="st">"momedu"</span>, <span class="st">"hfiacat"</span>),</span>
+<span id="cb6-202"><a href="#cb6-202" aria-hidden="true" tabindex="-1"></a>  <span class="at">treatment_var =</span> <span class="st">"intervention"</span>,</span>
+<span id="cb6-203"><a href="#cb6-203" aria-hidden="true" tabindex="-1"></a>  <span class="at">treatment =</span> <span class="dv">1</span>,</span>
+<span id="cb6-204"><a href="#cb6-204" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome =</span> <span class="st">"laz"</span>,</span>
+<span id="cb6-205"><a href="#cb6-205" aria-hidden="true" tabindex="-1"></a>  <span class="at">NCO =</span> <span class="st">"Nlt18scale"</span>,</span>
+<span id="cb6-206"><a href="#cb6-206" aria-hidden="true" tabindex="-1"></a>  <span class="at">pRCT =</span> <span class="fl">0.5</span>,</span>
+<span id="cb6-207"><a href="#cb6-207" aria-hidden="true" tabindex="-1"></a>  <span class="at">V =</span> <span class="dv">10</span>,</span>
+<span id="cb6-208"><a href="#cb6-208" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
+<span id="cb6-209"><a href="#cb6-209" aria-hidden="true" tabindex="-1"></a>  <span class="at">g.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>),</span>
+<span id="cb6-210"><a href="#cb6-210" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q.discreteSL =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb6-211"><a href="#cb6-211" aria-hidden="true" tabindex="-1"></a>  <span class="at">g.discreteSL =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb6-212"><a href="#cb6-212" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="st">"gaussian"</span>,</span>
+<span id="cb6-213"><a href="#cb6-213" aria-hidden="true" tabindex="-1"></a>  <span class="at">family_nco =</span> <span class="st">"gaussian"</span>,</span>
+<span id="cb6-214"><a href="#cb6-214" aria-hidden="true" tabindex="-1"></a>  <span class="at">fluctuation =</span> <span class="st">"logistic"</span>,</span>
+<span id="cb6-215"><a href="#cb6-215" aria-hidden="true" tabindex="-1"></a>  <span class="at">comparisons =</span> <span class="fu">list</span>(<span class="fu">c</span>(<span class="dv">1</span>), <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">0</span>)),</span>
+<span id="cb6-216"><a href="#cb6-216" aria-hidden="true" tabindex="-1"></a>  <span class="at">adjustnco =</span> <span class="cn">FALSE</span>,</span>
+<span id="cb6-217"><a href="#cb6-217" aria-hidden="true" tabindex="-1"></a>  <span class="at">target.gwt =</span> <span class="cn">TRUE</span></span>
+<span id="cb6-218"><a href="#cb6-218" aria-hidden="true" tabindex="-1"></a>)</span>
 <span id="cb6-219"><a href="#cb6-219" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-220"><a href="#cb6-220" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`txinrwd = TRUE`</span>: The active treatment is available in the external data.</span>
-<span id="cb6-221"><a href="#cb6-221" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`comparisons = list(c(1), c(1, 0))`</span>: Compare two experiments: RCT only ($S = 1$) vs. RCT + RWD ($S \in <span class="sc">\{</span>1, 0<span class="sc">\}</span>$).</span>
-<span id="cb6-222"><a href="#cb6-222" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`NCO = "Nlt18scale"`</span>: Negative control outcome (household members $\leq 18$), which should not be affected by sanitation intervention.</span>
-<span id="cb6-223"><a href="#cb6-223" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`V = 10`</span>: 10-fold cross-validation.</span>
-<span id="cb6-224"><a href="#cb6-224" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-225"><a href="#cb6-225" aria-hidden="true" tabindex="-1"></a>With unbiased external data, we expect most folds to select pooling, producing a narrower CI than RCT-only.</span>
-<span id="cb6-226"><a href="#cb6-226" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-227"><a href="#cb6-227" aria-hidden="true" tabindex="-1"></a><span class="fu">### Biased external data</span></span>
-<span id="cb6-228"><a href="#cb6-228" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-231"><a href="#cb6-231" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb6-232"><a href="#cb6-232" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
-<span id="cb6-233"><a href="#cb6-233" aria-hidden="true" tabindex="-1"></a><span class="co"># Use studies 1 (RCT) and 3 (biased external)</span></span>
-<span id="cb6-234"><a href="#cb6-234" aria-hidden="true" tabindex="-1"></a>dat_biased <span class="ot">&lt;-</span> wash[wash<span class="sc">$</span>study <span class="sc">%in%</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">3</span>), ]</span>
-<span id="cb6-235"><a href="#cb6-235" aria-hidden="true" tabindex="-1"></a>dat_biased<span class="sc">$</span>study[dat_biased<span class="sc">$</span>study <span class="sc">==</span> <span class="dv">3</span>] <span class="ot">&lt;-</span> <span class="dv">0</span></span>
-<span id="cb6-236"><a href="#cb6-236" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-237"><a href="#cb6-237" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2026</span>)</span>
-<span id="cb6-238"><a href="#cb6-238" aria-hidden="true" tabindex="-1"></a>results_biased <span class="ot">&lt;-</span> <span class="fu">ES.cvtmle</span>(</span>
-<span id="cb6-239"><a href="#cb6-239" aria-hidden="true" tabindex="-1"></a>  <span class="at">txinrwd =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb6-240"><a href="#cb6-240" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat_biased,</span>
-<span id="cb6-241"><a href="#cb6-241" aria-hidden="true" tabindex="-1"></a>  <span class="at">study =</span> <span class="st">"study"</span>,</span>
-<span id="cb6-242"><a href="#cb6-242" aria-hidden="true" tabindex="-1"></a>  <span class="at">covariates =</span> <span class="fu">c</span>(<span class="st">"aged"</span>, <span class="st">"sex"</span>, <span class="st">"momedu"</span>, <span class="st">"hfiacat"</span>),</span>
-<span id="cb6-243"><a href="#cb6-243" aria-hidden="true" tabindex="-1"></a>  <span class="at">treatment_var =</span> <span class="st">"intervention"</span>,</span>
-<span id="cb6-244"><a href="#cb6-244" aria-hidden="true" tabindex="-1"></a>  <span class="at">treatment =</span> <span class="dv">1</span>,</span>
-<span id="cb6-245"><a href="#cb6-245" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome =</span> <span class="st">"laz"</span>,</span>
-<span id="cb6-246"><a href="#cb6-246" aria-hidden="true" tabindex="-1"></a>  <span class="at">NCO =</span> <span class="st">"Nlt18scale"</span>,</span>
-<span id="cb6-247"><a href="#cb6-247" aria-hidden="true" tabindex="-1"></a>  <span class="at">pRCT =</span> <span class="fl">0.5</span>,</span>
-<span id="cb6-248"><a href="#cb6-248" aria-hidden="true" tabindex="-1"></a>  <span class="at">V =</span> <span class="dv">10</span>,</span>
-<span id="cb6-249"><a href="#cb6-249" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
-<span id="cb6-250"><a href="#cb6-250" aria-hidden="true" tabindex="-1"></a>  <span class="at">g.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>),</span>
-<span id="cb6-251"><a href="#cb6-251" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q.discreteSL =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb6-252"><a href="#cb6-252" aria-hidden="true" tabindex="-1"></a>  <span class="at">g.discreteSL =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb6-253"><a href="#cb6-253" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="st">"gaussian"</span>,</span>
-<span id="cb6-254"><a href="#cb6-254" aria-hidden="true" tabindex="-1"></a>  <span class="at">family_nco =</span> <span class="st">"gaussian"</span>,</span>
-<span id="cb6-255"><a href="#cb6-255" aria-hidden="true" tabindex="-1"></a>  <span class="at">fluctuation =</span> <span class="st">"logistic"</span>,</span>
-<span id="cb6-256"><a href="#cb6-256" aria-hidden="true" tabindex="-1"></a>  <span class="at">comparisons =</span> <span class="fu">list</span>(<span class="fu">c</span>(<span class="dv">1</span>), <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">0</span>)),</span>
-<span id="cb6-257"><a href="#cb6-257" aria-hidden="true" tabindex="-1"></a>  <span class="at">adjustnco =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb6-258"><a href="#cb6-258" aria-hidden="true" tabindex="-1"></a>  <span class="at">target.gwt =</span> <span class="cn">TRUE</span></span>
-<span id="cb6-259"><a href="#cb6-259" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb6-260"><a href="#cb6-260" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-261"><a href="#cb6-261" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(results_biased)</span>
-<span id="cb6-262"><a href="#cb6-262" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb6-263"><a href="#cb6-263" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-264"><a href="#cb6-264" aria-hidden="true" tabindex="-1"></a>With biased external data, we expect most folds to select RCT-only. The <span class="in">`adjustnco = TRUE`</span> flag incorporates the negative control outcome into the bias estimate, which can improve the method's ability to detect bias.</span>
-<span id="cb6-265"><a href="#cb6-265" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-266"><a href="#cb6-266" aria-hidden="true" tabindex="-1"></a><span class="fu">### Interpreting ES-CV-TMLE output</span></span>
-<span id="cb6-267"><a href="#cb6-267" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-268"><a href="#cb6-268" aria-hidden="true" tabindex="-1"></a>The output includes:</span>
+<span id="cb6-220"><a href="#cb6-220" aria-hidden="true" tabindex="-1"></a><span class="co"># Results</span></span>
+<span id="cb6-221"><a href="#cb6-221" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(results_unbiased)</span>
+<span id="cb6-222"><a href="#cb6-222" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb6-223"><a href="#cb6-223" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-224"><a href="#cb6-224" aria-hidden="true" tabindex="-1"></a>Key arguments:</span>
+<span id="cb6-225"><a href="#cb6-225" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-226"><a href="#cb6-226" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`txinrwd = TRUE`</span>: The active treatment is available in the external data.</span>
+<span id="cb6-227"><a href="#cb6-227" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`comparisons = list(c(1), c(1, 0))`</span>: Compare two experiments: RCT only ($S = 1$) vs. RCT + RWD ($S \in <span class="sc">\{</span>1, 0<span class="sc">\}</span>$).</span>
+<span id="cb6-228"><a href="#cb6-228" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`NCO = "Nlt18scale"`</span>: Negative control outcome (household members $\leq 18$), which should not be affected by sanitation intervention.</span>
+<span id="cb6-229"><a href="#cb6-229" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`V = 10`</span>: 10-fold cross-validation.</span>
+<span id="cb6-230"><a href="#cb6-230" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-231"><a href="#cb6-231" aria-hidden="true" tabindex="-1"></a>With unbiased external data, we expect most folds to select pooling, producing a narrower CI than RCT-only.</span>
+<span id="cb6-232"><a href="#cb6-232" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-233"><a href="#cb6-233" aria-hidden="true" tabindex="-1"></a><span class="fu">### Biased external data</span></span>
+<span id="cb6-234"><a href="#cb6-234" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-237"><a href="#cb6-237" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb6-238"><a href="#cb6-238" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
+<span id="cb6-239"><a href="#cb6-239" aria-hidden="true" tabindex="-1"></a><span class="co"># Use studies 1 (RCT) and 3 (biased external)</span></span>
+<span id="cb6-240"><a href="#cb6-240" aria-hidden="true" tabindex="-1"></a>dat_biased <span class="ot">&lt;-</span> wash[wash<span class="sc">$</span>study <span class="sc">%in%</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">3</span>), ]</span>
+<span id="cb6-241"><a href="#cb6-241" aria-hidden="true" tabindex="-1"></a>dat_biased<span class="sc">$</span>study[dat_biased<span class="sc">$</span>study <span class="sc">==</span> <span class="dv">3</span>] <span class="ot">&lt;-</span> <span class="dv">0</span></span>
+<span id="cb6-242"><a href="#cb6-242" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-243"><a href="#cb6-243" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2026</span>)</span>
+<span id="cb6-244"><a href="#cb6-244" aria-hidden="true" tabindex="-1"></a>results_biased <span class="ot">&lt;-</span> <span class="fu">ES.cvtmle</span>(</span>
+<span id="cb6-245"><a href="#cb6-245" aria-hidden="true" tabindex="-1"></a>  <span class="at">txinrwd =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb6-246"><a href="#cb6-246" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat_biased,</span>
+<span id="cb6-247"><a href="#cb6-247" aria-hidden="true" tabindex="-1"></a>  <span class="at">study =</span> <span class="st">"study"</span>,</span>
+<span id="cb6-248"><a href="#cb6-248" aria-hidden="true" tabindex="-1"></a>  <span class="at">covariates =</span> <span class="fu">c</span>(<span class="st">"aged"</span>, <span class="st">"sex"</span>, <span class="st">"momedu"</span>, <span class="st">"hfiacat"</span>),</span>
+<span id="cb6-249"><a href="#cb6-249" aria-hidden="true" tabindex="-1"></a>  <span class="at">treatment_var =</span> <span class="st">"intervention"</span>,</span>
+<span id="cb6-250"><a href="#cb6-250" aria-hidden="true" tabindex="-1"></a>  <span class="at">treatment =</span> <span class="dv">1</span>,</span>
+<span id="cb6-251"><a href="#cb6-251" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome =</span> <span class="st">"laz"</span>,</span>
+<span id="cb6-252"><a href="#cb6-252" aria-hidden="true" tabindex="-1"></a>  <span class="at">NCO =</span> <span class="st">"Nlt18scale"</span>,</span>
+<span id="cb6-253"><a href="#cb6-253" aria-hidden="true" tabindex="-1"></a>  <span class="at">pRCT =</span> <span class="fl">0.5</span>,</span>
+<span id="cb6-254"><a href="#cb6-254" aria-hidden="true" tabindex="-1"></a>  <span class="at">V =</span> <span class="dv">10</span>,</span>
+<span id="cb6-255"><a href="#cb6-255" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
+<span id="cb6-256"><a href="#cb6-256" aria-hidden="true" tabindex="-1"></a>  <span class="at">g.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>),</span>
+<span id="cb6-257"><a href="#cb6-257" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q.discreteSL =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb6-258"><a href="#cb6-258" aria-hidden="true" tabindex="-1"></a>  <span class="at">g.discreteSL =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb6-259"><a href="#cb6-259" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="st">"gaussian"</span>,</span>
+<span id="cb6-260"><a href="#cb6-260" aria-hidden="true" tabindex="-1"></a>  <span class="at">family_nco =</span> <span class="st">"gaussian"</span>,</span>
+<span id="cb6-261"><a href="#cb6-261" aria-hidden="true" tabindex="-1"></a>  <span class="at">fluctuation =</span> <span class="st">"logistic"</span>,</span>
+<span id="cb6-262"><a href="#cb6-262" aria-hidden="true" tabindex="-1"></a>  <span class="at">comparisons =</span> <span class="fu">list</span>(<span class="fu">c</span>(<span class="dv">1</span>), <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">0</span>)),</span>
+<span id="cb6-263"><a href="#cb6-263" aria-hidden="true" tabindex="-1"></a>  <span class="at">adjustnco =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb6-264"><a href="#cb6-264" aria-hidden="true" tabindex="-1"></a>  <span class="at">target.gwt =</span> <span class="cn">TRUE</span></span>
+<span id="cb6-265"><a href="#cb6-265" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb6-266"><a href="#cb6-266" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-267"><a href="#cb6-267" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(results_biased)</span>
+<span id="cb6-268"><a href="#cb6-268" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
 <span id="cb6-269"><a href="#cb6-269" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-270"><a href="#cb6-270" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`ATE`**: Point estimates under the bias$^2$+variance selector (<span class="in">`b2v`</span>) and the NCO-adjusted selector (<span class="in">`ncobias`</span>).</span>
-<span id="cb6-271"><a href="#cb6-271" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`CI`**: 95% confidence intervals.</span>
-<span id="cb6-272"><a href="#cb6-272" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`proportionselected`**: The fraction of cross-validation folds that selected each experiment. A high proportion selecting RCT-only signals that the external data are likely biased.</span>
-<span id="cb6-273"><a href="#cb6-273" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`g`**: Propensity score values; check for near-zero values indicating positivity violations.</span>
-<span id="cb6-274"><a href="#cb6-274" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-270"><a href="#cb6-270" aria-hidden="true" tabindex="-1"></a>With biased external data, we expect most folds to select RCT-only. The <span class="in">`adjustnco = TRUE`</span> flag incorporates the negative control outcome into the bias estimate, which can improve the method's ability to detect bias.</span>
+<span id="cb6-271"><a href="#cb6-271" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-272"><a href="#cb6-272" aria-hidden="true" tabindex="-1"></a><span class="fu">### Interpreting ES-CV-TMLE output</span></span>
+<span id="cb6-273"><a href="#cb6-273" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-274"><a href="#cb6-274" aria-hidden="true" tabindex="-1"></a>The output includes:</span>
 <span id="cb6-275"><a href="#cb6-275" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-276"><a href="#cb6-276" aria-hidden="true" tabindex="-1"></a><span class="fu"># Method 2: A-TMLE (Adaptive TMLE)</span></span>
-<span id="cb6-277"><a href="#cb6-277" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-278"><a href="#cb6-278" aria-hidden="true" tabindex="-1"></a><span class="fu">## How it works</span></span>
-<span id="cb6-279"><a href="#cb6-279" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-280"><a href="#cb6-280" aria-hidden="true" tabindex="-1"></a>A-TMLE takes a different approach: instead of deciding whether to pool, it always pools but adaptively estimates and corrects the bias (van der Laan, Qiu, and van der Laan 2024). The key innovation is that efficiency gains depend on the **complexity** of the bias, not just its magnitude.</span>
+<span id="cb6-276"><a href="#cb6-276" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`ATE`**: Point estimates under the bias$^2$+variance selector (<span class="in">`b2v`</span>) and the NCO-adjusted selector (<span class="in">`ncobias`</span>).</span>
+<span id="cb6-277"><a href="#cb6-277" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`CI`**: 95% confidence intervals.</span>
+<span id="cb6-278"><a href="#cb6-278" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`proportionselected`**: The fraction of cross-validation folds that selected each experiment. A high proportion selecting RCT-only signals that the external data are likely biased.</span>
+<span id="cb6-279"><a href="#cb6-279" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`g`**: Propensity score values; check for near-zero values indicating positivity violations.</span>
+<span id="cb6-280"><a href="#cb6-280" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb6-281"><a href="#cb6-281" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-282"><a href="#cb6-282" aria-hidden="true" tabindex="-1"></a>The algorithm:</span>
+<span id="cb6-282"><a href="#cb6-282" aria-hidden="true" tabindex="-1"></a><span class="fu"># Method 2: A-TMLE (Adaptive TMLE)</span></span>
 <span id="cb6-283"><a href="#cb6-283" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-284"><a href="#cb6-284" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**Estimate the pooled-ATE** $\tilde{\Psi}$ using standard TMLE on the combined RCT + RWD data.</span>
-<span id="cb6-285"><a href="#cb6-285" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**Estimate the bias** $\Psi^{<span class="sc">\#</span>}$ using a flexible working model. A-TMLE uses the highly adaptive lasso (HAL) to learn the bias structure data-adaptively, without pre-specifying its functional form.</span>
-<span id="cb6-286"><a href="#cb6-286" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Correct**: The final estimate is $\hat{\Psi} = \hat{\tilde{\Psi}} - \hat{\Psi}^{<span class="sc">\#</span>}$.</span>
+<span id="cb6-284"><a href="#cb6-284" aria-hidden="true" tabindex="-1"></a><span class="fu">## How it works</span></span>
+<span id="cb6-285"><a href="#cb6-285" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-286"><a href="#cb6-286" aria-hidden="true" tabindex="-1"></a>A-TMLE takes a different approach: instead of deciding whether to pool, it always pools but adaptively estimates and corrects the bias (van der Laan, Qiu, and van der Laan 2024). The key innovation is that efficiency gains depend on the **complexity** of the bias, not just its magnitude.</span>
 <span id="cb6-287"><a href="#cb6-287" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-288"><a href="#cb6-288" aria-hidden="true" tabindex="-1"></a>The targeting step ensures the final estimator solves the efficient influence function equation, providing valid inference under appropriate regularity conditions regardless of whether the bias working model is correctly specified.</span>
+<span id="cb6-288"><a href="#cb6-288" aria-hidden="true" tabindex="-1"></a>The algorithm:</span>
 <span id="cb6-289"><a href="#cb6-289" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-290"><a href="#cb6-290" aria-hidden="true" tabindex="-1"></a>**Why HAL?** The highly adaptive lasso can approximate any cadlag function, so it can capture complex bias patterns (interactions, nonlinearities) without the analyst having to specify them. If the bias is zero, HAL shrinks $\hat{\Psi}^{<span class="sc">\#</span>}$ toward zero, and the estimator achieves the efficiency of pooling. If the bias is large, $\hat{\Psi}^{<span class="sc">\#</span>}$ captures it, and the estimator falls back toward the RCT-only estimate.</span>
-<span id="cb6-291"><a href="#cb6-291" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-292"><a href="#cb6-292" aria-hidden="true" tabindex="-1"></a><span class="fu">## Application: Simulated RCT + RWD</span></span>
+<span id="cb6-290"><a href="#cb6-290" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**Estimate the pooled-ATE** $\tilde{\Psi}$ using standard TMLE on the combined RCT + RWD data.</span>
+<span id="cb6-291"><a href="#cb6-291" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**Estimate the bias** $\Psi^{<span class="sc">\#</span>}$ using a flexible working model. A-TMLE uses the highly adaptive lasso (HAL) to learn the bias structure data-adaptively, without pre-specifying its functional form.</span>
+<span id="cb6-292"><a href="#cb6-292" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Correct**: The final estimate is $\hat{\Psi} = \hat{\tilde{\Psi}} - \hat{\Psi}^{<span class="sc">\#</span>}$.</span>
 <span id="cb6-293"><a href="#cb6-293" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-294"><a href="#cb6-294" aria-hidden="true" tabindex="-1"></a>The <span class="in">`atmle`</span> package includes a sample dataset for demonstration:</span>
+<span id="cb6-294"><a href="#cb6-294" aria-hidden="true" tabindex="-1"></a>The targeting step ensures the final estimator solves the efficient influence function equation, providing valid inference under appropriate regularity conditions regardless of whether the bias working model is correctly specified.</span>
 <span id="cb6-295"><a href="#cb6-295" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-298"><a href="#cb6-298" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb6-299"><a href="#cb6-299" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
-<span id="cb6-300"><a href="#cb6-300" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(atmle)</span>
-<span id="cb6-301"><a href="#cb6-301" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(sl3)</span>
-<span id="cb6-302"><a href="#cb6-302" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-303"><a href="#cb6-303" aria-hidden="true" tabindex="-1"></a><span class="co"># Load built-in sample data</span></span>
-<span id="cb6-304"><a href="#cb6-304" aria-hidden="true" tabindex="-1"></a><span class="fu">data</span>(sample_data)</span>
-<span id="cb6-305"><a href="#cb6-305" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-306"><a href="#cb6-306" aria-hidden="true" tabindex="-1"></a><span class="co"># Define Super Learner library</span></span>
-<span id="cb6-307"><a href="#cb6-307" aria-hidden="true" tabindex="-1"></a>sl_lib <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
-<span id="cb6-308"><a href="#cb6-308" aria-hidden="true" tabindex="-1"></a>  Lrnr_glm<span class="sc">$</span><span class="fu">new</span>(),</span>
-<span id="cb6-309"><a href="#cb6-309" aria-hidden="true" tabindex="-1"></a>  Lrnr_xgboost<span class="sc">$</span><span class="fu">new</span>()</span>
-<span id="cb6-310"><a href="#cb6-310" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb6-296"><a href="#cb6-296" aria-hidden="true" tabindex="-1"></a>**Why HAL?** The highly adaptive lasso can approximate any cadlag function, so it can capture complex bias patterns (interactions, nonlinearities) without the analyst having to specify them. If the bias is zero, HAL shrinks $\hat{\Psi}^{<span class="sc">\#</span>}$ toward zero, and the estimator achieves the efficiency of pooling. If the bias is large, $\hat{\Psi}^{<span class="sc">\#</span>}$ captures it, and the estimator falls back toward the RCT-only estimate.</span>
+<span id="cb6-297"><a href="#cb6-297" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-298"><a href="#cb6-298" aria-hidden="true" tabindex="-1"></a><span class="fu">## Application: Simulated RCT + RWD</span></span>
+<span id="cb6-299"><a href="#cb6-299" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-300"><a href="#cb6-300" aria-hidden="true" tabindex="-1"></a>The <span class="in">`atmle`</span> package includes a sample dataset for demonstration:</span>
+<span id="cb6-301"><a href="#cb6-301" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-304"><a href="#cb6-304" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb6-305"><a href="#cb6-305" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
+<span id="cb6-306"><a href="#cb6-306" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(atmle)</span>
+<span id="cb6-307"><a href="#cb6-307" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(sl3)</span>
+<span id="cb6-308"><a href="#cb6-308" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-309"><a href="#cb6-309" aria-hidden="true" tabindex="-1"></a><span class="co"># Load built-in sample data</span></span>
+<span id="cb6-310"><a href="#cb6-310" aria-hidden="true" tabindex="-1"></a><span class="fu">data</span>(sample_data)</span>
 <span id="cb6-311"><a href="#cb6-311" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-312"><a href="#cb6-312" aria-hidden="true" tabindex="-1"></a><span class="co"># Standard (non-adaptive) TMLE for comparison</span></span>
-<span id="cb6-313"><a href="#cb6-313" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2026</span>)</span>
-<span id="cb6-314"><a href="#cb6-314" aria-hidden="true" tabindex="-1"></a>tmle_res <span class="ot">&lt;-</span> <span class="fu">nonparametric</span>(</span>
-<span id="cb6-315"><a href="#cb6-315" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> mydata,</span>
-<span id="cb6-316"><a href="#cb6-316" aria-hidden="true" tabindex="-1"></a>  <span class="at">S =</span> <span class="st">"S"</span>,</span>
-<span id="cb6-317"><a href="#cb6-317" aria-hidden="true" tabindex="-1"></a>  <span class="at">W =</span> <span class="fu">c</span>(<span class="st">"W1"</span>, <span class="st">"W2"</span>, <span class="st">"W3"</span>, <span class="st">"W4"</span>),</span>
-<span id="cb6-318"><a href="#cb6-318" aria-hidden="true" tabindex="-1"></a>  <span class="at">A =</span> <span class="st">"A"</span>,</span>
-<span id="cb6-319"><a href="#cb6-319" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> <span class="st">"Y"</span>,</span>
-<span id="cb6-320"><a href="#cb6-320" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="st">"gaussian"</span>,</span>
-<span id="cb6-321"><a href="#cb6-321" aria-hidden="true" tabindex="-1"></a>  <span class="at">Pi_method =</span> sl_lib,</span>
-<span id="cb6-322"><a href="#cb6-322" aria-hidden="true" tabindex="-1"></a>  <span class="at">g_method =</span> <span class="st">"glm"</span>,</span>
-<span id="cb6-323"><a href="#cb6-323" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q_method =</span> sl_lib,</span>
-<span id="cb6-324"><a href="#cb6-324" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q_pooling =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb6-325"><a href="#cb6-325" aria-hidden="true" tabindex="-1"></a>  <span class="at">v_folds =</span> <span class="dv">5</span></span>
-<span id="cb6-326"><a href="#cb6-326" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb6-327"><a href="#cb6-327" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-328"><a href="#cb6-328" aria-hidden="true" tabindex="-1"></a><span class="co"># A-TMLE with HAL-based bias correction</span></span>
-<span id="cb6-329"><a href="#cb6-329" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2026</span>)</span>
-<span id="cb6-330"><a href="#cb6-330" aria-hidden="true" tabindex="-1"></a>atmle_res <span class="ot">&lt;-</span> <span class="fu">atmle</span>(</span>
-<span id="cb6-331"><a href="#cb6-331" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> mydata,</span>
-<span id="cb6-332"><a href="#cb6-332" aria-hidden="true" tabindex="-1"></a>  <span class="at">S =</span> <span class="st">"S"</span>,</span>
-<span id="cb6-333"><a href="#cb6-333" aria-hidden="true" tabindex="-1"></a>  <span class="at">W =</span> <span class="fu">c</span>(<span class="st">"W1"</span>, <span class="st">"W2"</span>, <span class="st">"W3"</span>, <span class="st">"W4"</span>),</span>
-<span id="cb6-334"><a href="#cb6-334" aria-hidden="true" tabindex="-1"></a>  <span class="at">A =</span> <span class="st">"A"</span>,</span>
-<span id="cb6-335"><a href="#cb6-335" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> <span class="st">"Y"</span>,</span>
-<span id="cb6-336"><a href="#cb6-336" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="st">"gaussian"</span>,</span>
-<span id="cb6-337"><a href="#cb6-337" aria-hidden="true" tabindex="-1"></a>  <span class="at">theta_method =</span> sl_lib,</span>
-<span id="cb6-338"><a href="#cb6-338" aria-hidden="true" tabindex="-1"></a>  <span class="at">Pi_method =</span> sl_lib,</span>
-<span id="cb6-339"><a href="#cb6-339" aria-hidden="true" tabindex="-1"></a>  <span class="at">g_method =</span> sl_lib,</span>
-<span id="cb6-340"><a href="#cb6-340" aria-hidden="true" tabindex="-1"></a>  <span class="at">theta_tilde_method =</span> sl_lib,</span>
-<span id="cb6-341"><a href="#cb6-341" aria-hidden="true" tabindex="-1"></a>  <span class="at">bias_working_model =</span> <span class="st">"HAL"</span>,</span>
-<span id="cb6-342"><a href="#cb6-342" aria-hidden="true" tabindex="-1"></a>  <span class="at">pooled_working_model =</span> <span class="st">"HAL"</span>,</span>
-<span id="cb6-343"><a href="#cb6-343" aria-hidden="true" tabindex="-1"></a>  <span class="at">enumerate_basis_args =</span> <span class="fu">list</span>(</span>
-<span id="cb6-344"><a href="#cb6-344" aria-hidden="true" tabindex="-1"></a>    <span class="at">max_degree =</span> <span class="dv">3</span>,</span>
-<span id="cb6-345"><a href="#cb6-345" aria-hidden="true" tabindex="-1"></a>    <span class="at">smoothness_orders =</span> <span class="dv">1</span></span>
-<span id="cb6-346"><a href="#cb6-346" aria-hidden="true" tabindex="-1"></a>  ),</span>
-<span id="cb6-347"><a href="#cb6-347" aria-hidden="true" tabindex="-1"></a>  <span class="at">v_folds =</span> <span class="dv">5</span></span>
-<span id="cb6-348"><a href="#cb6-348" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb6-349"><a href="#cb6-349" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb6-350"><a href="#cb6-350" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-351"><a href="#cb6-351" aria-hidden="true" tabindex="-1"></a>Key arguments:</span>
-<span id="cb6-352"><a href="#cb6-352" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-353"><a href="#cb6-353" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`S = "S"`</span>: Study indicator (1 = RCT, 0 = RWD).</span>
-<span id="cb6-354"><a href="#cb6-354" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`theta_method`</span>, <span class="in">`Pi_method`</span>, <span class="in">`g_method`</span>, <span class="in">`theta_tilde_method`</span>: Super Learner libraries for the outcome regression, study enrollment score, treatment mechanism, and marginal outcome, respectively.</span>
-<span id="cb6-355"><a href="#cb6-355" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`bias_working_model = "HAL"`</span>: Use the highly adaptive lasso to learn the bias structure.</span>
-<span id="cb6-356"><a href="#cb6-356" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`enumerate_basis_args`</span>: Control the complexity of the HAL basis functions (higher <span class="in">`max_degree`</span> allows more complex bias patterns).</span>
-<span id="cb6-357"><a href="#cb6-357" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-358"><a href="#cb6-358" aria-hidden="true" tabindex="-1"></a><span class="fu">### Comparing results</span></span>
-<span id="cb6-359"><a href="#cb6-359" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-362"><a href="#cb6-362" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb6-363"><a href="#cb6-363" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
-<span id="cb6-364"><a href="#cb6-364" aria-hidden="true" tabindex="-1"></a><span class="co"># Compare standard TMLE vs A-TMLE</span></span>
-<span id="cb6-365"><a href="#cb6-365" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Standard TMLE (pooled, no bias correction):</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb6-366"><a href="#cb6-366" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Estimate:"</span>, <span class="fu">round</span>(tmle_res<span class="sc">$</span>psi_pooled_W, <span class="dv">4</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb6-367"><a href="#cb6-367" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  95% CI: ["</span>, <span class="fu">round</span>(tmle_res<span class="sc">$</span>lower_pooled_W, <span class="dv">4</span>), <span class="st">","</span>,</span>
-<span id="cb6-368"><a href="#cb6-368" aria-hidden="true" tabindex="-1"></a>    <span class="fu">round</span>(tmle_res<span class="sc">$</span>upper_pooled_W, <span class="dv">4</span>), <span class="st">"]</span><span class="sc">\n\n</span><span class="st">"</span>)</span>
-<span id="cb6-369"><a href="#cb6-369" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-370"><a href="#cb6-370" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"A-TMLE (bias-corrected):</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb6-371"><a href="#cb6-371" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Pooled-ATE estimate:"</span>, <span class="fu">round</span>(atmle_res<span class="sc">$</span>psi_tilde_est, <span class="dv">4</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb6-372"><a href="#cb6-372" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Estimated bias:"</span>, <span class="fu">round</span>(atmle_res<span class="sc">$</span>psi_pound_est, <span class="dv">4</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb6-373"><a href="#cb6-373" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Corrected estimate:"</span>, <span class="fu">round</span>(atmle_res<span class="sc">$</span>est, <span class="dv">4</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb6-374"><a href="#cb6-374" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  95% CI: ["</span>, <span class="fu">round</span>(atmle_res<span class="sc">$</span>lower, <span class="dv">4</span>), <span class="st">","</span>,</span>
-<span id="cb6-375"><a href="#cb6-375" aria-hidden="true" tabindex="-1"></a>    <span class="fu">round</span>(atmle_res<span class="sc">$</span>upper, <span class="dv">4</span>), <span class="st">"]</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb6-376"><a href="#cb6-376" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb6-377"><a href="#cb6-377" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-378"><a href="#cb6-378" aria-hidden="true" tabindex="-1"></a><span class="fu">### Interpreting A-TMLE output</span></span>
-<span id="cb6-379"><a href="#cb6-379" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-380"><a href="#cb6-380" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`est`**: The bias-corrected ATE estimate $\hat{\Psi} = \hat{\tilde{\Psi}} - \hat{\Psi}^{<span class="sc">\#</span>}$.</span>
-<span id="cb6-381"><a href="#cb6-381" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`psi_tilde_est`**: The pooled-ATE before bias correction.</span>
-<span id="cb6-382"><a href="#cb6-382" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`psi_pound_est`**: The estimated bias. If this is near zero, pooling was safe. If it is large, A-TMLE corrected for substantial external data bias.</span>
-<span id="cb6-383"><a href="#cb6-383" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`lower`, `upper`**: 95% confidence interval based on the efficient influence curve.</span>
-<span id="cb6-384"><a href="#cb6-384" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`eic`**: The efficient influence curve values, useful for diagnostics.</span>
+<span id="cb6-312"><a href="#cb6-312" aria-hidden="true" tabindex="-1"></a><span class="co"># Define Super Learner library</span></span>
+<span id="cb6-313"><a href="#cb6-313" aria-hidden="true" tabindex="-1"></a>sl_lib <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb6-314"><a href="#cb6-314" aria-hidden="true" tabindex="-1"></a>  Lrnr_glm<span class="sc">$</span><span class="fu">new</span>(),</span>
+<span id="cb6-315"><a href="#cb6-315" aria-hidden="true" tabindex="-1"></a>  Lrnr_xgboost<span class="sc">$</span><span class="fu">new</span>()</span>
+<span id="cb6-316"><a href="#cb6-316" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb6-317"><a href="#cb6-317" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-318"><a href="#cb6-318" aria-hidden="true" tabindex="-1"></a><span class="co"># Standard (non-adaptive) TMLE for comparison</span></span>
+<span id="cb6-319"><a href="#cb6-319" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2026</span>)</span>
+<span id="cb6-320"><a href="#cb6-320" aria-hidden="true" tabindex="-1"></a>tmle_res <span class="ot">&lt;-</span> <span class="fu">nonparametric</span>(</span>
+<span id="cb6-321"><a href="#cb6-321" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> mydata,</span>
+<span id="cb6-322"><a href="#cb6-322" aria-hidden="true" tabindex="-1"></a>  <span class="at">S =</span> <span class="st">"S"</span>,</span>
+<span id="cb6-323"><a href="#cb6-323" aria-hidden="true" tabindex="-1"></a>  <span class="at">W =</span> <span class="fu">c</span>(<span class="st">"W1"</span>, <span class="st">"W2"</span>, <span class="st">"W3"</span>, <span class="st">"W4"</span>),</span>
+<span id="cb6-324"><a href="#cb6-324" aria-hidden="true" tabindex="-1"></a>  <span class="at">A =</span> <span class="st">"A"</span>,</span>
+<span id="cb6-325"><a href="#cb6-325" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> <span class="st">"Y"</span>,</span>
+<span id="cb6-326"><a href="#cb6-326" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="st">"gaussian"</span>,</span>
+<span id="cb6-327"><a href="#cb6-327" aria-hidden="true" tabindex="-1"></a>  <span class="at">Pi_method =</span> sl_lib,</span>
+<span id="cb6-328"><a href="#cb6-328" aria-hidden="true" tabindex="-1"></a>  <span class="at">g_method =</span> <span class="st">"glm"</span>,</span>
+<span id="cb6-329"><a href="#cb6-329" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q_method =</span> sl_lib,</span>
+<span id="cb6-330"><a href="#cb6-330" aria-hidden="true" tabindex="-1"></a>  <span class="at">Q_pooling =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb6-331"><a href="#cb6-331" aria-hidden="true" tabindex="-1"></a>  <span class="at">v_folds =</span> <span class="dv">5</span></span>
+<span id="cb6-332"><a href="#cb6-332" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb6-333"><a href="#cb6-333" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-334"><a href="#cb6-334" aria-hidden="true" tabindex="-1"></a><span class="co"># A-TMLE with HAL-based bias correction</span></span>
+<span id="cb6-335"><a href="#cb6-335" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2026</span>)</span>
+<span id="cb6-336"><a href="#cb6-336" aria-hidden="true" tabindex="-1"></a>atmle_res <span class="ot">&lt;-</span> <span class="fu">atmle</span>(</span>
+<span id="cb6-337"><a href="#cb6-337" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> mydata,</span>
+<span id="cb6-338"><a href="#cb6-338" aria-hidden="true" tabindex="-1"></a>  <span class="at">S =</span> <span class="st">"S"</span>,</span>
+<span id="cb6-339"><a href="#cb6-339" aria-hidden="true" tabindex="-1"></a>  <span class="at">W =</span> <span class="fu">c</span>(<span class="st">"W1"</span>, <span class="st">"W2"</span>, <span class="st">"W3"</span>, <span class="st">"W4"</span>),</span>
+<span id="cb6-340"><a href="#cb6-340" aria-hidden="true" tabindex="-1"></a>  <span class="at">A =</span> <span class="st">"A"</span>,</span>
+<span id="cb6-341"><a href="#cb6-341" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> <span class="st">"Y"</span>,</span>
+<span id="cb6-342"><a href="#cb6-342" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="st">"gaussian"</span>,</span>
+<span id="cb6-343"><a href="#cb6-343" aria-hidden="true" tabindex="-1"></a>  <span class="at">theta_method =</span> sl_lib,</span>
+<span id="cb6-344"><a href="#cb6-344" aria-hidden="true" tabindex="-1"></a>  <span class="at">Pi_method =</span> sl_lib,</span>
+<span id="cb6-345"><a href="#cb6-345" aria-hidden="true" tabindex="-1"></a>  <span class="at">g_method =</span> sl_lib,</span>
+<span id="cb6-346"><a href="#cb6-346" aria-hidden="true" tabindex="-1"></a>  <span class="at">theta_tilde_method =</span> sl_lib,</span>
+<span id="cb6-347"><a href="#cb6-347" aria-hidden="true" tabindex="-1"></a>  <span class="at">bias_working_model =</span> <span class="st">"HAL"</span>,</span>
+<span id="cb6-348"><a href="#cb6-348" aria-hidden="true" tabindex="-1"></a>  <span class="at">pooled_working_model =</span> <span class="st">"HAL"</span>,</span>
+<span id="cb6-349"><a href="#cb6-349" aria-hidden="true" tabindex="-1"></a>  <span class="at">enumerate_basis_args =</span> <span class="fu">list</span>(</span>
+<span id="cb6-350"><a href="#cb6-350" aria-hidden="true" tabindex="-1"></a>    <span class="at">max_degree =</span> <span class="dv">3</span>,</span>
+<span id="cb6-351"><a href="#cb6-351" aria-hidden="true" tabindex="-1"></a>    <span class="at">smoothness_orders =</span> <span class="dv">1</span></span>
+<span id="cb6-352"><a href="#cb6-352" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb6-353"><a href="#cb6-353" aria-hidden="true" tabindex="-1"></a>  <span class="at">v_folds =</span> <span class="dv">5</span></span>
+<span id="cb6-354"><a href="#cb6-354" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb6-355"><a href="#cb6-355" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb6-356"><a href="#cb6-356" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-357"><a href="#cb6-357" aria-hidden="true" tabindex="-1"></a>Key arguments:</span>
+<span id="cb6-358"><a href="#cb6-358" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-359"><a href="#cb6-359" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`S = "S"`</span>: Study indicator (1 = RCT, 0 = RWD).</span>
+<span id="cb6-360"><a href="#cb6-360" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`theta_method`</span>, <span class="in">`Pi_method`</span>, <span class="in">`g_method`</span>, <span class="in">`theta_tilde_method`</span>: Super Learner libraries for the outcome regression, study enrollment score, treatment mechanism, and marginal outcome, respectively.</span>
+<span id="cb6-361"><a href="#cb6-361" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`bias_working_model = "HAL"`</span>: Use the highly adaptive lasso to learn the bias structure.</span>
+<span id="cb6-362"><a href="#cb6-362" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`enumerate_basis_args`</span>: Control the complexity of the HAL basis functions (higher <span class="in">`max_degree`</span> allows more complex bias patterns).</span>
+<span id="cb6-363"><a href="#cb6-363" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-364"><a href="#cb6-364" aria-hidden="true" tabindex="-1"></a><span class="fu">### Comparing results</span></span>
+<span id="cb6-365"><a href="#cb6-365" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-368"><a href="#cb6-368" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb6-369"><a href="#cb6-369" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
+<span id="cb6-370"><a href="#cb6-370" aria-hidden="true" tabindex="-1"></a><span class="co"># Compare standard TMLE vs A-TMLE</span></span>
+<span id="cb6-371"><a href="#cb6-371" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Standard TMLE (pooled, no bias correction):</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb6-372"><a href="#cb6-372" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Estimate:"</span>, <span class="fu">round</span>(tmle_res<span class="sc">$</span>psi_pooled_W, <span class="dv">4</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb6-373"><a href="#cb6-373" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  95% CI: ["</span>, <span class="fu">round</span>(tmle_res<span class="sc">$</span>lower_pooled_W, <span class="dv">4</span>), <span class="st">","</span>,</span>
+<span id="cb6-374"><a href="#cb6-374" aria-hidden="true" tabindex="-1"></a>    <span class="fu">round</span>(tmle_res<span class="sc">$</span>upper_pooled_W, <span class="dv">4</span>), <span class="st">"]</span><span class="sc">\n\n</span><span class="st">"</span>)</span>
+<span id="cb6-375"><a href="#cb6-375" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-376"><a href="#cb6-376" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"A-TMLE (bias-corrected):</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb6-377"><a href="#cb6-377" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Pooled-ATE estimate:"</span>, <span class="fu">round</span>(atmle_res<span class="sc">$</span>psi_tilde_est, <span class="dv">4</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb6-378"><a href="#cb6-378" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Estimated bias:"</span>, <span class="fu">round</span>(atmle_res<span class="sc">$</span>psi_pound_est, <span class="dv">4</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb6-379"><a href="#cb6-379" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Corrected estimate:"</span>, <span class="fu">round</span>(atmle_res<span class="sc">$</span>est, <span class="dv">4</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb6-380"><a href="#cb6-380" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  95% CI: ["</span>, <span class="fu">round</span>(atmle_res<span class="sc">$</span>lower, <span class="dv">4</span>), <span class="st">","</span>,</span>
+<span id="cb6-381"><a href="#cb6-381" aria-hidden="true" tabindex="-1"></a>    <span class="fu">round</span>(atmle_res<span class="sc">$</span>upper, <span class="dv">4</span>), <span class="st">"]</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb6-382"><a href="#cb6-382" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb6-383"><a href="#cb6-383" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-384"><a href="#cb6-384" aria-hidden="true" tabindex="-1"></a><span class="fu">### Interpreting A-TMLE output</span></span>
 <span id="cb6-385"><a href="#cb6-385" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-386"><a href="#cb6-386" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-387"><a href="#cb6-387" aria-hidden="true" tabindex="-1"></a><span class="fu"># When to Use Which Method</span></span>
-<span id="cb6-388"><a href="#cb6-388" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-389"><a href="#cb6-389" aria-hidden="true" tabindex="-1"></a>Both methods are valid approaches to data fusion. The choice depends on the setting:</span>
-<span id="cb6-390"><a href="#cb6-390" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-391"><a href="#cb6-391" aria-hidden="true" tabindex="-1"></a>**Prefer ES-CV-TMLE when:**</span>
+<span id="cb6-386"><a href="#cb6-386" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`est`**: The bias-corrected ATE estimate $\hat{\Psi} = \hat{\tilde{\Psi}} - \hat{\Psi}^{<span class="sc">\#</span>}$.</span>
+<span id="cb6-387"><a href="#cb6-387" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`psi_tilde_est`**: The pooled-ATE before bias correction.</span>
+<span id="cb6-388"><a href="#cb6-388" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`psi_pound_est`**: The estimated bias. If this is near zero, pooling was safe. If it is large, A-TMLE corrected for substantial external data bias.</span>
+<span id="cb6-389"><a href="#cb6-389" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`lower`, `upper`**: 95% confidence interval based on the efficient influence curve.</span>
+<span id="cb6-390"><a href="#cb6-390" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**`eic`**: The efficient influence curve values, useful for diagnostics.</span>
+<span id="cb6-391"><a href="#cb6-391" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb6-392"><a href="#cb6-392" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-393"><a href="#cb6-393" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>You have a **negative control outcome** available. ES-CV-TMLE can use NCOs to improve bias detection, which is especially valuable when the bias is subtle.</span>
-<span id="cb6-394"><a href="#cb6-394" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The decision is **binary**: either the external data are trustworthy or they are not. ES-CV-TMLE makes this choice explicitly.</span>
-<span id="cb6-395"><a href="#cb6-395" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>You want a **transparent** decision that is easy to communicate to regulators: "the algorithm selected RCT-only in 8 of 10 folds, indicating the external data are biased."</span>
+<span id="cb6-393"><a href="#cb6-393" aria-hidden="true" tabindex="-1"></a><span class="fu"># When to Use Which Method</span></span>
+<span id="cb6-394"><a href="#cb6-394" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-395"><a href="#cb6-395" aria-hidden="true" tabindex="-1"></a>Both methods are valid approaches to data fusion. The choice depends on the setting:</span>
 <span id="cb6-396"><a href="#cb6-396" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-397"><a href="#cb6-397" aria-hidden="true" tabindex="-1"></a>**Prefer A-TMLE when:**</span>
+<span id="cb6-397"><a href="#cb6-397" aria-hidden="true" tabindex="-1"></a>**Prefer ES-CV-TMLE when:**</span>
 <span id="cb6-398"><a href="#cb6-398" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-399"><a href="#cb6-399" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The bias may be **small but complex** (e.g., it varies across covariate strata). A-TMLE can still gain efficiency even with complex bias patterns, because it learns the bias function rather than testing a global null.</span>
-<span id="cb6-400"><a href="#cb6-400" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>You want to **always use the external data** to improve precision, rather than making a binary pool/reject decision.</span>
-<span id="cb6-401"><a href="#cb6-401" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The RCT is **very small** and you need every bit of efficiency gain. A-TMLE's continuous bias correction can extract more precision than ES-CV-TMLE's binary selection.</span>
+<span id="cb6-399"><a href="#cb6-399" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>You have a **negative control outcome** available. ES-CV-TMLE can use NCOs to improve bias detection, which is especially valuable when the bias is subtle.</span>
+<span id="cb6-400"><a href="#cb6-400" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The decision is **binary**: either the external data are trustworthy or they are not. ES-CV-TMLE makes this choice explicitly.</span>
+<span id="cb6-401"><a href="#cb6-401" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>You want a **transparent** decision that is easy to communicate to regulators: "the algorithm selected RCT-only in 8 of 10 folds, indicating the external data are biased."</span>
 <span id="cb6-402"><a href="#cb6-402" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-403"><a href="#cb6-403" aria-hidden="true" tabindex="-1"></a>In practice, running both methods and comparing their results provides a useful robustness check. If they agree, you can be more confident in the conclusions. If they disagree substantially, the bias structure deserves closer investigation.</span>
+<span id="cb6-403"><a href="#cb6-403" aria-hidden="true" tabindex="-1"></a>**Prefer A-TMLE when:**</span>
 <span id="cb6-404"><a href="#cb6-404" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-405"><a href="#cb6-405" aria-hidden="true" tabindex="-1"></a>::: {.callout-warning}</span>
-<span id="cb6-406"><a href="#cb6-406" aria-hidden="true" tabindex="-1"></a><span class="fu">## A note on what the RCT-only estimate tells you</span></span>
-<span id="cb6-407"><a href="#cb6-407" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-408"><a href="#cb6-408" aria-hidden="true" tabindex="-1"></a>The RCT-only estimate is consistent for the **trial-sample** treatment effect under randomization: it answers the question "what is the average effect among the patients who were enrolled in the trial?" This is internally valid but not necessarily generalizable to a broader target population if the trial enrolled a selected subset of patients.</span>
-<span id="cb6-409"><a href="#cb6-409" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-410"><a href="#cb6-410" aria-hidden="true" tabindex="-1"></a>Data fusion can improve precision for the trial-sample estimand (by augmenting outcome prediction) or enable estimation of a **target-population** estimand (by reweighting to a broader population). Both estimands are legitimate, but they answer different questions.</span>
-<span id="cb6-411"><a href="#cb6-411" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-412"><a href="#cb6-412" aria-hidden="true" tabindex="-1"></a>Always report the RCT-only estimate as a benchmark alongside any data-fusion result, and be explicit about which population the estimand refers to. For the formal treatment of transportability, see <span class="co">[</span><span class="ot">Chapter 3.13</span><span class="co">](03-13-transportability-generalizability.qmd)</span>.</span>
-<span id="cb6-413"><a href="#cb6-413" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb6-414"><a href="#cb6-414" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-405"><a href="#cb6-405" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The bias may be **small but complex** (e.g., it varies across covariate strata). A-TMLE can still gain efficiency even with complex bias patterns, because it learns the bias function rather than testing a global null.</span>
+<span id="cb6-406"><a href="#cb6-406" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>You want to **always use the external data** to improve precision, rather than making a binary pool/reject decision.</span>
+<span id="cb6-407"><a href="#cb6-407" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The RCT is **very small** and you need every bit of efficiency gain. A-TMLE's continuous bias correction can extract more precision than ES-CV-TMLE's binary selection.</span>
+<span id="cb6-408"><a href="#cb6-408" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-409"><a href="#cb6-409" aria-hidden="true" tabindex="-1"></a>In practice, running both methods and comparing their results provides a useful robustness check. If they agree, you can be more confident in the conclusions. If they disagree substantially, the bias structure deserves closer investigation.</span>
+<span id="cb6-410"><a href="#cb6-410" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-411"><a href="#cb6-411" aria-hidden="true" tabindex="-1"></a>::: {.callout-warning}</span>
+<span id="cb6-412"><a href="#cb6-412" aria-hidden="true" tabindex="-1"></a><span class="fu">## A note on what the RCT-only estimate tells you</span></span>
+<span id="cb6-413"><a href="#cb6-413" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-414"><a href="#cb6-414" aria-hidden="true" tabindex="-1"></a>The RCT-only estimate is consistent for the **trial-sample** treatment effect under randomization: it answers the question "what is the average effect among the patients who were enrolled in the trial?" This is internally valid but not necessarily generalizable to a broader target population if the trial enrolled a selected subset of patients.</span>
 <span id="cb6-415"><a href="#cb6-415" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-416"><a href="#cb6-416" aria-hidden="true" tabindex="-1"></a><span class="fu"># Practical Recommendations</span></span>
+<span id="cb6-416"><a href="#cb6-416" aria-hidden="true" tabindex="-1"></a>Data fusion can improve precision for the trial-sample estimand (by augmenting outcome prediction) or enable estimation of a **target-population** estimand (by reweighting to a broader population). Both estimands are legitimate, but they answer different questions.</span>
 <span id="cb6-417"><a href="#cb6-417" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-418"><a href="#cb6-418" aria-hidden="true" tabindex="-1"></a>Based on the methodological literature and the FIORD meeting recommendations (Qiu 2024), we highlight several practical considerations:</span>
-<span id="cb6-419"><a href="#cb6-419" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-420"><a href="#cb6-420" aria-hidden="true" tabindex="-1"></a><span class="fu">## Pre-processing: matching for overlap</span></span>
+<span id="cb6-418"><a href="#cb6-418" aria-hidden="true" tabindex="-1"></a>Always report the RCT-only estimate as a benchmark alongside any data-fusion result, and be explicit about which population the estimand refers to. For the formal treatment of transportability, see <span class="co">[</span><span class="ot">Chapter 3.13</span><span class="co">](03-13-transportability-generalizability.qmd)</span>.</span>
+<span id="cb6-419"><a href="#cb6-419" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb6-420"><a href="#cb6-420" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb6-421"><a href="#cb6-421" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-422"><a href="#cb6-422" aria-hidden="true" tabindex="-1"></a>Before applying either method, ensure that the RCT and RWD populations have adequate covariate overlap. A recommended strategy:</span>
+<span id="cb6-422"><a href="#cb6-422" aria-hidden="true" tabindex="-1"></a><span class="fu"># Practical Recommendations</span></span>
 <span id="cb6-423"><a href="#cb6-423" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-424"><a href="#cb6-424" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**Apply RCT inclusion/exclusion criteria** to the RWD to ensure basic comparability.</span>
-<span id="cb6-425"><a href="#cb6-425" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**Estimate the trial enrollment score** $\hat{\Pi}(1 \mid W) = \hat{P}(S = 1 \mid W)$ using the combined data.</span>
-<span id="cb6-426"><a href="#cb6-426" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Match** each RCT patient with $K$ external patients on the enrollment score (e.g., $K = 3$ nearest-neighbor matching).</span>
-<span id="cb6-427"><a href="#cb6-427" aria-hidden="true" tabindex="-1"></a><span class="ss">4. </span>**Within the matched sample**, estimate the RWD propensity score and optionally apply additional matching.</span>
-<span id="cb6-428"><a href="#cb6-428" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-429"><a href="#cb6-429" aria-hidden="true" tabindex="-1"></a>This two-stage matching makes the trial enrollment score and the RWD propensity score approximately constant across the analysis sample, which improves the finite-sample robustness of both ES-CV-TMLE and A-TMLE.</span>
-<span id="cb6-430"><a href="#cb6-430" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-431"><a href="#cb6-431" aria-hidden="true" tabindex="-1"></a><span class="fu">## Diagnostics</span></span>
-<span id="cb6-432"><a href="#cb6-432" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-433"><a href="#cb6-433" aria-hidden="true" tabindex="-1"></a>After fitting either method, check:</span>
+<span id="cb6-424"><a href="#cb6-424" aria-hidden="true" tabindex="-1"></a>Based on the methodological literature and the FIORD meeting recommendations (Qiu 2024), we highlight several practical considerations:</span>
+<span id="cb6-425"><a href="#cb6-425" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-426"><a href="#cb6-426" aria-hidden="true" tabindex="-1"></a><span class="fu">## Pre-processing: matching for overlap</span></span>
+<span id="cb6-427"><a href="#cb6-427" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-428"><a href="#cb6-428" aria-hidden="true" tabindex="-1"></a>Before applying either method, ensure that the RCT and RWD populations have adequate covariate overlap. A recommended strategy:</span>
+<span id="cb6-429"><a href="#cb6-429" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-430"><a href="#cb6-430" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**Apply RCT inclusion/exclusion criteria** to the RWD to ensure basic comparability.</span>
+<span id="cb6-431"><a href="#cb6-431" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**Estimate the trial enrollment score** $\hat{\Pi}(1 \mid W) = \hat{P}(S = 1 \mid W)$ using the combined data.</span>
+<span id="cb6-432"><a href="#cb6-432" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Match** each RCT patient with $K$ external patients on the enrollment score (e.g., $K = 3$ nearest-neighbor matching).</span>
+<span id="cb6-433"><a href="#cb6-433" aria-hidden="true" tabindex="-1"></a><span class="ss">4. </span>**Within the matched sample**, estimate the RWD propensity score and optionally apply additional matching.</span>
 <span id="cb6-434"><a href="#cb6-434" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-435"><a href="#cb6-435" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Propensity score overlap**: Plot $\hat{P}(S = 1 \mid W)$; if the RCT and RWD populations have minimal overlap, the external data cannot help and may introduce instability.</span>
-<span id="cb6-436"><a href="#cb6-436" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Estimated bias magnitude**: A-TMLE reports $\hat{\Psi}^{<span class="sc">\#</span>}$ directly. For ES-CV-TMLE, the proportion of folds selecting RCT-only is a proxy for bias severity.</span>
-<span id="cb6-437"><a href="#cb6-437" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Influence function values**: Extreme values suggest near-positivity violations or highly influential observations.</span>
+<span id="cb6-435"><a href="#cb6-435" aria-hidden="true" tabindex="-1"></a>This two-stage matching makes the trial enrollment score and the RWD propensity score approximately constant across the analysis sample, which improves the finite-sample robustness of both ES-CV-TMLE and A-TMLE.</span>
+<span id="cb6-436"><a href="#cb6-436" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-437"><a href="#cb6-437" aria-hidden="true" tabindex="-1"></a><span class="fu">## Diagnostics</span></span>
 <span id="cb6-438"><a href="#cb6-438" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-439"><a href="#cb6-439" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sensitivity analysis</span></span>
+<span id="cb6-439"><a href="#cb6-439" aria-hidden="true" tabindex="-1"></a>After fitting either method, check:</span>
 <span id="cb6-440"><a href="#cb6-440" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-441"><a href="#cb6-441" aria-hidden="true" tabindex="-1"></a>Even with these methods, the analyst should report:</span>
-<span id="cb6-442"><a href="#cb6-442" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-443"><a href="#cb6-443" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The **RCT-only estimate** as a benchmark. If the data-fusion estimate deviates substantially from the RCT-only result, investigate why.</span>
-<span id="cb6-444"><a href="#cb6-444" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Results under **different Super Learner libraries** to assess model dependence. For guidance on learner library sensitivity, see <span class="co">[</span><span class="ot">Chapter 3.12</span><span class="co">](03-12-sensitivity-analysis.qmd)</span>.</span>
-<span id="cb6-445"><a href="#cb6-445" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The **proportion of external data retained** after matching, and how results change with stricter or looser matching thresholds.</span>
+<span id="cb6-441"><a href="#cb6-441" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Propensity score overlap**: Plot $\hat{P}(S = 1 \mid W)$; if the RCT and RWD populations have minimal overlap, the external data cannot help and may introduce instability.</span>
+<span id="cb6-442"><a href="#cb6-442" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Estimated bias magnitude**: A-TMLE reports $\hat{\Psi}^{<span class="sc">\#</span>}$ directly. For ES-CV-TMLE, the proportion of folds selecting RCT-only is a proxy for bias severity.</span>
+<span id="cb6-443"><a href="#cb6-443" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Influence function values**: Extreme values suggest near-positivity violations or highly influential observations.</span>
+<span id="cb6-444"><a href="#cb6-444" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-445"><a href="#cb6-445" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sensitivity analysis</span></span>
 <span id="cb6-446"><a href="#cb6-446" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-447"><a href="#cb6-447" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-448"><a href="#cb6-448" aria-hidden="true" tabindex="-1"></a><span class="fu"># Summary</span></span>
-<span id="cb6-449"><a href="#cb6-449" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-450"><a href="#cb6-450" aria-hidden="true" tabindex="-1"></a>Data fusion is a powerful tool for improving the precision of treatment effect estimates, but it requires methods that protect against bias from unmeasured confounding in the external data. ES-CV-TMLE and A-TMLE provide complementary approaches:</span>
-<span id="cb6-451"><a href="#cb6-451" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-452"><a href="#cb6-452" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**ES-CV-TMLE** (Dang et al. 2022) uses cross-validated experiment selection to make a data-adaptive choice between RCT-only and pooled analysis, minimizing an estimated bias$^2$+variance criterion.</span>
-<span id="cb6-453"><a href="#cb6-453" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**A-TMLE** (van der Laan, Qiu, and van der Laan 2024) directly estimates and corrects the bias using the highly adaptive lasso, gaining efficiency whenever the bias is learnable regardless of its complexity.</span>
-<span id="cb6-454"><a href="#cb6-454" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-455"><a href="#cb6-455" aria-hidden="true" tabindex="-1"></a>Both methods build on the TMLE framework, inherit its double robustness and asymptotic efficiency properties, and provide valid inference under appropriate regularity conditions through influence-curve-based standard errors. They represent the current state of the art for principled integration of randomized and real-world evidence.</span>
-<span id="cb6-456"><a href="#cb6-456" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-447"><a href="#cb6-447" aria-hidden="true" tabindex="-1"></a>Even with these methods, the analyst should report:</span>
+<span id="cb6-448"><a href="#cb6-448" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-449"><a href="#cb6-449" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The **RCT-only estimate** as a benchmark. If the data-fusion estimate deviates substantially from the RCT-only result, investigate why.</span>
+<span id="cb6-450"><a href="#cb6-450" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Results under **different Super Learner libraries** to assess model dependence. For guidance on learner library sensitivity, see <span class="co">[</span><span class="ot">Chapter 3.12</span><span class="co">](03-12-sensitivity-analysis.qmd)</span>.</span>
+<span id="cb6-451"><a href="#cb6-451" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The **proportion of external data retained** after matching, and how results change with stricter or looser matching thresholds.</span>
+<span id="cb6-452"><a href="#cb6-452" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-453"><a href="#cb6-453" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-454"><a href="#cb6-454" aria-hidden="true" tabindex="-1"></a><span class="fu"># Summary</span></span>
+<span id="cb6-455"><a href="#cb6-455" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-456"><a href="#cb6-456" aria-hidden="true" tabindex="-1"></a>Data fusion is a powerful tool for improving the precision of treatment effect estimates, but it requires methods that protect against bias from unmeasured confounding in the external data. ES-CV-TMLE and A-TMLE provide complementary approaches:</span>
 <span id="cb6-457"><a href="#cb6-457" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-458"><a href="#cb6-458" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb6-459"><a href="#cb6-459" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-460"><a href="#cb6-460" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
-<span id="cb6-461"><a href="#cb6-461" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-462"><a href="#cb6-462" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb6-463"><a href="#cb6-463" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. Why is naive pooling of RCT and RWD dangerous, even when the RWD sample is much larger?&lt;/strong&gt;&lt;/summary&gt;</span>
-<span id="cb6-464"><a href="#cb6-464" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-465"><a href="#cb6-465" aria-hidden="true" tabindex="-1"></a>Because the observational data may contain unmeasured confounding that biases the treatment effect estimate. Naive pooling imports this bias into the combined estimate. The larger RWD sample dominates the pooled analysis, so the bias from the RWD overwhelms the unbiased signal from the small RCT. The resulting confidence interval is narrow (because of the large sample size) but centered on a biased estimate, producing *confident wrong answers*.</span>
-<span id="cb6-466"><a href="#cb6-466" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-467"><a href="#cb6-467" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
-<span id="cb6-468"><a href="#cb6-468" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-469"><a href="#cb6-469" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb6-470"><a href="#cb6-470" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q2. What is the key difference between the ES-CV-TMLE and A-TMLE strategies?&lt;/strong&gt;&lt;/summary&gt;</span>
-<span id="cb6-471"><a href="#cb6-471" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-472"><a href="#cb6-472" aria-hidden="true" tabindex="-1"></a>ES-CV-TMLE makes a **binary decision**: pool or do not pool, based on a cross-validated bias$^2$+variance criterion. A-TMLE takes a **continuous approach**: it always pools but estimates and subtracts the bias using a flexible working model (HAL). A-TMLE can gain efficiency even when the bias is small but complex (varying across covariate strata), whereas ES-CV-TMLE may fail to detect such bias and either incorrectly pool or conservatively reject.</span>
-<span id="cb6-473"><a href="#cb6-473" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-474"><a href="#cb6-474" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
-<span id="cb6-475"><a href="#cb6-475" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-476"><a href="#cb6-476" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb6-477"><a href="#cb6-477" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q3. Why is the trial enrollment score $P(S = 1 \mid W)$ important for data fusion?&lt;/strong&gt;&lt;/summary&gt;</span>
-<span id="cb6-478"><a href="#cb6-478" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-479"><a href="#cb6-479" aria-hidden="true" tabindex="-1"></a>The trial enrollment score determines the overlap between RCT and RWD populations. If $P(S = 1 \mid W) \approx 0$ for some covariate strata, those strata have no representation in the RCT, so the treatment effect for those patients cannot be learned from the trial. Borrowing strength from RWD for these strata requires the (untestable) assumption that the treatment effect is the same in the trial and the real world. Making the enrollment score approximately constant through matching reduces dependence on this assumption and improves finite-sample performance.</span>
-<span id="cb6-480"><a href="#cb6-480" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-481"><a href="#cb6-481" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
-<span id="cb6-482"><a href="#cb6-482" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-483"><a href="#cb6-483" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-458"><a href="#cb6-458" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**ES-CV-TMLE** (Dang et al. 2022) uses cross-validated experiment selection to make a data-adaptive choice between RCT-only and pooled analysis, minimizing an estimated bias$^2$+variance criterion.</span>
+<span id="cb6-459"><a href="#cb6-459" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**A-TMLE** (van der Laan, Qiu, and van der Laan 2024) directly estimates and corrects the bias using the highly adaptive lasso, gaining efficiency whenever the bias is learnable regardless of its complexity.</span>
+<span id="cb6-460"><a href="#cb6-460" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-461"><a href="#cb6-461" aria-hidden="true" tabindex="-1"></a>Both methods build on the TMLE framework, inherit its double robustness and asymptotic efficiency properties, and provide valid inference under appropriate regularity conditions through influence-curve-based standard errors. They represent the current state of the art for principled integration of randomized and real-world evidence.</span>
+<span id="cb6-462"><a href="#cb6-462" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-463"><a href="#cb6-463" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-464"><a href="#cb6-464" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-465"><a href="#cb6-465" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-466"><a href="#cb6-466" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
+<span id="cb6-467"><a href="#cb6-467" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-468"><a href="#cb6-468" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb6-469"><a href="#cb6-469" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. Why is naive pooling of RCT and RWD dangerous, even when the RWD sample is much larger?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb6-470"><a href="#cb6-470" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-471"><a href="#cb6-471" aria-hidden="true" tabindex="-1"></a>Because the observational data may contain unmeasured confounding that biases the treatment effect estimate. Naive pooling imports this bias into the combined estimate. The larger RWD sample dominates the pooled analysis, so the bias from the RWD overwhelms the unbiased signal from the small RCT. The resulting confidence interval is narrow (because of the large sample size) but centered on a biased estimate, producing *confident wrong answers*.</span>
+<span id="cb6-472"><a href="#cb6-472" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-473"><a href="#cb6-473" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
+<span id="cb6-474"><a href="#cb6-474" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-475"><a href="#cb6-475" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb6-476"><a href="#cb6-476" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q2. What is the key difference between the ES-CV-TMLE and A-TMLE strategies?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb6-477"><a href="#cb6-477" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-478"><a href="#cb6-478" aria-hidden="true" tabindex="-1"></a>ES-CV-TMLE makes a **binary decision**: pool or do not pool, based on a cross-validated bias$^2$+variance criterion. A-TMLE takes a **continuous approach**: it always pools but estimates and subtracts the bias using a flexible working model (HAL). A-TMLE can gain efficiency even when the bias is small but complex (varying across covariate strata), whereas ES-CV-TMLE may fail to detect such bias and either incorrectly pool or conservatively reject.</span>
+<span id="cb6-479"><a href="#cb6-479" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-480"><a href="#cb6-480" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
+<span id="cb6-481"><a href="#cb6-481" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-482"><a href="#cb6-482" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb6-483"><a href="#cb6-483" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q3. Why is the trial enrollment score $P(S = 1 \mid W)$ important for data fusion?&lt;/strong&gt;&lt;/summary&gt;</span>
 <span id="cb6-484"><a href="#cb6-484" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-485"><a href="#cb6-485" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and further reading</span></span>
+<span id="cb6-485"><a href="#cb6-485" aria-hidden="true" tabindex="-1"></a>The trial enrollment score determines the overlap between RCT and RWD populations. If $P(S = 1 \mid W) \approx 0$ for some covariate strata, those strata have no representation in the RCT, so the treatment effect for those patients cannot be learned from the trial. Borrowing strength from RWD for these strata requires the (untestable) assumption that the treatment effect is the same in the trial and the real world. Making the enrollment score approximately constant through matching reduces dependence on this assumption and improves finite-sample performance.</span>
 <span id="cb6-486"><a href="#cb6-486" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-487"><a href="#cb6-487" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Dang LE, Tager I, Petersen ML (2022). A cross-validated targeted maximum likelihood estimator for data-adaptive experiment selection applied to the augmentation of RCT control arms with external data. *arXiv:2210.05802*.</span>
-<span id="cb6-488"><a href="#cb6-488" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>van der Laan L, Qiu S, van der Laan MJ (2024). Adaptive-TMLE for the average treatment effect based on randomized controlled trial augmented with real-world data. *arXiv:2405.07186*. Published in *Journal of Causal Inference*, 2025.</span>
-<span id="cb6-489"><a href="#cb6-489" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Qiu S (2024). Optimizing data integration with an estimator-robust design. Presented at the FIORD meeting, Bethesda, MD, November 2024.</span>
-<span id="cb6-490"><a href="#cb6-490" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`EScvtmle`</span> R package: <span class="co">[</span><span class="ot">GitHub</span><span class="co">](https://github.com/Lauren-EylerDang/EScvtmle)</span></span>
-<span id="cb6-491"><a href="#cb6-491" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`atmle`</span> R package: <span class="co">[</span><span class="ot">GitHub</span><span class="co">](https://github.com/tq21/atmle)</span></span>
+<span id="cb6-487"><a href="#cb6-487" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
+<span id="cb6-488"><a href="#cb6-488" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-489"><a href="#cb6-489" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-490"><a href="#cb6-490" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-491"><a href="#cb6-491" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and further reading</span></span>
+<span id="cb6-492"><a href="#cb6-492" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-493"><a href="#cb6-493" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Dang LE, Tager I, Petersen ML (2022). A cross-validated targeted maximum likelihood estimator for data-adaptive experiment selection applied to the augmentation of RCT control arms with external data. *arXiv:2210.05802*.</span>
+<span id="cb6-494"><a href="#cb6-494" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>van der Laan L, Qiu S, van der Laan MJ (2024). Adaptive-TMLE for the average treatment effect based on randomized controlled trial augmented with real-world data. *arXiv:2405.07186*. Published in *Journal of Causal Inference*, 2025.</span>
+<span id="cb6-495"><a href="#cb6-495" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Qiu S (2024). Optimizing data integration with an estimator-robust design. Presented at the FIORD meeting, Bethesda, MD, November 2024.</span>
+<span id="cb6-496"><a href="#cb6-496" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`EScvtmle`</span> R package: <span class="co">[</span><span class="ot">GitHub</span><span class="co">](https://github.com/Lauren-EylerDang/EScvtmle)</span></span>
+<span id="cb6-497"><a href="#cb6-497" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`atmle`</span> R package: <span class="co">[</span><span class="ot">GitHub</span><span class="co">](https://github.com/tq21/atmle)</span></span>
 </code><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></pre></div>
 </div></div></div></div></div>
 </div> <!-- /content -->
