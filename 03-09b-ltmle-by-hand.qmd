@@ -172,23 +172,58 @@ naive_pred_11 <- mean(predict(naive_mod, newdata = dat %>% mutate(A1 = 1, A2 = 1
 iptw_w <- ifelse(dat$A1 == 1 & dat$A2 == 1, 1 / (g1_hat * g2_hat), 0)
 iptw_est <- sum(iptw_w * dat$Y) / sum(iptw_w)
 
+# --- Confidence intervals via influence curves ---
+
+# Naive regression CI (influence curve for standardized mean)
+naive_p1 <- predict(naive_mod, newdata = dat %>% mutate(A1 = 1, A2 = 1), type = "response")
+naive_resid <- dat$Y - predict(naive_mod, type = "response")
+naive_H <- ifelse(dat$A1 == 1 & dat$A2 == 1, 1, 0)
+naive_ic <- naive_p1 - naive_pred_11 + naive_H * naive_resid / mean(naive_H)
+naive_se <- sd(naive_ic) / sqrt(n)
+
+# G-computation CI (use the TMLE-style IC with Q1 model)
+gcomp_resid <- Q2_A2is1 - predict(Q1_mod, type = "response")
+gcomp_ic <- Q1_A1is1 - mean(Q1_A1is1) + ifelse(dat$A1 == 1, 1, 0) * gcomp_resid / mean(dat$A1 == 1)
+gcomp_se <- sd(gcomp_ic) / sqrt(n)
+
+# IPTW CI
+iptw_num <- iptw_w * dat$Y
+iptw_den <- sum(iptw_w)
+iptw_ic <- (iptw_num - iptw_est * iptw_w) / mean(iptw_w > 0)
+iptw_se <- sd(iptw_ic[iptw_w > 0]) / sqrt(sum(iptw_w > 0))
+
+# L-TMLE CI (from efficient influence curve)
+Qstar_obs <- ifelse(dat$A1 == 1, Q1_star, Q1_star)  # at observed A
+H_obs_ltmle <- ifelse(dat$A1 == 1 & dat$A2 == 1,
+                       1 / (g1_hat * g2_under_a1), 0)
+ltmle_ic <- H_obs_ltmle * (dat$Y - predict(Q2_mod, type = "response")) +
+            Q1_star - ltmle_est_11
+ltmle_se <- sd(ltmle_ic) / sqrt(n)
+
 comparison <- tibble(
   Method = c("True E[Y(1,1)]", "Naive regression", "G-computation", "IPTW", "L-TMLE"),
-  Estimate = round(c(true_EY_11, naive_pred_11, mean(Q1_A1is1), iptw_est, ltmle_est_11), 4)
+  Estimate = c(true_EY_11, naive_pred_11, mean(Q1_A1is1), iptw_est, ltmle_est_11),
+  SE = c(NA, naive_se, gcomp_se, iptw_se, ltmle_se),
+  Lower = Estimate - 1.96 * SE,
+  Upper = Estimate + 1.96 * SE
 )
-comparison |> as.data.frame()
+comparison |> mutate(across(where(is.numeric), ~ round(.x, 4))) |> as.data.frame()
 ```
 
 ```{r}
 #| label: fig-estimator-comparison
-#| fig-cap: "Comparison of estimators for the counterfactual failure rate under sustained high adherence."
+#| fig-cap: "Comparison of estimators for the counterfactual failure rate under sustained high adherence. Error bars show 95% confidence intervals. The dashed red line marks the true value."
 #| code-fold: true
-ggplot(comparison, aes(x = Estimate, y = factor(Method, levels = rev(Method)))) +
+plot_df <- comparison |> filter(Method != "True E[Y(1,1)]")
+
+ggplot(plot_df, aes(x = Estimate, y = factor(Method, levels = rev(plot_df$Method)))) +
+  geom_errorbarh(aes(xmin = Lower, xmax = Upper), height = 0.2, color = "grey40") +
   geom_point(size = 3) +
-  geom_vline(xintercept = true_EY_11, linetype = "dashed", color = "red") +
-  annotate("text", x = true_EY_11, y = 5.4, label = "Truth", color = "red", size = 3) +
+  geom_vline(xintercept = true_EY_11, linetype = "dashed", color = "red", linewidth = 0.7) +
+  annotate("text", x = true_EY_11, y = 4.4, label = "Truth", color = "red", size = 3) +
   labs(x = "Estimated E[Y(1,1)]", y = "") +
-  theme_minimal()
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 11))
 ```
 
 
