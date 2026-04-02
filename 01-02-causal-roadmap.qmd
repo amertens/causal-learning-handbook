@@ -58,10 +58,12 @@ In epidemiology, it is tempting to jump straight to fitting a model: "Let's run 
 
 **Key point.** A causal roadmap ensures transparency in how evidence is generated, separation of scientific questions from statistical methods, clear articulation of assumptions, and structured thinking in both trial and non-randomized settings. Starting with a well-defined question, before touching data or code, is the single most important step in any causal analysis.
 
+This framework is increasingly relevant as real-world data (RWD) enters the regulatory process. Regulatory agencies including the FDA, EMA, and NICE are using RWD to support labeling decisions, external control arms, and post-market surveillance. But RWD analyses face a credibility challenge that trials do not: every analytic decision is made by the analyst, and without a structured framework, it is difficult to distinguish principled analysis from data dredging. The causal roadmap provides that structure. It aligns with ICH E9(R1) estimand thinking, target trial emulation, and the growing consensus that RWE studies require clearly defined estimands, transparent assumptions, and robust inference [@petersen2014causal; @dang2023causal].
+
 ::: {.callout-note}
 ## Mapping to commonly cited roadmap formulations
 
-This handbook presents the causal roadmap in **six steps** (question, model, estimand, identification, estimation, interpretation), following @petersen2014causal. Other formulations exist in the literature:
+This handbook presents the causal roadmap in **seven steps** (question, model, estimand, identification, estimation, sensitivity analysis, interpretation), following @petersen2014causal. Other formulations exist in the literature:
 
 | This handbook | Petersen & van der Laan (2014) | Dang et al. (2023) high-quality RWE |
 |--------------|-------------------------------|-------------------------------------|
@@ -70,7 +72,8 @@ This handbook presents the causal roadmap in **six steps** (question, model, est
 | Step 3: Define the estimand | Step 3: Identification | Step 3: Define target quantity |
 | Step 4: Identification | Step 4: Estimation | Step 4: Assess identifiability |
 | Step 5: Estimation | Step 5: Interpretation | Step 5: Statistical estimation |
-| Step 6: Interpretation | (see Step 5) | Step 6: Interpret, sensitivity |
+| Step 6: Sensitivity analysis | (within Step 5) | Step 6: Interpret, sensitivity |
+| Step 7: Interpretation | (within Step 5) | (within Step 6) |
 
 The step numbers do not map one-to-one across these formulations. The table shows conceptual alignment, not step-number correspondence. The core logic is the same: separate the *scientific question* from the *statistical procedure*, and make assumptions explicit before touching data. The Dang et al. formulation [@dang2023causal] adds explicit data quality assessment and reporting requirements, which we cover in [Chapter 3.1](03-01-rwe-analysis-workflow.qmd) and [Chapter 3.8](03-08-tmle-clean-room.qmd).
 :::
@@ -295,49 +298,42 @@ In plain terms, this says we can estimate the causal effect by (1) modeling the 
 A **causal estimand** is defined via potential outcomes (e.g., 3-year MI risk difference if all patients received denosumab vs. ZA). A **statistical estimand** is the function of the observed-data distribution that equals the causal estimand *under the identification assumptions* (e.g., the standardized mean difference from a model of $P(Y \mid A, W)$).
 
 **Pitfall.** Regression coefficients (e.g., log-odds ratios, hazard ratios) are **not** the statistical estimand for the ATE. They are conditional measures on the wrong scale.
+
+When the identification assumptions hold, the causal estimand equals the statistical estimand. When they do not, there is a **causal gap**: the statistical procedure targets a quantity that may differ from the causal effect of interest. The causal gap cannot be estimated from data (the violated assumption is untestable), but it can be bounded through sensitivity analysis (Step 6). Better study design, richer covariate measurement, and stronger subject-matter justification all work to reduce the plausible magnitude of this gap.
 :::
 
-### Diagnosing positivity violations
+Positivity violations are diagnosed using propensity score overlap plots and effective sample size calculations. We cover this in detail in [Chapter 3.2](03-02-positivity-overlap.qmd).
 
-The propensity score overlap plot is your primary diagnostic. Look for mass piling up near 0 or 1 and poor overlap between groups.
+When identification assumptions fail, there is a gap between the causal estimand and the statistical estimand. This **causal gap** is the difference between what we want to estimate (the causal effect) and what the statistical procedure actually targets (a function of the observed data distribution that equals the causal effect only if the assumptions hold). The causal gap cannot be estimated from data, because the violated assumption is, by definition, not testable. But it can be bounded and subjected to sensitivity analysis (Step 6).
 
-```{r}
-source("_data/load-haart-cohort.R")
+## Step 5: Statistical Estimation
 
-ps <- predict(glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
-                   family = binomial, data = haart_baseline),
-              type = "response")
-plot(density(ps), main = "Propensity Score Distribution",
-     xlab = "Estimated P(HAART = 1 | W)")
-```
+This step translates the identified statistical estimand into an algorithm applied to data. The estimator must match the statistical estimand from Step 4. A logistic regression coefficient, for example, targets a conditional log-odds ratio, not the marginal risk difference identified by the g-computation formula. Using the wrong estimator for the right estimand is a common source of error.
 
-When you see poor overlap, consider restricting to the region of common support, trimming extreme weights, or acknowledging the limitations. See [Chapter 3.2](03-02-positivity-overlap.qmd) for a detailed treatment.
+The main estimation approaches covered in this handbook are g-computation ([Chapter 2.1](02-01-gcomputation.qmd)), which models the outcome and standardizes; IPTW ([Chapter 2.2](02-02-iptw.qmd)), which reweights by inverse probability of treatment; and TMLE ([Chapter 2.3](02-03-doubly-robust-tmle.qmd)), which combines both for double robustness. For longitudinal settings with time-varying confounding, these extend to longitudinal TMLE ([Chapter 3.9](03-09-illustrated-ltmle.qmd)).
 
+When choosing among estimators, the relevant performance criteria are bias, variance, mean squared error, and confidence interval coverage with respect to the statistical estimand. Outcome-blind simulations, where the analysis pipeline is run on data simulated to match the study's covariate structure but with a known or null treatment effect, can help evaluate estimator performance before outcome data are accessed. This connects to the clean-room workflow in [Chapter 3.8](03-08-tmle-clean-room.qmd).
 
-### Step 5: Choose a Statistical Estimator
+## Step 6: Sensitivity Analysis
 
-This step translates the identified quantity into an algorithm we can apply to data. You *could* use a standard regression model here (e.g., fit a logistic regression and standardize predictions via g-computation), but modern methods offer important advantages in robustness and flexibility. Options covered in upcoming chapters include:
+Statistical inference (confidence intervals, p-values) quantifies **statistical uncertainty**: the imprecision from having a finite sample. But it says nothing about **causal uncertainty**: the possibility that the identification assumptions are wrong.
 
-- **G-computation** ([Chapter 2.1](02-01-gcomputation.qmd)): Predict outcomes under each treatment, average over W
-- **IPTW** ([Chapter 2.2](02-02-iptw.qmd)): Weight observations by inverse probability of treatment
-- **TMLE** ([Chapter 2.3](02-03-doubly-robust-tmle.qmd)): Targeted learning that combines outcome and treatment models for double robustness
-- **Longitudinal TMLE (L-TMLE)** ([Chapter 3.9](03-09-illustrated-ltmle.qmd)): For time-varying treatments, time-varying confounding, and survival outcomes, estimating causal survival curves without proportional hazards assumptions
+When exchangeability, positivity, or consistency fail, the statistical estimand no longer equals the causal estimand. The resulting causal gap means that even a perfectly estimated statistical quantity may not answer the causal question. Sensitivity analysis is the discipline of asking: how large could this gap be, and would it change my conclusions?
 
-The choice depends on the assumptions you're willing to make, the complexity of the data structure (point treatment vs. longitudinal), sample size, and tolerance for model misspecification.
+Key approaches include:
 
-### Step 6: Evaluate and Interpret
+- **Unmeasured confounding sensitivity.** E-values quantify the minimum strength of association an unmeasured confounder would need with both treatment and outcome to explain away the observed effect. Quantitative bias analysis models the bias as a function of assumed confounder properties.
+- **Negative control outcomes.** Apply the same analysis to an outcome that should not be affected by treatment. A non-null effect on the negative control suggests residual bias in the primary analysis.
+- **Bounding approaches.** Under partial identification, bounds on the causal effect can be computed without assuming exchangeability holds exactly.
+- **Outcome-blind simulation.** Evaluate the operating characteristics of the estimator (Type I error, coverage, bias) using simulations calibrated to the study data but without access to the real outcome. This allows pre-specification of the analysis pipeline and assessment of whether the chosen estimator is suitable for the data structure at hand.
 
-Once you've estimated your parameter, interpretation is **not automatic**.
+We cover these tools in [Chapter 3.12: Sensitivity Analysis](03-12-sensitivity-analysis.qmd) and [Chapter 3.5: Advanced Diagnostics](03-05-advanced-diagnostics.qmd).
 
-Ask yourself: Are your assumptions plausible? What does your estimate mean for real-world decisions? Can you generalize to other populations? No amount of statistical sophistication can rescue an analysis built on implausible assumptions. Use sensitivity analyses, negative control outcomes, covariate balance checks, and expert consultation to stress-test your conclusions.
+## Step 7: Interpretation
 
-We cover diagnostics in detail in [Chapter 3.5: Advanced Diagnostics](03-05-advanced-diagnostics.qmd) (covariate balance, weight distributions, influence curves) and sensitivity analyses in [Chapter 3.12: Sensitivity Analysis](03-12-sensitivity-analysis.qmd) (E-values, quantitative bias analysis, and bounding approaches for unmeasured confounding).
+Once you have an estimate and have assessed its sensitivity, interpretation connects the statistical result back to the original causal question. Ask: are the identification assumptions plausible in this study? What does the estimate mean for clinical or policy decisions? Does it generalize to other populations? No amount of statistical sophistication can rescue an analysis built on implausible assumptions.
 
-:::{.callout}
-## Summary
-
-The Causal Roadmap gives a rigorous framework for designing and evaluating real-world effect estimates. Before choosing a statistical method, start with the science: define your causal question, specify your model and assumptions, decide how to express the effect, and choose a transparent, defensible estimation method.
-:::
+The Causal Roadmap is not just a sequence of steps. It is a framework for aligning the causal question, the study design, the identification argument, and the statistical procedure. When all four are aligned, the result is a credible causal estimate. When any one is misaligned, the result may look precise but answer the wrong question.
 
 ## Running Example: Antiretroviral Therapy Cohort
 
@@ -359,7 +355,9 @@ Because conditioning on time-varying CD4 in a regression blocks part of the caus
 
 **Step 5: Estimation.** Point-treatment versions of this question are addressed with g-computation (Chapter 2.1), IPTW (Chapter 2.2), and TMLE (Chapter 2.3). The full longitudinal question requires IPTW with marginal structural models (Chapter 3.7) or longitudinal TMLE (Chapter 3.9).
 
-**Step 6: Interpretation.** Diagnostics (Chapter 3.5), sensitivity analysis for unmeasured confounding (Chapter 3.12), and consideration of informative censoring are all critical before interpreting results from this cohort.
+**Step 6: Sensitivity analysis.** E-values for unmeasured confounding (Chapter 3.12), negative control outcomes, and assessment of informative censoring are needed before drawing causal conclusions.
+
+**Step 7: Interpretation.** Diagnostics (Chapter 3.5) and the sensitivity analyses from Step 6 inform the credibility of the final estimate. Results should be interpreted in light of the plausibility of sequential exchangeability and positivity in the specific data source.
 
 ## Check your understanding
 
@@ -415,12 +413,8 @@ With the causal question defined, the roadmap laid out, and the identification f
 - Dang LE, Tager I, Petersen ML (2023). A causal roadmap for generating high-quality real-world evidence. *Journal of Clinical and Translational Science* 7(1):e127.
 - Hernan MA, Robins JM (2016). Using big data to emulate a target trial when a randomized trial is not available. *Am J Epidemiol* 183(8):758-764.
 - Hernan MA, Robins JM (2020). *Causal Inference: What If*. Chapman & Hall/CRC. [Free online](https://www.hsph.harvard.edu/miguel-hernan/causal-inference-book/)
+- ICH E9(R1) Addendum (2020). Estimands and sensitivity analysis in clinical trials.
 - Suissa S (2008). Immortal time bias in pharmacoepidemiology. *Am J Epidemiol* 167(4):492-499.
-- Lund JL, Richardson DB, Sturmer T (2015). The active comparator, new user study design in pharmacoepidemiology. *Epidemiology* 26(1):105-113.
-- Pearl J (2009). *Causality: Models, Reasoning, and Inference*. 2nd ed. Cambridge University Press.
-- Robins JM (1986). A new approach to causal inference in mortality studies with sustained exposure periods. *Mathematical Modelling* 7:1393-1512.
-- van der Laan MJ, Rose S (2011). *Targeted Learning*. Springer.
-- Gruber S, van der Laan MJ (2010). A targeted maximum likelihood estimator of a causal effect on a bounded continuous outcome. *Int J Biostat* 6(1):Article 26.
 - ICH E9 (R1) Addendum (2019). Addendum on estimands and sensitivity analyses in clinical trials.
 - Kennedy EH (2019). Nonparametric causal effects based on incremental propensity score interventions. *JASA* 114(526):645-656.
 - `tmle` R package: [CRAN](https://cran.r-project.org/package=tmle)

@@ -250,46 +250,9 @@ This feedback structure is why later chapters need longitudinal g-methods. No si
 The person-period structure of `haartdat` maps directly onto this longitudinal DAG. Each row corresponds to one time slice. Within each interval, the temporal ordering is: CD4 is measured (beginning of interval), then the treatment decision and outcome/censoring occur (end of interval). The variables map as follows: `cd4.sqrt` is $L_t$, `haartind` is $A_t$, `event` is $Y$, `dropout` is $C$, and `age` and `sex` are the baseline covariates $W$.
 
 
-## Why naive methods fail in this cohort
+## Why standard approaches can mislead
 
-Three quick analyses show why standard approaches produce misleading results here.
-
-**Crude comparison.** Simply comparing mortality between HAART initiators and non-initiators:
-
-```{r}
-haart_baseline |>
-  group_by(ever_haart) |>
-  summarise(
-    n = n(),
-    deaths = sum(died),
-    mortality_pct = mean(died) * 100,
-    .groups = "drop"
-  ) |>
-  knitr::kable(digits = 1, caption = "Crude mortality by HAART status")
-```
-
-The crude comparison may show that HAART users have *higher* mortality. This is confounding by indication: physicians initiate HAART in sicker patients.
-
-**Baseline-adjusted regression.** Adjusting for baseline confounders improves on the crude comparison but ignores that CD4 changes over time and that HAART initiation is a time-varying decision:
-
-```{r}
-naive_mod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
-                 family = binomial, data = haart_baseline)
-broom::tidy(naive_mod, conf.int = TRUE) |>
-  knitr::kable(digits = 3, caption = "Baseline-adjusted logistic regression")
-```
-
-**Regression conditioning on time-varying CD4.** Adjusting for `cd4.sqrt` in a pooled logistic regression blocks part of the causal pathway (HAART improves CD4, which reduces mortality) while still leaving residual confounding:
-
-```{r}
-naive_tv <- glm(event ~ haartind + cd4.sqrt + age + sex,
-                family = binomial, data = haartdat)
-broom::tidy(naive_tv, conf.int = TRUE) |>
-  knitr::kable(digits = 3,
-    caption = "Pooled logistic regression with time-varying CD4 adjustment")
-```
-
-None of these approaches correctly estimates the causal effect. Ignoring time-varying CD4 leaves confounding; adjusting for it blocks part of the treatment effect. The g-methods covered in this handbook (g-computation, IPTW, TMLE) are designed to handle this correctly.
+The treatment-confounder feedback structure in this cohort means that naive regression approaches, whether they ignore time-varying CD4 or adjust for it, can produce misleading estimates of the HAART effect. A crude comparison of treated and untreated patients is confounded by indication (sicker patients start HAART). Adjusting for baseline covariates alone ignores that CD4 changes over time. And adjusting for time-varying CD4 in a pooled regression blocks part of the treatment's beneficial pathway. [Chapter 1.1](01-01-regression-vs-causal.qmd) explains these failure modes in detail and motivates the g-methods (g-computation, IPTW, TMLE) that the rest of the handbook develops.
 
 
 ## Sources
