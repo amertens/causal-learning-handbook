@@ -1,0 +1,114 @@
+---
+title: "Theme Preview: flatly + tango"
+format:
+  html:
+    theme: flatly
+    highlight-style: tango
+    toc: true
+    number-sections: true
+    code-fold: show
+    code-tools: true
+    code-summary: "Show code"
+    self-contained: true
+---
+
+# G-Computation Example
+
+This page previews the **flatly** theme with **tango** code highlighting.
+
+## Data Setup
+
+```{r}
+#| code-fold: true
+library(tidyverse)
+
+set.seed(2026)
+n <- 1000
+age <- rnorm(n, 65, 10)
+cvd <- rbinom(n, 1, plogis(-2 + 0.03 * age))
+A <- rbinom(n, 1, plogis(-0.5 + 0.02 * age + 0.3 * cvd))
+Y <- rbinom(n, 1, plogis(-2.5 + 0.03 * age + 0.5 * cvd - 0.4 * A))
+
+dat <- tibble(age, cvd, A, Y)
+```
+
+## Outcome Model
+
+```{r}
+mod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
+broom::tidy(mod, conf.int = TRUE) |>
+  knitr::kable(digits = 3, caption = "Outcome model coefficients")
+```
+
+## Counterfactual Predictions
+
+```{r}
+p1 <- predict(mod, newdata = mutate(dat, A = 1), type = "response")
+p0 <- predict(mod, newdata = mutate(dat, A = 0), type = "response")
+
+risk1 <- mean(p1)
+risk0 <- mean(p0)
+ate <- risk1 - risk0
+
+data.frame(
+  Measure = c("Risk under treatment", "Risk under control", "ATE (risk difference)"),
+  Estimate = round(c(risk1, risk0, ate), 4)
+) |> knitr::kable()
+```
+
+## Propensity Score Overlap
+
+```{r}
+#| code-fold: true
+#| fig-cap: "Propensity score overlap by treatment group"
+ps <- predict(glm(A ~ age + cvd, family = binomial, data = dat), type = "response")
+
+ggplot(tibble(ps = ps, A = factor(dat$A, labels = c("Control", "Treated"))),
+       aes(x = ps, fill = A)) +
+  geom_density(alpha = 0.4) +
+  labs(x = "Propensity Score", y = "Density", fill = "Group") +
+  scale_fill_manual(values = c("#EE6677", "#228833")) +
+  theme_minimal()
+```
+
+## TMLE Targeting Step
+
+```{r}
+# Clever covariate
+H <- dat$A / ps - (1 - dat$A) / (1 - ps)
+
+# Fluctuation
+logit <- function(p) log(p / (1 - p))
+Qinit <- predict(mod, type = "response")
+epsilon <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H, family = binomial)$coef
+
+# Update predictions
+H1 <- 1 / ps
+H0 <- -1 / (1 - ps)
+Q1_star <- plogis(logit(p1) + epsilon * H1)
+Q0_star <- plogis(logit(p0) + epsilon * H0)
+
+tmle_ate <- mean(Q1_star) - mean(Q0_star)
+cat("G-computation ATE:", round(ate, 4), "\n")
+cat("TMLE ATE:         ", round(tmle_ate, 4), "\n")
+```
+
+::: {.callout-note}
+## Key Takeaway
+The TMLE targeting step adjusts the initial outcome predictions to reduce bias for the ATE specifically. The fluctuation parameter $\hat{\epsilon}$ captures the correction needed.
+:::
+
+::: {.callout-warning}
+## In development
+This is a theme preview page, not part of the handbook.
+:::
+
+## Math Display
+
+The ATE is identified by the g-computation formula:
+
+$$
+E[Y(1)] - E[Y(0)] = E_W\!\left[E[Y \mid A=1, W] - E[Y \mid A=0, W]\right]
+$$
+
+Under consistency, exchangeability conditional on $W$, and positivity.
