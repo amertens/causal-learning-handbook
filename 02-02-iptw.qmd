@@ -7,18 +7,7 @@ format: html
 
 # Chapter 2.2: Inverse Probability of Treatment Weighting
 
-Inverse probability of treatment weighting (IPTW) is a core method in modern causal inference. Instead of modeling the outcome directly as in g computation, IPTW uses a model for **treatment assignment** to create a pseudo population where treatment is independent of confounders.  
-
-In this chapter we will
-
-- Build intuition for IPTW
-- Derive the weights and connect them to the causal estimand
-- Show how to estimate and diagnose propensity scores
-- Implement IPTW in R with tidyverse style
-- Discuss stabilized weights and truncation
-- Compare IPTW to g computation on the same data
-
-This is still point treatment only. Longitudinal extensions come later.
+Inverse probability of treatment weighting (IPTW) is a core method in modern causal inference. Instead of modeling the outcome directly as in g-computation, IPTW uses a model for **treatment assignment** to create a pseudo-population where treatment is independent of confounders. This is still point treatment only; longitudinal extensions come later.
 
 ---
 
@@ -66,7 +55,7 @@ $$
 E[Y(0)] = E\left[ \frac{I(A = 0) Y}{1 - e(W)} \right]
 $$
 
-The IPTW estimator replaces the expectation with the sample average and replaces the true \( e(W) \) with an estimated one.
+In plain terms, we recover the average outcome under treatment by upweighting treated individuals who were unlikely to be treated (given their covariates) and downweighting those who were very likely to be treated. The IPTW estimator replaces the expectation with the sample average and replaces the true \( e(W) \) with an estimated one.
 :::
 
 This is called a **Horvitz-Thompson type** estimator because it has the same structure as the survey sampling estimator that reweights observations by the inverse of their selection probability. In our setting, "selection" is selection into a treatment group. We upweight patients whose treatment assignment was unlikely given their covariates.
@@ -142,7 +131,9 @@ As a rule of thumb, be concerned if propensity scores for either group pile up n
 
 # Constructing IPTW Weights
 
-**Definition.** Unstabilized weights are the simplest form of IPTW weights. For each individual, the weight is the inverse of the probability of receiving the treatment they actually received: for the treated ($A = 1$), $w_i = 1 / e(W_i)$; for the untreated ($A = 0$), $w_i = 1 / (1 - e(W_i))$. These weights create a pseudo-population where treatment is independent of measured confounders, but they can be highly variable when some propensity scores are close to 0 or 1.
+**Definition.** Unstabilized weights are the simplest form of IPTW weights. For each individual, the weight is the inverse of the probability of receiving the treatment they actually received: for the treated ($A = 1$), $w_i = 1 / e(W_i)$; for the untreated ($A = 0$), $w_i = 1 / (1 - e(W_i))$.
+
+These weights create a pseudo-population where treatment is independent of measured confounders, but they can be highly variable when some propensity scores are close to 0 or 1. For example, an untreated patient with a propensity score of 0.95 (very likely to be treated, yet was not) receives a weight of $1 / (1 - 0.95) = 20$, meaning this single person counts as 20 in the pseudo-population.
 
 ```{webr-r}
 dat <- dat %>%
@@ -163,7 +154,7 @@ Keep an eye on
 ## Why Stabilized Weights Are Preferred in Practice
 
 
-Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment** [@hernan2025whatif]; the overall proportion of patients who received the treatment they actually received, ignoring covariates. This rescaling brings the weights closer to 1 on average and reduces their variance without affecting consistency for the marginal causal effect.
+Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment** [@hernan2025whatif] (the overall proportion of patients who received the treatment they actually received, ignoring covariates). This rescaling brings the weights closer to 1 on average and reduces their variance without affecting consistency for the marginal causal effect.
 
 For a binary treatment, the stabilized weight for individual $i$ is:
 
@@ -171,7 +162,7 @@ $$
 SW_i = \frac{P(A = 1)}{e(W_i)} \quad \text{if } A_i = 1, \qquad SW_i = \frac{P(A = 0)}{1 - e(W_i)} \quad \text{if } A_i = 0
 $$
 
-where $P(A = 1)$ is the marginal probability of treatment (estimated as the sample proportion treated) and $P(A = 0) = 1 - P(A = 1)$ is the marginal probability of control. Note that the numerator uses the marginal probability of the treatment *actually received*; $P(A = 1)$ for treated, $P(A = 0)$ for untreated; not a single value for both groups.
+where $P(A = 1)$ is the marginal probability of treatment (estimated as the sample proportion treated) and $P(A = 0) = 1 - P(A = 1)$ is the marginal probability of control. Note that the numerator uses the marginal probability of the treatment *actually received*: $P(A = 1)$ for treated, $P(A = 0)$ for untreated, not a single value for both groups.
 
 **Why this helps:** Unstabilized weights create a pseudo-population that is larger than the original sample, which inflates standard errors. Stabilized weights preserve the original sample size in expectation, leading to:
 
@@ -302,7 +293,7 @@ Neither uses both models at once. This motivates **doubly robust** methods (next
 
 ### Check propensity score overlap
 
-To assess positivity, plot propensity score densities by treatment group (as in Section 4) and flag regions where one group is missing or sparse. If the treated and untreated distributions do not overlap, the ATE may not be identifiable in that region. Consider restricting inference to the overlap population or reporting the ATT instead.
+To assess positivity, plot propensity score densities by treatment group and flag regions where one group is missing or sparse. For example, if elderly patients with prior cardiovascular disease are almost never prescribed the newer drug, you will see a gap in the treated distribution at high-risk covariate values. If the treated and untreated distributions do not overlap, the ATE may not be identifiable in that region. Consider restricting inference to the overlap population or reporting the ATT instead.
 
 ### Check weights
 
@@ -321,7 +312,7 @@ dat %>%
 
 Large extreme weights are a red flag. Watch for these warning signs:
 
-- **Maximum weight > 10 to 20**: a single observation is being counted as 10 to 20 people. Your estimate may be driven by one or two individuals.
+- **Maximum weight > 10 to 20**: a single observation is being counted as 10 to 20 people in the pseudo-population. Your estimate may be driven by one or two individuals.
 - **Mean of stabilized weights far from 1**: stabilized weights should average approximately 1. Deviations suggest model misspecification.
 - **Ratio of max to median weight > 20**: indicates near-violation of positivity for some covariate patterns.
 
@@ -356,8 +347,8 @@ Truncation (also called "winsorizing") reduces variance at the cost of introduci
 
 **The trade-off in practice:**
 
-- **Without truncation**: consistent and asymptotically unbiased under correct propensity model specification, positivity, and regularity conditions; but finite-sample bias can remain, and variance may be large enough to render confidence intervals uninformatively wide
-- **With truncation**: introduces bias (the estimator no longer targets the original ATE but implicitly targets a modified estimand defined over the population with sufficient overlap), yet often achieves lower mean squared error
+- **Without truncation**: consistent under correct propensity model specification, positivity, and regularity conditions, but finite-sample variance may be large enough to render confidence intervals uninformatively wide
+- **With truncation**: introduces some bias (the estimator implicitly targets a modified estimand defined over the population with sufficient overlap), yet often achieves lower mean squared error
 
 **Common approaches:**
 
@@ -365,7 +356,9 @@ Truncation (also called "winsorizing") reduces variance at the cost of introduci
 - Truncate at fixed values (e.g., cap weights at 10 or 20)
 - Report results with and without truncation as a sensitivity analysis
 
-There is no single "right" truncation threshold. Truncation is best treated as a **sensitivity analysis**: report results at multiple thresholds (e.g., 1st/99th, 5th/95th percentiles, and untruncated) and examine how conclusions change. Note that under severe truncation, the estimator implicitly targets a modified estimand; the ATE in the subpopulation with propensity scores bounded away from 0 and 1; which may differ from the original population-level ATE. This is not merely a statistical nuisance; it reflects a genuine change in the causal question being answered, and should be reported transparently. For more on modified estimands under practical positivity, see [Chapter 3.2](03-02-positivity-overlap.qmd). In [Chapter 4.2: Outcome-Blind Simulation Studies](04-02-outcome-blind-simulations.qmd), we show how to use simulations calibrated to your specific dataset to choose an appropriate truncation level.
+There is no single "right" truncation threshold. Truncation is best treated as a **sensitivity analysis**: report results at multiple thresholds (e.g., 1st/99th, 5th/95th percentiles, and untruncated) and examine how conclusions change.
+
+Note that under severe truncation, the estimator implicitly targets a modified estimand: the ATE in the subpopulation with propensity scores bounded away from 0 and 1. This may differ from the original population-level ATE. This is not merely a statistical nuisance; it reflects a genuine change in the causal question being answered, and should be reported transparently. For more on modified estimands under practical positivity, see [Chapter 3.2](03-02-positivity-overlap.qmd). In [Chapter 4.2: Outcome-Blind Simulation Studies](04-02-outcome-blind-simulations.qmd), we show how to use simulations calibrated to your specific dataset to choose an appropriate truncation level.
 
 
 :::

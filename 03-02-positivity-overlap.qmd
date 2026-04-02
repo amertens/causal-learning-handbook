@@ -99,9 +99,13 @@ chicken. You can speculate, but the data are silent on that comparison.
 
 The formal definition above is stated for discrete $W$, where we require $P(A = a \mid W = w) > 0$ at every support point. When $W$ is continuous or high-dimensional, the condition generalizes to positivity **almost surely**: the propensity score $g(W) = P(A = 1 \mid W)$ must be bounded away from 0 and 1 with probability one in the analysis population.
 
-**Practical restatement.** There exist constants $0 < \delta_L \leq \delta_U < 1$ such that $\delta_L \leq g(W) \leq \delta_U$ almost surely. In applied work, this means the estimated propensity scores should be bounded away from the boundaries --- not just on average, but for every observation that contributes to the analysis. When propensity scores approach 0 or 1 for a non-negligible fraction of the sample, the effective sample size shrinks, influence-function-based variance estimates grow, and the causal estimand becomes poorly identified in the tails of the covariate distribution.
+**Practical restatement.** There exist constants $0 < \delta_L \leq \delta_U < 1$ such that $\delta_L \leq g(W) \leq \delta_U$ almost surely. In applied work, this means the estimated propensity scores should be bounded away from the boundaries, not just on average, but for every observation that contributes to the analysis.
 
-This is not merely a technical annoyance. When positivity fails for a subpopulation, the most principled response is often to **revise the estimand** rather than to truncate weights or extrapolate. Modified treatment policies and stochastic interventions (see [Chapter 3.3b](03-03b-adherence-shift-methods.qmd)) define interventions that remain within the observed data support by construction, avoiding the need to estimate treatment effects in regions where the data are sparse. Alternatively, one can restrict the target population to the subset with adequate overlap, acknowledging that the resulting estimate answers a different (but well-defined) causal question.
+When propensity scores approach 0 or 1 for a non-negligible fraction of the sample, the effective sample size shrinks, influence-function-based variance estimates grow, and the causal estimand becomes poorly identified in the tails of the covariate distribution. For instance, if elderly patients with renal impairment are almost never prescribed the new drug, the propensity score for that group approaches zero, and estimates for their subgroup rely entirely on model extrapolation.
+
+This is not merely a technical annoyance. When positivity fails for a subpopulation, the most principled response is often to **revise the estimand** rather than to truncate weights or extrapolate. Modified treatment policies and stochastic interventions (see [Chapter 3.3b](03-03b-adherence-shift-methods.qmd)) define interventions that remain within the observed data support by construction, avoiding the need to estimate treatment effects in regions where the data are sparse.
+
+Alternatively, one can restrict the target population to the subset with adequate overlap, acknowledging that the resulting estimate answers a different (but well-defined) causal question. This often arises in claims-based studies when certain comorbidity profiles are strongly associated with one treatment, leaving little or no overlap for the alternative.
 
 ---
 
@@ -345,16 +349,16 @@ cat("G-computation ATE estimate:", round(ate_gcomp, 3), "\n")
 ```
 
 G-computation may look stable, but that stability is an illusion. It relies entirely on
-the parametric model being correct in the extrapolation region. There is no data to
-check it.
+the parametric model being correct in the extrapolation region, and there is no data to
+check it. The model might predict that an 90-year-old with severe comorbidities would benefit from treatment, but if no such patient was ever treated, that prediction is pure speculation dressed up as an estimate.
 
 ## TMLE: clever covariate instability
 
 TMLE (Chapter 2.3, `doubly-robust-tmle.qmd`) updates the initial outcome model
 using a "clever covariate" $H(A, W) = A / g(W) - (1-A) / (1 - g(W))$. When $g(W)$
-is near zero, this clever covariate explodes, just like the IPW weight. So TMLE
+is near zero, this clever covariate explodes, just like the IPW weight. TMLE
 inherits the instability of IPTW through its targeting step, even though it also uses
-an outcome model.
+an outcome model. In practice, you might see one or two observations with clever-covariate values ten times larger than the rest, suggesting those patients are driving the entire estimate.
 
 ```{r}
 # Demonstrate clever covariate magnitude
@@ -576,7 +580,9 @@ ggplot(haart_baseline, aes(x = ps_hat, fill = factor(ever_haart))) +
   theme_minimal()
 ```
 
-The overlap plot reveals that patients with low `cd4_sqrt_baseline` cluster near propensity scores of 1, because clinical guidelines make HAART initiation near-certain for severely immunocompromised patients. This is a practical (not structural) positivity violation: HAART is not literally required, but it is rarely withheld. Any causal estimate for those patients relies heavily on model extrapolation rather than observed counterfactual data. Analysts should consider restricting the target population to the overlap region or reporting effective sample sizes (Chapter 3.5) to quantify how much information these near-violations consume.
+The overlap plot reveals that patients with low `cd4_sqrt_baseline` cluster near propensity scores of 1, because clinical guidelines make HAART initiation near-certain for severely immunocompromised patients. This is a practical (not structural) positivity violation: HAART is not literally required, but it is rarely withheld.
+
+Any causal estimate for those patients relies heavily on model extrapolation rather than observed counterfactual data. Analysts should consider restricting the target population to the overlap region or reporting effective sample sizes (Chapter 3.5) to quantify how much information these near-violations consume.
 
 ---
 

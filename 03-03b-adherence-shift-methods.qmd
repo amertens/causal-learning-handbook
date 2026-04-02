@@ -28,9 +28,9 @@ knitr::opts_chunk$set(
 
 # Overview
 
-Chapter 3.3 introduced a distribution-shift intervention using quantile mapping to compare two antiretroviral drugs under a common adherence distribution. That approach is one principled way to operationalize the question "what if Drug B patients adhered like Drug A patients?" But it is not the only way. Different shift functions encode different assumptions about what "adhering like Drug A" means, and they answer subtly different causal questions.
+Chapter 3.3 introduced a distribution-shift intervention using quantile mapping to compare two antiretroviral drugs under a common adherence distribution. That approach is one principled way to operationalize the question "what if Drug B patients adhered like Drug A patients?", but it is not the only way. Different shift functions encode different assumptions about what "adhering like Drug A" means, and they answer subtly different causal questions.
 
-This supplement implements four approaches on the same simulated data:
+This chapter implements four approaches on the same simulated data:
 
 1. **Marginal quantile mapping**: map Drug B adherence to the Drug A distribution via the empirical CDF.
 2. **Conditional distribution mapping**: same idea, but condition on baseline covariates so the mapping respects patient characteristics.
@@ -309,9 +309,9 @@ A negative contrast means the adherence distribution shift reduces virologic fai
 
 ## How it works
 
-The marginal quantile map treats all Drug B patients as exchangeable within the Drug B group. But adherence depends on patient characteristics: older patients, those with lower CD4, those with higher viral load may adhere differently. A more principled mapping conditions on covariates, so that the quantile lookup reflects each patient's clinical profile.
+The marginal quantile map treats all Drug B patients as exchangeable within the Drug B group. But adherence depends on patient characteristics: older patients, those with lower CD4, those with higher viral load may adhere differently.
 
-The idea is the same as approach 1 (find a patient's percentile rank in the Drug B distribution and map it to the corresponding percentile in the Drug A distribution), but now both the CDF and quantile function are conditional on covariates. We estimate these using **conditional quantile regression** via the `quantreg` package, fitting separate models at a grid of quantile levels ($\tau = 0.05, 0.10, \ldots, 0.95$) for each drug. This avoids the normality assumption that a location-scale model would impose, which matters because adherence is bounded on [0,1] and often skewed.
+A more principled mapping conditions on covariates, so that the quantile lookup reflects each patient's clinical profile. The idea is the same as approach 1 (find a patient's percentile rank in the Drug B distribution and map it to the corresponding percentile in the Drug A distribution), but now both the CDF and quantile function are conditional on covariates. We estimate these using **conditional quantile regression** via the `quantreg` package, fitting separate models at a grid of quantile levels ($\tau = 0.05, 0.10, \ldots, 0.95$) for each drug. This avoids the normality assumption that a location-scale model would impose, which matters because adherence is bounded on [0,1] and often skewed.
 
 For a Drug B patient with covariates $X$ and observed adherence $a_t$:
 
@@ -470,7 +470,7 @@ $$
 d_3(a_{it}) = \min\big(a_{it} + \delta_t, \; 1\big) \quad \text{where} \quad \delta_t = \bar{A}_t^{D=A} - \bar{A}_t^{D=B}
 $$
 
-The adherence is capped at 1 because adherence above 100% is meaningless.
+In words: add the mean adherence gap between drugs to each Drug B patient's observed adherence, capping at 1 because adherence above 100% is meaningless.
 
 ## What question it answers
 
@@ -549,9 +549,7 @@ $$
 d_4(a_{it}) = \min(a_{it} + \delta, \; 1)
 $$
 
-where $\delta$ is a prespecified amount (we use $\delta = 0.10$, i.e., a 10 percentage-point increase).
-
-This is not a cross-drug comparison at all. It is a within-population policy question.
+where $\delta$ is a prespecified amount (we use $\delta = 0.10$, i.e., a 10 percentage-point increase). In words: add 10 percentage points to every patient's adherence, regardless of drug assignment. This is not a cross-drug comparison at all; it is a within-population policy question.
 
 ## What question it answers
 
@@ -658,9 +656,11 @@ ggplot(results_plot, aes(x = Contrast, y = Approach)) +
 
 Under observed adherence, the estimated virologic failure rate is about 22%. All four shift interventions reduce it, but by different amounts and with different precision.
 
-The two approaches that most aggressively reshape the Drug B adherence distribution (marginal quantile mapping and the mean-calibrated additive shift) produce the largest reductions, bringing the estimated failure rate down to roughly 5--6% (contrasts of --17 and --16 percentage points, both with 95% CIs excluding zero). These two agree closely despite using very different mechanics, which suggests that in this simulation the adherence gap between drugs is fairly uniform across the distribution and the shape difference between Drug A and Drug B adherence matters less than the location difference.
+The two approaches that most aggressively reshape the Drug B adherence distribution (marginal quantile mapping and the mean-calibrated additive shift) produce the largest reductions, bringing the estimated failure rate down to roughly 5--6%. These two agree closely despite using very different mechanics, which suggests that in this simulation the adherence gap between drugs is fairly uniform across the distribution. The shape difference between Drug A and Drug B adherence matters less than the location difference.
 
-The conditional distribution mapping, now implemented with conditional quantile regression rather than a normal location-scale model, may produce a different estimate than the marginal approach. Because it conditions on covariates, the shift is more patient-specific: it only moves each Drug B patient's adherence to what the conditional quantile model predicts they would have achieved under Drug A given their clinical profile. For patients whose covariates predict similar adherence under both drugs, the shift is small. The quantile regression avoids the normality assumption, so the mapping better respects the bounded, potentially skewed shape of real adherence distributions.
+The conditional distribution mapping may produce a different estimate than the marginal approach. Because it conditions on covariates, the shift is more patient-specific: it only moves each Drug B patient's adherence to what the conditional quantile model predicts they would have achieved under Drug A given their clinical profile.
+
+For patients whose covariates predict similar adherence under both drugs, the shift is small. The quantile regression avoids the normality assumption, so the mapping better respects the bounded, potentially skewed shape of real adherence distributions.
 
 The fixed additive shift (+10 percentage points for everyone) yields a --10 percentage point reduction, also with a CI approaching zero. This is a smaller intervention than the cross-drug shifts (the Drug A--Drug B gap is about 23--28 percentage points per visit), so the smaller effect is expected. But it answers a different, more directly actionable question: a realistic adherence support program that raises compliance by 10 points across the board would cut failure rates nearly in half.
 
@@ -675,9 +675,9 @@ $$
 r_d(a) = P\big(Y = 1 \mid \text{do}(\bar{A} = a), D = d\big)
 $$
 
-where $d$ indexes the drug. This curve captures everything about how a drug responds to adherence variation. A "forgiving" drug has a flat curve over a wide PDC range; a less forgiving drug has a steep curve where small adherence drops produce large risk increases.
+where $d$ indexes the drug. This curve captures how a drug responds to adherence variation. A "forgiving" drug has a flat curve over a wide PDC range (failure risk stays low even when adherence drops moderately). A less forgiving drug has a steep curve where small adherence drops produce large risk increases.
 
-The four shift approaches relate to this curve as follows:
+Each of the four shift approaches summarizes this curve differently:
 
 **Fixed additive shift** moves each patient along the x-axis of the forgiveness curve by a constant $\delta$. The LMTP contrast integrates the slope of the curve over the observed adherence distribution, weighted by the shift magnitude. This tells you the marginal benefit of a small adherence improvement, averaged over the patient population. It is a local derivative-like quantity when $\delta$ is small.
 
@@ -709,7 +709,9 @@ $$
 
 The direct effect captures pharmacological differences between drugs (potency, resistance barrier, half-life) that affect outcomes regardless of adherence. The indirect effect captures the pathway where drug assignment affects adherence (e.g., through pill burden or side effects), which in turn affects outcomes.
 
-The quantile-matching approach provides an informal controlled direct effect (CDE). By matching Drug B's adherence distribution to Drug A's, we are holding the adherence pathway constant and asking what outcome difference remains. If the total observed difference between drugs is $\Delta_{\text{total}}$ and the difference under matched adherence is $\Delta_{\text{matched}}$, then:
+The quantile-matching approach provides an informal controlled direct effect (CDE). By matching Drug B's adherence distribution to Drug A's, we hold the adherence pathway constant and ask what outcome difference remains.
+
+If the total observed difference between drugs is $\Delta_{\text{total}}$ and the difference under matched adherence is $\Delta_{\text{matched}}$, then:
 
 - $\Delta_{\text{matched}}$ approximates the direct (pharmacological) effect: the outcome difference when both drugs have the same adherence distribution.
 - $\Delta_{\text{total}} - \Delta_{\text{matched}}$ approximates the adherence-mediated component: how much of the drug difference operates through the adherence pathway.

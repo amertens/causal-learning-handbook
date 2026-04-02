@@ -219,7 +219,7 @@ $$
 \psi_{\text{shift}} = E\big[Y\big(\text{Drug B}, \; \bar{A}^{d_A}\big)\big]
 $$
 
-This is the expected virologic failure rate among Drug B patients if their adherence at each visit were shifted to follow the distribution observed among Drug A patients with similar covariate histories.
+In words: the expected virologic failure rate among Drug B patients if their adherence at each visit were shifted to follow the distribution observed among Drug A patients with similar covariate histories.
 
 The contrast of interest compares this to the observed outcome under Drug B:
 
@@ -502,23 +502,23 @@ When interpreting, several points deserve emphasis.
 
 **Realistic adherence, not perfect adherence.** The target distribution is Drug A's observed adherence, not 100%. Some Drug A patients have low adherence too. The intervention asks for a realistic redistribution, not an impossible ideal.
 
-**Causal, not descriptive.** This is not the same as reweighting Drug B outcomes to match Drug A adherence in a descriptive analysis. The LMTP framework models the interventional distribution of time-varying confounders under the shift. When we change adherence, CD4 and viral load change too (because adherence affects them), and those changes affect the outcome. The sequential regression structure handles this forward propagation.
+**Causal, not descriptive.** This is not the same as reweighting Drug B outcomes to match Drug A adherence in a descriptive analysis. The LMTP framework models the interventional distribution of time-varying confounders under the shift. When we change adherence, CD4 and viral load change too (because adherence affects them), and those changes affect the outcome.
 
-**What remains drug-specific.** The drug's direct pharmacological effect (on viral resistance, metabolism, etc.) is held at its Drug B value. Only the adherence process is shifted. If Drug A has a pharmacological advantage beyond its adherence advantage, the contrast will not capture that.
+**What remains drug-specific.** The drug's direct pharmacological effect (on viral resistance, metabolism, etc.) is held at its Drug B value. Only the adherence process is shifted.
 
 
 # Informative Censoring
 
 Loss to follow-up in HIV cohorts is rarely random. Patients who are doing poorly (declining CD4, rising viral load, low adherence) are more likely to disengage from care. If censoring is ignored or treated as non-informative, outcomes among the remaining patients paint an overly optimistic picture.
 
-The `lmtp` framework handles informative censoring by modeling the censoring mechanism at each time point: $P(C_t = 0 \mid \bar{A}_{t}, \bar{L}_t, W)$. Patients who remain uncensored despite having high-risk profiles receive additional weight in the estimation, correcting for the differential dropout. The `cens` argument in `lmtp_sdr()` specifies the censoring indicators, and the package fits a separate nuisance model for censoring at each visit.
+The `lmtp` framework handles informative censoring by modeling the censoring mechanism at each time point: $P(C_t = 0 \mid \bar{A}_{t}, \bar{L}_t, W)$. Patients who remain uncensored despite having high-risk profiles receive additional weight in the estimation, correcting for the differential dropout.
 
-In our simulation, censoring probability increases with low CD4, high viral load, and low adherence. This means the uncensored sample is enriched for healthier, more adherent patients. Without censoring adjustment, the estimated failure rate would be biased downward.
+In our simulation, censoring probability increases with low CD4, high viral load, and low adherence. Without censoring adjustment, the estimated failure rate would be biased downward because the uncensored sample is enriched for healthier, more adherent patients.
 
 
 ## Intercurrent events in practice
 
-Real HIV cohort analyses face complications beyond simple time-varying confounding and informative censoring. The DAG extends when we add monitoring intensity changes, treatment switching, and competing risks. Each of these is an *intercurrent event*, something that happens after treatment initiation and affects either the treatment process, the outcome process, or our ability to observe the outcome.
+Real HIV cohort analyses face complications beyond time-varying confounding and informative censoring. Monitoring intensity changes, treatment switching, and competing risks are all *intercurrent events*: things that happen after treatment initiation and affect either the treatment process, the outcome process, or our ability to observe the outcome.
 
 Consider the extended DAG structure at each visit:
 
@@ -528,13 +528,13 @@ $$
 
 where $M_t$ denotes monitoring intensity (e.g., visit frequency, lab ordering patterns), $S_t$ denotes treatment switching, and $R_t$ denotes competing risks (e.g., death from non-HIV causes). Each of these nodes feeds back into subsequent time-varying confounders and adherence, creating additional pathways that must be handled for valid causal inference.
 
-L-TMLE and LMTP handle all of these intercurrent events through the same sequential regression machinery, by incorporating them as additional nodes in the longitudinal data structure:
+L-TMLE and LMTP handle these intercurrent events through the same sequential regression machinery, incorporating them as additional nodes in the longitudinal data structure:
 
 - **Monitoring intensity** enters as a time-varying covariate in $L_t$. If monitoring is informative (sicker patients are seen more often, which affects measured adherence), including it in the covariate set adjusts for this pathway.
 - **Treatment switching** can be handled as a censoring event (censor at switch) or as a time-varying covariate, depending on the estimand. See the Treatment Switching section below.
 - **Competing risks** enter as additional censoring indicators. If death from non-HIV causes is informative (related to the same confounders that affect virologic failure), the censoring model adjusts for this.
 
-The key insight is that the sequential regression structure of L-TMLE/LMTP does not change when intercurrent events are added; only the node set grows. Each additional node requires a correctly specified nuisance model, but the identification strategy and estimation machinery remain the same.
+The key insight is that the sequential regression structure does not change when intercurrent events are added; only the node set grows. Each additional node requires a correctly specified nuisance model, but the identification strategy and estimation machinery remain the same. The target quantity remains the counterfactual risk under the hypothetical adherence intervention, now adjusted for both time-varying confounding and intercurrent events.
 
 | Intercurrent Event | Challenge | LMTP / L-TMLE Handling |
 |--------------------|-----------|----------------------|
@@ -568,11 +568,11 @@ In our simulation we did not include switching for clarity, but in a real analys
 
 The two estimation chapters cover complementary tools for longitudinal causal inference. Here is when to reach for each.
 
-**L-TMLE (Chapter 3.9)** is the right choice when the intervention is a standard static or dynamic regime ("always treat," "treat if CD4 drops below 200," or similar rules that assign a deterministic treatment value at each visit). The `ltmle` package is mature, well-documented, and handles binary/continuous treatments with censoring. For the standard longitudinal treatment effect question, it is the workhorse.
+**L-TMLE (Chapter 3.9)** is the right choice when the intervention is a standard static or dynamic regime ("always treat," "treat if CD4 drops below 200," or similar rules that assign a deterministic treatment value at each visit). The `ltmle` package is mature, well-documented, and handles binary/continuous treatments with censoring.
 
-**LMTP (this chapter)** is the right choice when the intervention is a modified treatment policy, such as a shift, a distributional change, or any rule where the intervened treatment value depends on the patient's natural (observed) treatment value. It is also the better choice when positivity is a concern, because shift interventions stay closer to the observed data support. The `lmtp` package implements the sequentially doubly robust estimator with cross-fitting, handling both static and stochastic interventions in a unified framework.
+**LMTP (this chapter)** is the right choice when the intervention is a modified treatment policy: a shift, a distributional change, or any rule where the intervened treatment value depends on the patient's natural (observed) treatment value. It is also the better choice when positivity is a concern, because shift interventions stay closer to the observed data support.
 
-The two methods share the same identification assumptions (consistency, sequential exchangeability, positivity) and the same backwards sequential regression structure. They differ in the class of interventions they can target and in the specific estimator mechanics. For any given analysis, the choice depends on the causal question.
+The two methods share the same identification assumptions and the same backwards sequential regression structure. They differ in the class of interventions they can target. For any given analysis, the choice depends on the causal question.
 
 | Feature | L-TMLE (`ltmle`) | LMTP (`lmtp`) |
 |---------|-------------------|---------------|

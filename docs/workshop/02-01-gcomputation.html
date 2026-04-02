@@ -2331,7 +2331,7 @@ globalThis.qwebrCreateMonacoEditorInstance = function (cellData) {
 <section id="chapter-2.1-outcome-modeling-and-standardization" class="level1" data-number="6">
 <h1 data-number="6"><span class="header-section-number">6</span> Chapter 2.1: Outcome Modeling and Standardization</h1>
 <p><em>G-computation as a foundation for causal estimation</em></p>
-<p>Outcome modeling and standardization, often referred to as <strong>g-computation</strong>, is one of the oldest and most intuitive approaches to causal inference. In this chapter, we’ll build intuition, walk carefully through why the method works, and show where it fails.</p>
+<p>Outcome modeling and standardization, often referred to as <strong>g-computation</strong>, is one of the oldest and most intuitive approaches to causal inference.</p>
 <hr>
 <div class="callout callout-style-default callout-tip callout-titled">
 <div class="callout-header d-flex align-content-center">
@@ -2390,10 +2390,11 @@ Step 3: Standardize. This Is the Step That Makes It Causal
 </section>
 <section id="beyond-the-risk-difference-relative-risk-and-population-attributable-fraction" class="level3" data-number="8.0.3">
 <h3 data-number="8.0.3" class="anchored" data-anchor-id="beyond-the-risk-difference-relative-risk-and-population-attributable-fraction"><span class="header-section-number">8.0.3</span> Beyond the Risk Difference: Relative Risk and Population Attributable Fraction</h3>
-<p>One of the strengths of g-computation is that once you have the counterfactual predictions <code>p1</code> and <code>p0</code>, you can compute <em>any</em> contrast — not just the risk difference. This flexibility is difficult to achieve with a single regression coefficient.</p>
+<p>One of the strengths of g-computation is that once you have the counterfactual predictions <code>p1</code> and <code>p0</code>, you can compute <em>any</em> contrast, not just the risk difference. This flexibility is difficult to achieve with a single regression coefficient.</p>
 <div id="qwebr-insertion-location-5"></div>
 <noscript>Please enable JavaScript to experience the dynamic code cell content on this page.</noscript>
-<p>The <strong>relative risk</strong> tells you how many times more likely the outcome is under treatment versus control. The <strong>population attributable fraction (causal)</strong> tells you what proportion of observed cases would be eliminated if the entire population had received control instead of treatment. Under the identification assumptions (exchangeability, positivity, consistency), this formula has a causal interpretation: it estimates the fraction of cases that would be eliminated if the entire population had been untreated. This differs from the traditional epidemiologic PAF formula, which uses observed prevalence and does not require causal assumptions but also does not have a causal interpretation. Neither of these measures is directly available from a single logistic regression coefficient — you would need to exponentiate and back-transform, making strong assumptions about the scale. With g-computation, you compute them directly from the predicted counterfactual risks.</p>
+<p>The <strong>relative risk</strong> tells you how many times more likely the outcome is under treatment versus control. The <strong>population attributable fraction (causal)</strong> tells you what proportion of observed cases would be eliminated if the entire population had received control instead of treatment. Under the identification assumptions (exchangeability, positivity, consistency), this formula has a causal interpretation: it estimates the fraction of cases that would be eliminated if the entire population had been untreated. This differs from the traditional epidemiologic PAF formula, which uses observed prevalence and does not require causal assumptions but also does not have a causal interpretation.</p>
+<p>Neither of these measures is directly available from a single logistic regression coefficient; you would need to exponentiate and back-transform, making strong assumptions about the scale. With g-computation, you compute them directly from the predicted counterfactual risks.</p>
 </section>
 </section>
 <section id="why-g-computation-works" class="level1" data-number="9">
@@ -2402,6 +2403,7 @@ Step 3: Standardize. This Is the Step That Makes It Causal
 <p><span class="math display">\[
 E_W[ E[Y | A=a, W] ].
 \]</span></p>
+<p>In plain terms, this averages the predicted outcomes under treatment (or control) across the full study population, weighting each prediction by the population’s covariate distribution. The goal remains the same: estimate <span class="math inline">\(E[Y(1)] - E[Y(0)]\)</span>, the population-level risk difference.</p>
 <div class="callout callout-style-default callout-tip callout-titled">
 <div class="callout-header d-flex align-content-center">
 <div class="callout-icon-container">
@@ -2434,7 +2436,7 @@ Model Misspecification
 </div>
 </div>
 <div class="callout-body-container callout-body">
-<p>G-computation rests entirely on the outcome model <span class="math inline">\(E[Y \mid A, W]\)</span>. If that model is wrong (e.g., omits interactions, assumes linearity when the truth is non-linear), bias propagates directly into the causal estimate. Always check residuals and consider flexible alternatives (see Chapter 2.3).</p>
+<p>G-computation rests entirely on the outcome model <span class="math inline">\(E[Y \mid A, W]\)</span>. If that model is wrong (e.g., omits interactions, assumes linearity when the truth is non-linear), bias propagates directly into the causal estimate. For example, if mortality risk depends on an interaction between CD4 count and age, but your model includes only main effects, the predicted counterfactual outcomes will be systematically off. Always check residuals and consider flexible alternatives (see Chapter 2.3).</p>
 </div>
 </div>
 <hr>
@@ -2472,7 +2474,9 @@ p0_sl &lt;- predict(sl_mod, newdata = dat0)\)</span>pred</p>
 :::{.callout-warning}
 ## Why G-Computation Is Less Common in Practice: No Built-In Inference
 
-A key limitation of g-computation is that it provides a **point estimate but no standard error or confidence interval** from the procedure itself. Unlike a regression model, which produces standard errors from the Fisher information matrix, g-computation's standardization step has no closed-form variance formula in general. To obtain confidence intervals, you must use the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.
+A key limitation of g-computation is that it provides a **point estimate but no standard error or confidence interval** from the procedure itself. Unlike a regression model, which produces standard errors from the Fisher information matrix, g-computation's standardization step has no closed-form variance formula in general.
+
+To obtain confidence intervals, you must use the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.
 
 ```{webr-r, eval=FALSE}
 # Bootstrap confidence interval for g-computation
@@ -2490,12 +2494,13 @@ for (b in seq_len(n_boot)) {
 }
 
 quantile(boot_ates, c(0.025, 0.975))</code></pre>
-<p>This works but is computationally expensive and does not benefit from efficiency theory. The methods in the next two chapters — <strong>IPTW</strong> and especially <strong>TMLE</strong> — provide analytic standard errors and confidence intervals based on influence function theory, making them more practical for routine use. TMLE in particular combines the outcome-modeling strengths of g-computation with formal inference, which is one reason it is the recommended approach in later chapters. :::</p>
+<p>This works but is computationally expensive and does not benefit from efficiency theory. The methods in the next two chapters (<strong>IPTW</strong> and especially <strong>TMLE</strong>) provide analytic standard errors and confidence intervals based on influence function theory, making them more practical for routine use. TMLE in particular combines the outcome-modeling strengths of g-computation with formal inference, which is one reason it is the recommended approach in later chapters. :::</p>
 <section id="running-example-antiretroviral-therapy-cohort" class="level2" data-number="11.1">
 <h2 data-number="11.1" class="anchored" data-anchor-id="running-example-antiretroviral-therapy-cohort"><span class="header-section-number">11.1</span> Running Example: Antiretroviral Therapy Cohort</h2>
 <p>See the <a href="./00-case-study.html">Running Case Study</a> for the full data description.</p>
 <p>Throughout this chapter we applied g-computation to a <strong>point-treatment simplification</strong> of the HIV antiretroviral therapy cohort. Rather than modeling HAART initiation as a time-varying decision, we collapsed each patient’s treatment history into a single binary indicator: <code>ever_haart</code> (1 if the patient initiated HAART at any point, 0 otherwise). The outcome is <code>died</code> (1 if the patient died during follow-up, 0 if alive at the end of the study). The baseline confounders we adjusted for are <code>cd4_sqrt_baseline</code> (square-root transformed CD4 cell count at baseline), <code>age</code>, and <code>sex</code>.</p>
-<p>This point-treatment setup is a natural fit for g-computation. The method lets us ask a concrete causal question: “What would population mortality have looked like if <em>everyone</em> had initiated HAART, compared to a world where <em>no one</em> did?” We answered this by fitting an outcome model for <code>died</code> as a function of <code>ever_haart</code> and the confounders, predicting each patient’s mortality risk under both treatment scenarios, and averaging those predictions to obtain the marginal risk difference. Because treatment is strongly confounded by baseline CD4 count and age (sicker patients are more likely to start HAART, but also more likely to die), a naive comparison of treated and untreated groups would be misleading. G-computation addresses this by standardizing over the full covariate distribution.</p>
+<p>The method lets us ask a concrete causal question: “What would population mortality have looked like if <em>everyone</em> had initiated HAART, compared to a world where <em>no one</em> did?” We answered this by fitting an outcome model for <code>died</code> as a function of <code>ever_haart</code> and the confounders, predicting each patient’s mortality risk under both treatment scenarios, and averaging those predictions to obtain the marginal risk difference.</p>
+<p>Because treatment is strongly confounded by baseline CD4 count and age (sicker patients are more likely to start HAART, but also more likely to die), a naive comparison of treated and untreated groups would be misleading. G-computation addresses this by standardizing over the full covariate distribution.</p>
 <p>The point-treatment analysis is a useful pedagogical starting point, but it does not fully capture the causal structure of this problem. In reality, HAART initiation is a time-varying treatment whose effect is confounded by evolving CD4 counts, which are themselves affected by prior treatment. Handling this feedback loop requires <strong>longitudinal g-computation</strong> and related methods (marginal structural models, longitudinal TMLE), which are covered in later chapters.</p>
 <div class="callout callout-style-default callout-tip callout-titled">
 <div class="callout-header d-flex align-content-center">
@@ -3041,253 +3046,260 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 <span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="fu"># Chapter 2.1: Outcome Modeling and Standardization</span></span>
 <span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>*G-computation as a foundation for causal estimation*</span>
 <span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>Outcome modeling and standardization, often referred to as **g-computation**, is one of the oldest and most intuitive approaches to causal inference. In this chapter, we'll build intuition, walk carefully through why the method works, and show where it fails. </span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>Outcome modeling and standardization, often referred to as **g-computation**, is one of the oldest and most intuitive approaches to causal inference.</span>
 <span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>:::{.callout-tip}</span>
-<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a><span class="fu">## Why Start With G-Computation?</span></span>
-<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions <span class="co">[</span><span class="ot">@hernan2025whatif</span><span class="co">]</span>. No reliance on a single regression coefficient required. It directly implements the identification formula from Chapter 1.2 ($E<span class="co">[</span><span class="ot">Y(a)</span><span class="co">]</span> = E_W<span class="co">[</span><span class="ot">E[Y \mid A=a, W]</span><span class="co">]</span>$), making it the most concrete entry point for learning causal estimation, and mapping the causal estimand to a statistical estimand.</span>
-<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>**Key point.** G-computation reconstructs what would have happened if *everyone* received treatment ($A=1$) and, separately, if *everyone* received control ($A=0$). The recipe is three steps: (1) fit an outcome model $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$, (2) predict outcomes for each individual under both treatments, and (3) average those predictions (standardization). That is the entire method.</span>
-<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a><span class="fu"># Implementation Example: HIV Antiretroviral Therapy Cohort</span></span>
-<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a>We use the shared HIV antiretroviral therapy cohort introduced in the case study. This dataset follows HIV-positive patients from seroconversion, tracking HAART initiation and mortality. Here we collapse the longitudinal data to a point-treatment snapshot: A = <span class="in">`ever_haart`</span> (1 = initiated HAART at any point, 0 = never initiated), Y = <span class="in">`died`</span> (1 = died, 0 = alive at end of follow-up), with confounders age, sex, and baseline CD4 count (square-root transformed).</span>
-<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
-<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a><span class="in">library(tidyverse)</span></span>
-<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a><span class="in">download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")</span></span>
-<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a><span class="in">source("load-haart-cohort.R")</span></span>
-<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a><span class="in">dat &lt;- as_tibble(haart_baseline)</span></span>
-<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb2-35"><a href="#cb2-35" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-36"><a href="#cb2-36" aria-hidden="true" tabindex="-1"></a>Treatment is strongly confounded by baseline CD4 count and age, making this a good scenario for demonstrating g-computation.</span>
-<span id="cb2-37"><a href="#cb2-37" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-38"><a href="#cb2-38" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb2-39"><a href="#cb2-39" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-40"><a href="#cb2-40" aria-hidden="true" tabindex="-1"></a><span class="fu"># Step-by-Step G-Computation</span></span>
-<span id="cb2-41"><a href="#cb2-41" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-42"><a href="#cb2-42" aria-hidden="true" tabindex="-1"></a><span class="fu">### Step 1: Fit an Outcome Model</span></span>
-<span id="cb2-43"><a href="#cb2-43" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-44"><a href="#cb2-44" aria-hidden="true" tabindex="-1"></a>We fit a logistic regression model predicting the outcome from treatment and confounders:</span>
-<span id="cb2-45"><a href="#cb2-45" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-46"><a href="#cb2-46" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
-<span id="cb2-47"><a href="#cb2-47" aria-hidden="true" tabindex="-1"></a><span class="in">mod &lt;- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,</span></span>
-<span id="cb2-48"><a href="#cb2-48" aria-hidden="true" tabindex="-1"></a><span class="in">           family = binomial, data = dat)</span></span>
-<span id="cb2-49"><a href="#cb2-49" aria-hidden="true" tabindex="-1"></a><span class="in">broom::tidy(mod, conf.int = TRUE) |&gt; knitr::kable(digits = 3, caption = "Outcome model coefficients")</span></span>
-<span id="cb2-50"><a href="#cb2-50" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb2-51"><a href="#cb2-51" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-52"><a href="#cb2-52" aria-hidden="true" tabindex="-1"></a>**Pitfall.** The coefficient on `ever_haart` from this logistic regression is a *conditional log-odds ratio*. It tells you the association between HAART initiation and mortality *holding confounders fixed*. That is **not** a causal effect on its own. We need the next two steps (prediction + averaging) to turn this model into a causal estimate.</span>
-<span id="cb2-53"><a href="#cb2-53" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-54"><a href="#cb2-54" aria-hidden="true" tabindex="-1"></a><span class="fu">### Step 2: Predict Counterfactual Outcomes (The "What If" Step)</span></span>
-<span id="cb2-55"><a href="#cb2-55" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-56"><a href="#cb2-56" aria-hidden="true" tabindex="-1"></a>This is where g-computation earns its name. We ask two "what if" questions for *every single person* in the dataset, regardless of what treatment they actually received: what if this person had been treated ($A=1$)? What if untreated ($A=0$)?</span>
-<span id="cb2-57"><a href="#cb2-57" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-58"><a href="#cb2-58" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
-<span id="cb2-59"><a href="#cb2-59" aria-hidden="true" tabindex="-1"></a><span class="in"># create counterfactual datasets</span></span>
-<span id="cb2-60"><a href="#cb2-60" aria-hidden="true" tabindex="-1"></a><span class="in">dat1 &lt;- dat %&gt;% mutate(ever_haart = 1)</span></span>
-<span id="cb2-61"><a href="#cb2-61" aria-hidden="true" tabindex="-1"></a><span class="in">dat0 &lt;- dat %&gt;% mutate(ever_haart = 0)</span></span>
-<span id="cb2-62"><a href="#cb2-62" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-63"><a href="#cb2-63" aria-hidden="true" tabindex="-1"></a><span class="in"># predict potential outcomes</span></span>
-<span id="cb2-64"><a href="#cb2-64" aria-hidden="true" tabindex="-1"></a><span class="in">p1 &lt;- predict(mod, newdata = dat1, type = "response")</span></span>
-<span id="cb2-65"><a href="#cb2-65" aria-hidden="true" tabindex="-1"></a><span class="in">p0 &lt;- predict(mod, newdata = dat0, type = "response")</span></span>
-<span id="cb2-66"><a href="#cb2-66" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb2-67"><a href="#cb2-67" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-68"><a href="#cb2-68" aria-hidden="true" tabindex="-1"></a>Here <span class="in">`p1[i]`</span> and <span class="in">`p0[i]`</span> are the predicted outcomes for person *i* under treatment and control, respectively. Notice we are *not* comparing treated vs. untreated groups. We are comparing two hypothetical worlds for the *same* people. This is the counterfactual reasoning that separates causal inference from plain regression.</span>
-<span id="cb2-69"><a href="#cb2-69" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-70"><a href="#cb2-70" aria-hidden="true" tabindex="-1"></a>:::{.callout-important}</span>
-<span id="cb2-71"><a href="#cb2-71" aria-hidden="true" tabindex="-1"></a><span class="fu">## Step 3: Standardize. This Is the Step That Makes It Causal</span></span>
-<span id="cb2-72"><a href="#cb2-72" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-73"><a href="#cb2-73" aria-hidden="true" tabindex="-1"></a>Averaging the counterfactual predictions over the *entire population* converts model-based predictions into a **causal** estimate: a standardized (marginal) risk difference, the same quantity a well-randomized trial would yield.</span>
-<span id="cb2-74"><a href="#cb2-74" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-75"><a href="#cb2-75" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
-<span id="cb2-76"><a href="#cb2-76" aria-hidden="true" tabindex="-1"></a><span class="in">risk1 &lt;- mean(p1)</span></span>
-<span id="cb2-77"><a href="#cb2-77" aria-hidden="true" tabindex="-1"></a><span class="in">risk0 &lt;- mean(p0)</span></span>
-<span id="cb2-78"><a href="#cb2-78" aria-hidden="true" tabindex="-1"></a><span class="in">ate  &lt;- risk1 - risk0</span></span>
-<span id="cb2-79"><a href="#cb2-79" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-80"><a href="#cb2-80" aria-hidden="true" tabindex="-1"></a><span class="in">knitr::kable(data.frame(risk1 = risk1, risk0 = risk0, ate = ate))</span></span>
-<span id="cb2-81"><a href="#cb2-81" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb2-82"><a href="#cb2-82" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-83"><a href="#cb2-83" aria-hidden="true" tabindex="-1"></a>Interpret the result as: “If the entire population had initiated HAART rather than not, the estimated change in mortality risk would be X percentage points.”</span>
-<span id="cb2-84"><a href="#cb2-84" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb2-85"><a href="#cb2-85" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-86"><a href="#cb2-86" aria-hidden="true" tabindex="-1"></a><span class="fu">### Beyond the Risk Difference: Relative Risk and Population Attributable Fraction</span></span>
-<span id="cb2-87"><a href="#cb2-87" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-88"><a href="#cb2-88" aria-hidden="true" tabindex="-1"></a>One of the strengths of g-computation is that once you have the counterfactual predictions <span class="in">`p1`</span> and <span class="in">`p0`</span>, you can compute *any* contrast --- not just the risk difference. This flexibility is difficult to achieve with a single regression coefficient.</span>
-<span id="cb2-89"><a href="#cb2-89" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-90"><a href="#cb2-90" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
-<span id="cb2-91"><a href="#cb2-91" aria-hidden="true" tabindex="-1"></a><span class="in"># Relative risk (risk ratio)</span></span>
-<span id="cb2-92"><a href="#cb2-92" aria-hidden="true" tabindex="-1"></a><span class="in">rr &lt;- risk1 / risk0</span></span>
-<span id="cb2-93"><a href="#cb2-93" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-94"><a href="#cb2-94" aria-hidden="true" tabindex="-1"></a><span class="in"># Population attributable fraction (causal):</span></span>
-<span id="cb2-95"><a href="#cb2-95" aria-hidden="true" tabindex="-1"></a><span class="in"># What fraction of cases would be eliminated if all were untreated?</span></span>
-<span id="cb2-96"><a href="#cb2-96" aria-hidden="true" tabindex="-1"></a><span class="in"># PAF = (P(Y=1) - P(Y(0)=1)) / P(Y=1)</span></span>
-<span id="cb2-97"><a href="#cb2-97" aria-hidden="true" tabindex="-1"></a><span class="in">overall_risk &lt;- mean(dat$died)</span></span>
-<span id="cb2-98"><a href="#cb2-98" aria-hidden="true" tabindex="-1"></a><span class="in">par_frac &lt;- (overall_risk - risk0) / overall_risk</span></span>
-<span id="cb2-99"><a href="#cb2-99" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-100"><a href="#cb2-100" aria-hidden="true" tabindex="-1"></a><span class="in">knitr::kable(data.frame(</span></span>
-<span id="cb2-101"><a href="#cb2-101" aria-hidden="true" tabindex="-1"></a><span class="in">  Measure = c("Risk difference (ATE)", "Relative risk", "Population attributable fraction"),</span></span>
-<span id="cb2-102"><a href="#cb2-102" aria-hidden="true" tabindex="-1"></a><span class="in">  Estimate = round(c(ate, rr, par_frac), 4)</span></span>
-<span id="cb2-103"><a href="#cb2-103" aria-hidden="true" tabindex="-1"></a><span class="in">))</span></span>
-<span id="cb2-104"><a href="#cb2-104" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb2-105"><a href="#cb2-105" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-106"><a href="#cb2-106" aria-hidden="true" tabindex="-1"></a>The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **population attributable fraction (causal)** tells you what proportion of observed cases would be eliminated if the entire population had received control instead of treatment. Under the identification assumptions (exchangeability, positivity, consistency), this formula has a causal interpretation: it estimates the fraction of cases that would be eliminated if the entire population had been untreated. This differs from the traditional epidemiologic PAF formula, which uses observed prevalence and does not require causal assumptions but also does not have a causal interpretation. Neither of these measures is directly available from a single logistic regression coefficient --- you would need to exponentiate and back-transform, making strong assumptions about the scale. With g-computation, you compute them directly from the predicted counterfactual risks.</span>
-<span id="cb2-107"><a href="#cb2-107" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>:::{.callout-tip}</span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a><span class="fu">## Why Start With G-Computation?</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions <span class="co">[</span><span class="ot">@hernan2025whatif</span><span class="co">]</span>. No reliance on a single regression coefficient required. It directly implements the identification formula from Chapter 1.2 ($E<span class="co">[</span><span class="ot">Y(a)</span><span class="co">]</span> = E_W<span class="co">[</span><span class="ot">E[Y \mid A=a, W]</span><span class="co">]</span>$), making it the most concrete entry point for learning causal estimation, and mapping the causal estimand to a statistical estimand.</span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a>**Key point.** G-computation reconstructs what would have happened if *everyone* received treatment ($A=1$) and, separately, if *everyone* received control ($A=0$). The recipe is three steps: (1) fit an outcome model $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$, (2) predict outcomes for each individual under both treatments, and (3) average those predictions (standardization). That is the entire method.</span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a><span class="fu"># Implementation Example: HIV Antiretroviral Therapy Cohort</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a>We use the shared HIV antiretroviral therapy cohort introduced in the case study. This dataset follows HIV-positive patients from seroconversion, tracking HAART initiation and mortality. Here we collapse the longitudinal data to a point-treatment snapshot: A = <span class="in">`ever_haart`</span> (1 = initiated HAART at any point, 0 = never initiated), Y = <span class="in">`died`</span> (1 = died, 0 = alive at end of follow-up), with confounders age, sex, and baseline CD4 count (square-root transformed).</span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a><span class="in">library(tidyverse)</span></span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a><span class="in">download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")</span></span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a><span class="in">source("load-haart-cohort.R")</span></span>
+<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a><span class="in">dat &lt;- as_tibble(haart_baseline)</span></span>
+<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-35"><a href="#cb2-35" aria-hidden="true" tabindex="-1"></a>Treatment is strongly confounded by baseline CD4 count and age, making this a good scenario for demonstrating g-computation.</span>
+<span id="cb2-36"><a href="#cb2-36" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-37"><a href="#cb2-37" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb2-38"><a href="#cb2-38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-39"><a href="#cb2-39" aria-hidden="true" tabindex="-1"></a><span class="fu"># Step-by-Step G-Computation</span></span>
+<span id="cb2-40"><a href="#cb2-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-41"><a href="#cb2-41" aria-hidden="true" tabindex="-1"></a><span class="fu">### Step 1: Fit an Outcome Model</span></span>
+<span id="cb2-42"><a href="#cb2-42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-43"><a href="#cb2-43" aria-hidden="true" tabindex="-1"></a>We fit a logistic regression model predicting the outcome from treatment and confounders:</span>
+<span id="cb2-44"><a href="#cb2-44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-45"><a href="#cb2-45" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
+<span id="cb2-46"><a href="#cb2-46" aria-hidden="true" tabindex="-1"></a><span class="in">mod &lt;- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,</span></span>
+<span id="cb2-47"><a href="#cb2-47" aria-hidden="true" tabindex="-1"></a><span class="in">           family = binomial, data = dat)</span></span>
+<span id="cb2-48"><a href="#cb2-48" aria-hidden="true" tabindex="-1"></a><span class="in">broom::tidy(mod, conf.int = TRUE) |&gt; knitr::kable(digits = 3, caption = "Outcome model coefficients")</span></span>
+<span id="cb2-49"><a href="#cb2-49" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb2-50"><a href="#cb2-50" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-51"><a href="#cb2-51" aria-hidden="true" tabindex="-1"></a>**Pitfall.** The coefficient on `ever_haart` from this logistic regression is a *conditional log-odds ratio*. It tells you the association between HAART initiation and mortality *holding confounders fixed*. That is **not** a causal effect on its own. We need the next two steps (prediction + averaging) to turn this model into a causal estimate.</span>
+<span id="cb2-52"><a href="#cb2-52" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-53"><a href="#cb2-53" aria-hidden="true" tabindex="-1"></a><span class="fu">### Step 2: Predict Counterfactual Outcomes (The "What If" Step)</span></span>
+<span id="cb2-54"><a href="#cb2-54" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-55"><a href="#cb2-55" aria-hidden="true" tabindex="-1"></a>This is where g-computation earns its name. We ask two "what if" questions for *every single person* in the dataset, regardless of what treatment they actually received: what if this person had been treated ($A=1$)? What if untreated ($A=0$)?</span>
+<span id="cb2-56"><a href="#cb2-56" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-57"><a href="#cb2-57" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
+<span id="cb2-58"><a href="#cb2-58" aria-hidden="true" tabindex="-1"></a><span class="in"># create counterfactual datasets</span></span>
+<span id="cb2-59"><a href="#cb2-59" aria-hidden="true" tabindex="-1"></a><span class="in">dat1 &lt;- dat %&gt;% mutate(ever_haart = 1)</span></span>
+<span id="cb2-60"><a href="#cb2-60" aria-hidden="true" tabindex="-1"></a><span class="in">dat0 &lt;- dat %&gt;% mutate(ever_haart = 0)</span></span>
+<span id="cb2-61"><a href="#cb2-61" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-62"><a href="#cb2-62" aria-hidden="true" tabindex="-1"></a><span class="in"># predict potential outcomes</span></span>
+<span id="cb2-63"><a href="#cb2-63" aria-hidden="true" tabindex="-1"></a><span class="in">p1 &lt;- predict(mod, newdata = dat1, type = "response")</span></span>
+<span id="cb2-64"><a href="#cb2-64" aria-hidden="true" tabindex="-1"></a><span class="in">p0 &lt;- predict(mod, newdata = dat0, type = "response")</span></span>
+<span id="cb2-65"><a href="#cb2-65" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb2-66"><a href="#cb2-66" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-67"><a href="#cb2-67" aria-hidden="true" tabindex="-1"></a>Here <span class="in">`p1[i]`</span> and <span class="in">`p0[i]`</span> are the predicted outcomes for person *i* under treatment and control, respectively. Notice we are *not* comparing treated vs. untreated groups. We are comparing two hypothetical worlds for the *same* people. This is the counterfactual reasoning that separates causal inference from plain regression.</span>
+<span id="cb2-68"><a href="#cb2-68" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-69"><a href="#cb2-69" aria-hidden="true" tabindex="-1"></a>:::{.callout-important}</span>
+<span id="cb2-70"><a href="#cb2-70" aria-hidden="true" tabindex="-1"></a><span class="fu">## Step 3: Standardize. This Is the Step That Makes It Causal</span></span>
+<span id="cb2-71"><a href="#cb2-71" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-72"><a href="#cb2-72" aria-hidden="true" tabindex="-1"></a>Averaging the counterfactual predictions over the *entire population* converts model-based predictions into a **causal** estimate: a standardized (marginal) risk difference, the same quantity a well-randomized trial would yield.</span>
+<span id="cb2-73"><a href="#cb2-73" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-74"><a href="#cb2-74" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
+<span id="cb2-75"><a href="#cb2-75" aria-hidden="true" tabindex="-1"></a><span class="in">risk1 &lt;- mean(p1)</span></span>
+<span id="cb2-76"><a href="#cb2-76" aria-hidden="true" tabindex="-1"></a><span class="in">risk0 &lt;- mean(p0)</span></span>
+<span id="cb2-77"><a href="#cb2-77" aria-hidden="true" tabindex="-1"></a><span class="in">ate  &lt;- risk1 - risk0</span></span>
+<span id="cb2-78"><a href="#cb2-78" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-79"><a href="#cb2-79" aria-hidden="true" tabindex="-1"></a><span class="in">knitr::kable(data.frame(risk1 = risk1, risk0 = risk0, ate = ate))</span></span>
+<span id="cb2-80"><a href="#cb2-80" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb2-81"><a href="#cb2-81" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-82"><a href="#cb2-82" aria-hidden="true" tabindex="-1"></a>Interpret the result as: “If the entire population had initiated HAART rather than not, the estimated change in mortality risk would be X percentage points.”</span>
+<span id="cb2-83"><a href="#cb2-83" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb2-84"><a href="#cb2-84" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-85"><a href="#cb2-85" aria-hidden="true" tabindex="-1"></a><span class="fu">### Beyond the Risk Difference: Relative Risk and Population Attributable Fraction</span></span>
+<span id="cb2-86"><a href="#cb2-86" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-87"><a href="#cb2-87" aria-hidden="true" tabindex="-1"></a>One of the strengths of g-computation is that once you have the counterfactual predictions <span class="in">`p1`</span> and <span class="in">`p0`</span>, you can compute *any* contrast, not just the risk difference. This flexibility is difficult to achieve with a single regression coefficient.</span>
+<span id="cb2-88"><a href="#cb2-88" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-89"><a href="#cb2-89" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
+<span id="cb2-90"><a href="#cb2-90" aria-hidden="true" tabindex="-1"></a><span class="in"># Relative risk (risk ratio)</span></span>
+<span id="cb2-91"><a href="#cb2-91" aria-hidden="true" tabindex="-1"></a><span class="in">rr &lt;- risk1 / risk0</span></span>
+<span id="cb2-92"><a href="#cb2-92" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-93"><a href="#cb2-93" aria-hidden="true" tabindex="-1"></a><span class="in"># Population attributable fraction (causal):</span></span>
+<span id="cb2-94"><a href="#cb2-94" aria-hidden="true" tabindex="-1"></a><span class="in"># What fraction of cases would be eliminated if all were untreated?</span></span>
+<span id="cb2-95"><a href="#cb2-95" aria-hidden="true" tabindex="-1"></a><span class="in"># PAF = (P(Y=1) - P(Y(0)=1)) / P(Y=1)</span></span>
+<span id="cb2-96"><a href="#cb2-96" aria-hidden="true" tabindex="-1"></a><span class="in">overall_risk &lt;- mean(dat$died)</span></span>
+<span id="cb2-97"><a href="#cb2-97" aria-hidden="true" tabindex="-1"></a><span class="in">par_frac &lt;- (overall_risk - risk0) / overall_risk</span></span>
+<span id="cb2-98"><a href="#cb2-98" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-99"><a href="#cb2-99" aria-hidden="true" tabindex="-1"></a><span class="in">knitr::kable(data.frame(</span></span>
+<span id="cb2-100"><a href="#cb2-100" aria-hidden="true" tabindex="-1"></a><span class="in">  Measure = c("Risk difference (ATE)", "Relative risk", "Population attributable fraction"),</span></span>
+<span id="cb2-101"><a href="#cb2-101" aria-hidden="true" tabindex="-1"></a><span class="in">  Estimate = round(c(ate, rr, par_frac), 4)</span></span>
+<span id="cb2-102"><a href="#cb2-102" aria-hidden="true" tabindex="-1"></a><span class="in">))</span></span>
+<span id="cb2-103"><a href="#cb2-103" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb2-104"><a href="#cb2-104" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-105"><a href="#cb2-105" aria-hidden="true" tabindex="-1"></a>The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **population attributable fraction (causal)** tells you what proportion of observed cases would be eliminated if the entire population had received control instead of treatment. Under the identification assumptions (exchangeability, positivity, consistency), this formula has a causal interpretation: it estimates the fraction of cases that would be eliminated if the entire population had been untreated. This differs from the traditional epidemiologic PAF formula, which uses observed prevalence and does not require causal assumptions but also does not have a causal interpretation.</span>
+<span id="cb2-106"><a href="#cb2-106" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-107"><a href="#cb2-107" aria-hidden="true" tabindex="-1"></a>Neither of these measures is directly available from a single logistic regression coefficient; you would need to exponentiate and back-transform, making strong assumptions about the scale. With g-computation, you compute them directly from the predicted counterfactual risks.</span>
 <span id="cb2-108"><a href="#cb2-108" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-109"><a href="#cb2-109" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why G-Computation Works</span></span>
-<span id="cb2-110"><a href="#cb2-110" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-111"><a href="#cb2-111" aria-hidden="true" tabindex="-1"></a>It directly implements the identification formula:</span>
-<span id="cb2-112"><a href="#cb2-112" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-113"><a href="#cb2-113" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb2-114"><a href="#cb2-114" aria-hidden="true" tabindex="-1"></a>E_W<span class="co">[</span><span class="ot"> E[Y | A=a, W] </span><span class="co">]</span>.</span>
-<span id="cb2-115"><a href="#cb2-115" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb2-116"><a href="#cb2-116" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-109"><a href="#cb2-109" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-110"><a href="#cb2-110" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why G-Computation Works</span></span>
+<span id="cb2-111"><a href="#cb2-111" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-112"><a href="#cb2-112" aria-hidden="true" tabindex="-1"></a>It directly implements the identification formula:</span>
+<span id="cb2-113"><a href="#cb2-113" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-114"><a href="#cb2-114" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb2-115"><a href="#cb2-115" aria-hidden="true" tabindex="-1"></a>E_W<span class="co">[</span><span class="ot"> E[Y | A=a, W] </span><span class="co">]</span>.</span>
+<span id="cb2-116"><a href="#cb2-116" aria-hidden="true" tabindex="-1"></a>$$</span>
 <span id="cb2-117"><a href="#cb2-117" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-118"><a href="#cb2-118" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-119"><a href="#cb2-119" aria-hidden="true" tabindex="-1"></a>:::{.callout-tip}</span>
-<span id="cb2-120"><a href="#cb2-120" aria-hidden="true" tabindex="-1"></a><span class="fu">## Key Distinction: Marginal Risk Difference vs. Conditional Log-Odds Ratio</span></span>
+<span id="cb2-118"><a href="#cb2-118" aria-hidden="true" tabindex="-1"></a>In plain terms, this averages the predicted outcomes under treatment (or control) across the full study population, weighting each prediction by the population's covariate distribution. The goal remains the same: estimate $E<span class="co">[</span><span class="ot">Y(1)</span><span class="co">]</span> - E<span class="co">[</span><span class="ot">Y(0)</span><span class="co">]</span>$, the population-level risk difference.</span>
+<span id="cb2-119"><a href="#cb2-119" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-120"><a href="#cb2-120" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb2-121"><a href="#cb2-121" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-122"><a href="#cb2-122" aria-hidden="true" tabindex="-1"></a>This is one of the most commonly confused points in epidemiology:</span>
-<span id="cb2-123"><a href="#cb2-123" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-124"><a href="#cb2-124" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Conditional log-odds ratio** (what logistic regression gives you): "Among people with the *same* age, sex, and baseline CD4, how do the odds of death differ between those who initiated HAART and those who did not?" This is a measure of *association within strata*. It does not tell you what would happen if you intervened on the whole population. It is also non-collapsible, meaning it changes depending on which covariates you condition on, even without confounding.</span>
-<span id="cb2-125"><a href="#cb2-125" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-126"><a href="#cb2-126" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Marginal risk difference** (what g-computation gives you): "If we could treat *everyone* versus *no one*, how much would the overall population risk change?" This is a *causal* contrast on the risk scale, the kind of number a clinician or policy maker can act on.</span>
-<span id="cb2-127"><a href="#cb2-127" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-128"><a href="#cb2-128" aria-hidden="true" tabindex="-1"></a>G-computation bridges the gap: it uses the conditional model internally but **standardizes** over the population to produce the marginal (causal) effect.</span>
-<span id="cb2-129"><a href="#cb2-129" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb2-122"><a href="#cb2-122" aria-hidden="true" tabindex="-1"></a>:::{.callout-tip}</span>
+<span id="cb2-123"><a href="#cb2-123" aria-hidden="true" tabindex="-1"></a><span class="fu">## Key Distinction: Marginal Risk Difference vs. Conditional Log-Odds Ratio</span></span>
+<span id="cb2-124"><a href="#cb2-124" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-125"><a href="#cb2-125" aria-hidden="true" tabindex="-1"></a>This is one of the most commonly confused points in epidemiology:</span>
+<span id="cb2-126"><a href="#cb2-126" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-127"><a href="#cb2-127" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Conditional log-odds ratio** (what logistic regression gives you): "Among people with the *same* age, sex, and baseline CD4, how do the odds of death differ between those who initiated HAART and those who did not?" This is a measure of *association within strata*. It does not tell you what would happen if you intervened on the whole population. It is also non-collapsible, meaning it changes depending on which covariates you condition on, even without confounding.</span>
+<span id="cb2-128"><a href="#cb2-128" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-129"><a href="#cb2-129" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Marginal risk difference** (what g-computation gives you): "If we could treat *everyone* versus *no one*, how much would the overall population risk change?" This is a *causal* contrast on the risk scale, the kind of number a clinician or policy maker can act on.</span>
 <span id="cb2-130"><a href="#cb2-130" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-131"><a href="#cb2-131" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb2-132"><a href="#cb2-132" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-133"><a href="#cb2-133" aria-hidden="true" tabindex="-1"></a><span class="fu"># Diagnostics: When Can G-Computation Fail?</span></span>
-<span id="cb2-134"><a href="#cb2-134" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-135"><a href="#cb2-135" aria-hidden="true" tabindex="-1"></a>:::{.callout-warning}</span>
-<span id="cb2-136"><a href="#cb2-136" aria-hidden="true" tabindex="-1"></a><span class="fu">## Model Misspecification</span></span>
+<span id="cb2-131"><a href="#cb2-131" aria-hidden="true" tabindex="-1"></a>G-computation bridges the gap: it uses the conditional model internally but **standardizes** over the population to produce the marginal (causal) effect.</span>
+<span id="cb2-132"><a href="#cb2-132" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb2-133"><a href="#cb2-133" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-134"><a href="#cb2-134" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb2-135"><a href="#cb2-135" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-136"><a href="#cb2-136" aria-hidden="true" tabindex="-1"></a><span class="fu"># Diagnostics: When Can G-Computation Fail?</span></span>
 <span id="cb2-137"><a href="#cb2-137" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-138"><a href="#cb2-138" aria-hidden="true" tabindex="-1"></a>G-computation rests entirely on the outcome model $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$. If that model is wrong (e.g., omits interactions, assumes linearity when the truth is non-linear), bias propagates directly into the causal estimate. Always check residuals and consider flexible alternatives (see Chapter 2.3).</span>
-<span id="cb2-139"><a href="#cb2-139" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb2-138"><a href="#cb2-138" aria-hidden="true" tabindex="-1"></a>:::{.callout-warning}</span>
+<span id="cb2-139"><a href="#cb2-139" aria-hidden="true" tabindex="-1"></a><span class="fu">## Model Misspecification</span></span>
 <span id="cb2-140"><a href="#cb2-140" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-141"><a href="#cb2-141" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb2-142"><a href="#cb2-142" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-143"><a href="#cb2-143" aria-hidden="true" tabindex="-1"></a>:::{.callout-warning}</span>
-<span id="cb2-144"><a href="#cb2-144" aria-hidden="true" tabindex="-1"></a><span class="fu">## Poor Positivity</span></span>
+<span id="cb2-141"><a href="#cb2-141" aria-hidden="true" tabindex="-1"></a>G-computation rests entirely on the outcome model $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$. If that model is wrong (e.g., omits interactions, assumes linearity when the truth is non-linear), bias propagates directly into the causal estimate. For example, if mortality risk depends on an interaction between CD4 count and age, but your model includes only main effects, the predicted counterfactual outcomes will be systematically off. Always check residuals and consider flexible alternatives (see Chapter 2.3).</span>
+<span id="cb2-142"><a href="#cb2-142" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb2-143"><a href="#cb2-143" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-144"><a href="#cb2-144" aria-hidden="true" tabindex="-1"></a>---</span>
 <span id="cb2-145"><a href="#cb2-145" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-146"><a href="#cb2-146" aria-hidden="true" tabindex="-1"></a>If some strata almost never receive a treatment, g-computation *extrapolates* into regions with little observed data. R will return a number, but it may be meaningless. Check propensity scores for values near 0 or 1:</span>
-<span id="cb2-147"><a href="#cb2-147" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-148"><a href="#cb2-148" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
-<span id="cb2-149"><a href="#cb2-149" aria-hidden="true" tabindex="-1"></a><span class="in">ps &lt;- predict(glm(ever_haart ~ age + sex + cd4_sqrt_baseline,</span></span>
-<span id="cb2-150"><a href="#cb2-150" aria-hidden="true" tabindex="-1"></a><span class="in">                   family = binomial, data = dat), type = "response")</span></span>
-<span id="cb2-151"><a href="#cb2-151" aria-hidden="true" tabindex="-1"></a><span class="in">summary(ps)</span></span>
-<span id="cb2-152"><a href="#cb2-152" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb2-153"><a href="#cb2-153" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-154"><a href="#cb2-154" aria-hidden="true" tabindex="-1"></a>G-computation handles near-positivity violations differently from IPTW. Where IPTW produces extreme weights for observations with propensity scores near 0 or 1, g-computation instead extrapolates from the fitted outcome model. This may be more or less reliable depending on how well the model captures the true outcome surface in sparse regions of the covariate space. The extrapolation is implicit and may not produce visible warnings.</span>
-<span id="cb2-155"><a href="#cb2-155" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb2-146"><a href="#cb2-146" aria-hidden="true" tabindex="-1"></a>:::{.callout-warning}</span>
+<span id="cb2-147"><a href="#cb2-147" aria-hidden="true" tabindex="-1"></a><span class="fu">## Poor Positivity</span></span>
+<span id="cb2-148"><a href="#cb2-148" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-149"><a href="#cb2-149" aria-hidden="true" tabindex="-1"></a>If some strata almost never receive a treatment, g-computation *extrapolates* into regions with little observed data. R will return a number, but it may be meaningless. Check propensity scores for values near 0 or 1:</span>
+<span id="cb2-150"><a href="#cb2-150" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-151"><a href="#cb2-151" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r}</span></span>
+<span id="cb2-152"><a href="#cb2-152" aria-hidden="true" tabindex="-1"></a><span class="in">ps &lt;- predict(glm(ever_haart ~ age + sex + cd4_sqrt_baseline,</span></span>
+<span id="cb2-153"><a href="#cb2-153" aria-hidden="true" tabindex="-1"></a><span class="in">                   family = binomial, data = dat), type = "response")</span></span>
+<span id="cb2-154"><a href="#cb2-154" aria-hidden="true" tabindex="-1"></a><span class="in">summary(ps)</span></span>
+<span id="cb2-155"><a href="#cb2-155" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
 <span id="cb2-156"><a href="#cb2-156" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-157"><a href="#cb2-157" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb2-158"><a href="#cb2-158" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-159"><a href="#cb2-159" aria-hidden="true" tabindex="-1"></a>**Pitfall.** No modeling strategy fixes missing confounders. If an important common cause of treatment and outcome is absent from your dataset, g-computation (like every other method in this handbook) will produce a biased estimate. However, g-computation makes its assumptions explicit (you can see exactly which variables $W$ enter the model), which aids transparent reporting and sensitivity analysis.</span>
-<span id="cb2-160"><a href="#cb2-160" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-161"><a href="#cb2-161" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb2-162"><a href="#cb2-162" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-163"><a href="#cb2-163" aria-hidden="true" tabindex="-1"></a>**Practical note.** The biggest limitation of g-computation with logistic regression is that you must get the functional form right. A powerful alternative is to replace the parametric model with a data-adaptive learner (random forests, gradient boosting, GAMs, or a SuperLearner ensemble), reducing reliance on parametric assumptions. In later chapters we systematically integrate SuperLearner with **TMLE**.</span>
-<span id="cb2-164"><a href="#cb2-164" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-165"><a href="#cb2-165" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r, eval=F}</span></span>
-<span id="cb2-166"><a href="#cb2-166" aria-hidden="true" tabindex="-1"></a><span class="in">library(SuperLearner)</span></span>
+<span id="cb2-157"><a href="#cb2-157" aria-hidden="true" tabindex="-1"></a>G-computation handles near-positivity violations differently from IPTW. Where IPTW produces extreme weights for observations with propensity scores near 0 or 1, g-computation instead extrapolates from the fitted outcome model. This may be more or less reliable depending on how well the model captures the true outcome surface in sparse regions of the covariate space. The extrapolation is implicit and may not produce visible warnings.</span>
+<span id="cb2-158"><a href="#cb2-158" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb2-159"><a href="#cb2-159" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-160"><a href="#cb2-160" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb2-161"><a href="#cb2-161" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-162"><a href="#cb2-162" aria-hidden="true" tabindex="-1"></a>**Pitfall.** No modeling strategy fixes missing confounders. If an important common cause of treatment and outcome is absent from your dataset, g-computation (like every other method in this handbook) will produce a biased estimate. However, g-computation makes its assumptions explicit (you can see exactly which variables $W$ enter the model), which aids transparent reporting and sensitivity analysis.</span>
+<span id="cb2-163"><a href="#cb2-163" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-164"><a href="#cb2-164" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb2-165"><a href="#cb2-165" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-166"><a href="#cb2-166" aria-hidden="true" tabindex="-1"></a>**Practical note.** The biggest limitation of g-computation with logistic regression is that you must get the functional form right. A powerful alternative is to replace the parametric model with a data-adaptive learner (random forests, gradient boosting, GAMs, or a SuperLearner ensemble), reducing reliance on parametric assumptions. In later chapters we systematically integrate SuperLearner with **TMLE**.</span>
 <span id="cb2-167"><a href="#cb2-167" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-168"><a href="#cb2-168" aria-hidden="true" tabindex="-1"></a><span class="in">sl_mod &lt;- SuperLearner(</span></span>
-<span id="cb2-169"><a href="#cb2-169" aria-hidden="true" tabindex="-1"></a><span class="in">  Y = dat$died,</span></span>
-<span id="cb2-170"><a href="#cb2-170" aria-hidden="true" tabindex="-1"></a><span class="in">  X = dat %&gt;% select(ever_haart, age, sex, cd4_sqrt_baseline),</span></span>
-<span id="cb2-171"><a href="#cb2-171" aria-hidden="true" tabindex="-1"></a><span class="in">  family = binomial(),</span></span>
-<span id="cb2-172"><a href="#cb2-172" aria-hidden="true" tabindex="-1"></a><span class="in">  SL.library = c("SL.glm", "SL.ranger", "SL.gam")</span></span>
-<span id="cb2-173"><a href="#cb2-173" aria-hidden="true" tabindex="-1"></a><span class="in">)</span></span>
-<span id="cb2-174"><a href="#cb2-174" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-175"><a href="#cb2-175" aria-hidden="true" tabindex="-1"></a><span class="in"># predict for counterfactuals</span></span>
-<span id="cb2-176"><a href="#cb2-176" aria-hidden="true" tabindex="-1"></a><span class="in">p1_sl &lt;- predict(sl_mod, newdata = dat1)$pred</span></span>
-<span id="cb2-177"><a href="#cb2-177" aria-hidden="true" tabindex="-1"></a><span class="in">p0_sl &lt;- predict(sl_mod, newdata = dat0)$pred</span></span>
-<span id="cb2-178"><a href="#cb2-178" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-179"><a href="#cb2-179" aria-hidden="true" tabindex="-1"></a><span class="in">mean(p1_sl - p0_sl)</span></span>
-<span id="cb2-180"><a href="#cb2-180" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb2-168"><a href="#cb2-168" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r, eval=F}</span></span>
+<span id="cb2-169"><a href="#cb2-169" aria-hidden="true" tabindex="-1"></a><span class="in">library(SuperLearner)</span></span>
+<span id="cb2-170"><a href="#cb2-170" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-171"><a href="#cb2-171" aria-hidden="true" tabindex="-1"></a><span class="in">sl_mod &lt;- SuperLearner(</span></span>
+<span id="cb2-172"><a href="#cb2-172" aria-hidden="true" tabindex="-1"></a><span class="in">  Y = dat$died,</span></span>
+<span id="cb2-173"><a href="#cb2-173" aria-hidden="true" tabindex="-1"></a><span class="in">  X = dat %&gt;% select(ever_haart, age, sex, cd4_sqrt_baseline),</span></span>
+<span id="cb2-174"><a href="#cb2-174" aria-hidden="true" tabindex="-1"></a><span class="in">  family = binomial(),</span></span>
+<span id="cb2-175"><a href="#cb2-175" aria-hidden="true" tabindex="-1"></a><span class="in">  SL.library = c("SL.glm", "SL.ranger", "SL.gam")</span></span>
+<span id="cb2-176"><a href="#cb2-176" aria-hidden="true" tabindex="-1"></a><span class="in">)</span></span>
+<span id="cb2-177"><a href="#cb2-177" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-178"><a href="#cb2-178" aria-hidden="true" tabindex="-1"></a><span class="in"># predict for counterfactuals</span></span>
+<span id="cb2-179"><a href="#cb2-179" aria-hidden="true" tabindex="-1"></a><span class="in">p1_sl &lt;- predict(sl_mod, newdata = dat1)$pred</span></span>
+<span id="cb2-180"><a href="#cb2-180" aria-hidden="true" tabindex="-1"></a><span class="in">p0_sl &lt;- predict(sl_mod, newdata = dat0)$pred</span></span>
 <span id="cb2-181"><a href="#cb2-181" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-182"><a href="#cb2-182" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb2-183"><a href="#cb2-183" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-184"><a href="#cb2-184" aria-hidden="true" tabindex="-1"></a>:::{.callout-warning}</span>
-<span id="cb2-185"><a href="#cb2-185" aria-hidden="true" tabindex="-1"></a><span class="fu">## Why G-Computation Is Less Common in Practice: No Built-In Inference</span></span>
+<span id="cb2-182"><a href="#cb2-182" aria-hidden="true" tabindex="-1"></a><span class="in">mean(p1_sl - p0_sl)</span></span>
+<span id="cb2-183"><a href="#cb2-183" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb2-184"><a href="#cb2-184" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-185"><a href="#cb2-185" aria-hidden="true" tabindex="-1"></a>---</span>
 <span id="cb2-186"><a href="#cb2-186" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-187"><a href="#cb2-187" aria-hidden="true" tabindex="-1"></a>A key limitation of g-computation is that it provides a **point estimate but no standard error or confidence interval** from the procedure itself. Unlike a regression model, which produces standard errors from the Fisher information matrix, g-computation's standardization step has no closed-form variance formula in general. To obtain confidence intervals, you must use the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.</span>
-<span id="cb2-188"><a href="#cb2-188" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-189"><a href="#cb2-189" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r, eval=FALSE}</span></span>
-<span id="cb2-190"><a href="#cb2-190" aria-hidden="true" tabindex="-1"></a><span class="in"># Bootstrap confidence interval for g-computation</span></span>
-<span id="cb2-191"><a href="#cb2-191" aria-hidden="true" tabindex="-1"></a><span class="in">set.seed(42)</span></span>
-<span id="cb2-192"><a href="#cb2-192" aria-hidden="true" tabindex="-1"></a><span class="in">n_boot &lt;- 500</span></span>
-<span id="cb2-193"><a href="#cb2-193" aria-hidden="true" tabindex="-1"></a><span class="in">boot_ates &lt;- numeric(n_boot)</span></span>
-<span id="cb2-194"><a href="#cb2-194" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-195"><a href="#cb2-195" aria-hidden="true" tabindex="-1"></a><span class="in">for (b in seq_len(n_boot)) {</span></span>
-<span id="cb2-196"><a href="#cb2-196" aria-hidden="true" tabindex="-1"></a><span class="in">  boot_dat &lt;- dat[sample(nrow(dat), replace = TRUE), ]</span></span>
-<span id="cb2-197"><a href="#cb2-197" aria-hidden="true" tabindex="-1"></a><span class="in">  boot_mod &lt;- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,</span></span>
-<span id="cb2-198"><a href="#cb2-198" aria-hidden="true" tabindex="-1"></a><span class="in">                   family = binomial, data = boot_dat)</span></span>
-<span id="cb2-199"><a href="#cb2-199" aria-hidden="true" tabindex="-1"></a><span class="in">  bp1 &lt;- predict(boot_mod, newdata = mutate(boot_dat, ever_haart = 1), type = "response")</span></span>
-<span id="cb2-200"><a href="#cb2-200" aria-hidden="true" tabindex="-1"></a><span class="in">  bp0 &lt;- predict(boot_mod, newdata = mutate(boot_dat, ever_haart = 0), type = "response")</span></span>
-<span id="cb2-201"><a href="#cb2-201" aria-hidden="true" tabindex="-1"></a><span class="in">  boot_ates[b] &lt;- mean(bp1) - mean(bp0)</span></span>
-<span id="cb2-202"><a href="#cb2-202" aria-hidden="true" tabindex="-1"></a><span class="in">}</span></span>
-<span id="cb2-203"><a href="#cb2-203" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-204"><a href="#cb2-204" aria-hidden="true" tabindex="-1"></a><span class="in">quantile(boot_ates, c(0.025, 0.975))</span></span>
-<span id="cb2-205"><a href="#cb2-205" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb2-206"><a href="#cb2-206" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-207"><a href="#cb2-207" aria-hidden="true" tabindex="-1"></a>This works but is computationally expensive and does not benefit from efficiency theory. The methods in the next two chapters --- **IPTW** and especially **TMLE** --- provide analytic standard errors and confidence intervals based on influence function theory, making them more practical for routine use. TMLE in particular combines the outcome-modeling strengths of g-computation with formal inference, which is one reason it is the recommended approach in later chapters.</span>
-<span id="cb2-208"><a href="#cb2-208" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb2-209"><a href="#cb2-209" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-210"><a href="#cb2-210" aria-hidden="true" tabindex="-1"></a><span class="fu">## Running Example: Antiretroviral Therapy Cohort</span></span>
+<span id="cb2-187"><a href="#cb2-187" aria-hidden="true" tabindex="-1"></a>:::{.callout-warning}</span>
+<span id="cb2-188"><a href="#cb2-188" aria-hidden="true" tabindex="-1"></a><span class="fu">## Why G-Computation Is Less Common in Practice: No Built-In Inference</span></span>
+<span id="cb2-189"><a href="#cb2-189" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-190"><a href="#cb2-190" aria-hidden="true" tabindex="-1"></a>A key limitation of g-computation is that it provides a **point estimate but no standard error or confidence interval** from the procedure itself. Unlike a regression model, which produces standard errors from the Fisher information matrix, g-computation's standardization step has no closed-form variance formula in general.</span>
+<span id="cb2-191"><a href="#cb2-191" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-192"><a href="#cb2-192" aria-hidden="true" tabindex="-1"></a>To obtain confidence intervals, you must use the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.</span>
+<span id="cb2-193"><a href="#cb2-193" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-194"><a href="#cb2-194" aria-hidden="true" tabindex="-1"></a><span class="in">```{webr-r, eval=FALSE}</span></span>
+<span id="cb2-195"><a href="#cb2-195" aria-hidden="true" tabindex="-1"></a><span class="in"># Bootstrap confidence interval for g-computation</span></span>
+<span id="cb2-196"><a href="#cb2-196" aria-hidden="true" tabindex="-1"></a><span class="in">set.seed(42)</span></span>
+<span id="cb2-197"><a href="#cb2-197" aria-hidden="true" tabindex="-1"></a><span class="in">n_boot &lt;- 500</span></span>
+<span id="cb2-198"><a href="#cb2-198" aria-hidden="true" tabindex="-1"></a><span class="in">boot_ates &lt;- numeric(n_boot)</span></span>
+<span id="cb2-199"><a href="#cb2-199" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-200"><a href="#cb2-200" aria-hidden="true" tabindex="-1"></a><span class="in">for (b in seq_len(n_boot)) {</span></span>
+<span id="cb2-201"><a href="#cb2-201" aria-hidden="true" tabindex="-1"></a><span class="in">  boot_dat &lt;- dat[sample(nrow(dat), replace = TRUE), ]</span></span>
+<span id="cb2-202"><a href="#cb2-202" aria-hidden="true" tabindex="-1"></a><span class="in">  boot_mod &lt;- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,</span></span>
+<span id="cb2-203"><a href="#cb2-203" aria-hidden="true" tabindex="-1"></a><span class="in">                   family = binomial, data = boot_dat)</span></span>
+<span id="cb2-204"><a href="#cb2-204" aria-hidden="true" tabindex="-1"></a><span class="in">  bp1 &lt;- predict(boot_mod, newdata = mutate(boot_dat, ever_haart = 1), type = "response")</span></span>
+<span id="cb2-205"><a href="#cb2-205" aria-hidden="true" tabindex="-1"></a><span class="in">  bp0 &lt;- predict(boot_mod, newdata = mutate(boot_dat, ever_haart = 0), type = "response")</span></span>
+<span id="cb2-206"><a href="#cb2-206" aria-hidden="true" tabindex="-1"></a><span class="in">  boot_ates[b] &lt;- mean(bp1) - mean(bp0)</span></span>
+<span id="cb2-207"><a href="#cb2-207" aria-hidden="true" tabindex="-1"></a><span class="in">}</span></span>
+<span id="cb2-208"><a href="#cb2-208" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-209"><a href="#cb2-209" aria-hidden="true" tabindex="-1"></a><span class="in">quantile(boot_ates, c(0.025, 0.975))</span></span>
+<span id="cb2-210"><a href="#cb2-210" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
 <span id="cb2-211"><a href="#cb2-211" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-212"><a href="#cb2-212" aria-hidden="true" tabindex="-1"></a>See the <span class="co">[</span><span class="ot">Running Case Study</span><span class="co">](00-case-study.qmd)</span> for the full data description.</span>
-<span id="cb2-213"><a href="#cb2-213" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-214"><a href="#cb2-214" aria-hidden="true" tabindex="-1"></a>Throughout this chapter we applied g-computation to a **point-treatment simplification** of the HIV antiretroviral therapy cohort. Rather than modeling HAART initiation as a time-varying decision, we collapsed each patient's treatment history into a single binary indicator: <span class="in">`ever_haart`</span> (1 if the patient initiated HAART at any point, 0 otherwise). The outcome is <span class="in">`died`</span> (1 if the patient died during follow-up, 0 if alive at the end of the study). The baseline confounders we adjusted for are <span class="in">`cd4_sqrt_baseline`</span> (square-root transformed CD4 cell count at baseline), <span class="in">`age`</span>, and <span class="in">`sex`</span>.</span>
-<span id="cb2-215"><a href="#cb2-215" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-216"><a href="#cb2-216" aria-hidden="true" tabindex="-1"></a>This point-treatment setup is a natural fit for g-computation. The method lets us ask a concrete causal question: "What would population mortality have looked like if *everyone* had initiated HAART, compared to a world where *no one* did?" We answered this by fitting an outcome model for <span class="in">`died`</span> as a function of <span class="in">`ever_haart`</span> and the confounders, predicting each patient's mortality risk under both treatment scenarios, and averaging those predictions to obtain the marginal risk difference. Because treatment is strongly confounded by baseline CD4 count and age (sicker patients are more likely to start HAART, but also more likely to die), a naive comparison of treated and untreated groups would be misleading. G-computation addresses this by standardizing over the full covariate distribution.</span>
-<span id="cb2-217"><a href="#cb2-217" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-218"><a href="#cb2-218" aria-hidden="true" tabindex="-1"></a>The point-treatment analysis is a useful pedagogical starting point, but it does not fully capture the causal structure of this problem. In reality, HAART initiation is a time-varying treatment whose effect is confounded by evolving CD4 counts, which are themselves affected by prior treatment. Handling this feedback loop requires **longitudinal g-computation** and related methods (marginal structural models, longitudinal TMLE), which are covered in later chapters.</span>
-<span id="cb2-219"><a href="#cb2-219" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-220"><a href="#cb2-220" aria-hidden="true" tabindex="-1"></a>:::{.callout-tip}</span>
-<span id="cb2-221"><a href="#cb2-221" aria-hidden="true" tabindex="-1"></a><span class="fu">## Summary</span></span>
+<span id="cb2-212"><a href="#cb2-212" aria-hidden="true" tabindex="-1"></a>This works but is computationally expensive and does not benefit from efficiency theory. The methods in the next two chapters (**IPTW** and especially **TMLE**) provide analytic standard errors and confidence intervals based on influence function theory, making them more practical for routine use. TMLE in particular combines the outcome-modeling strengths of g-computation with formal inference, which is one reason it is the recommended approach in later chapters.</span>
+<span id="cb2-213"><a href="#cb2-213" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb2-214"><a href="#cb2-214" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-215"><a href="#cb2-215" aria-hidden="true" tabindex="-1"></a><span class="fu">## Running Example: Antiretroviral Therapy Cohort</span></span>
+<span id="cb2-216"><a href="#cb2-216" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-217"><a href="#cb2-217" aria-hidden="true" tabindex="-1"></a>See the <span class="co">[</span><span class="ot">Running Case Study</span><span class="co">](00-case-study.qmd)</span> for the full data description.</span>
+<span id="cb2-218"><a href="#cb2-218" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-219"><a href="#cb2-219" aria-hidden="true" tabindex="-1"></a>Throughout this chapter we applied g-computation to a **point-treatment simplification** of the HIV antiretroviral therapy cohort. Rather than modeling HAART initiation as a time-varying decision, we collapsed each patient's treatment history into a single binary indicator: <span class="in">`ever_haart`</span> (1 if the patient initiated HAART at any point, 0 otherwise). The outcome is <span class="in">`died`</span> (1 if the patient died during follow-up, 0 if alive at the end of the study). The baseline confounders we adjusted for are <span class="in">`cd4_sqrt_baseline`</span> (square-root transformed CD4 cell count at baseline), <span class="in">`age`</span>, and <span class="in">`sex`</span>.</span>
+<span id="cb2-220"><a href="#cb2-220" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-221"><a href="#cb2-221" aria-hidden="true" tabindex="-1"></a>The method lets us ask a concrete causal question: "What would population mortality have looked like if *everyone* had initiated HAART, compared to a world where *no one* did?" We answered this by fitting an outcome model for <span class="in">`died`</span> as a function of <span class="in">`ever_haart`</span> and the confounders, predicting each patient's mortality risk under both treatment scenarios, and averaging those predictions to obtain the marginal risk difference.</span>
 <span id="cb2-222"><a href="#cb2-222" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-223"><a href="#cb2-223" aria-hidden="true" tabindex="-1"></a>G-computation = fit a model, predict under both treatments for everyone, then average. That three-step standardization is what converts a conditional model into a marginal causal estimate. Its main vulnerability is outcome-model misspecification; flexible learners and doubly robust methods (IPTW, TMLE) address this in subsequent chapters.</span>
-<span id="cb2-224"><a href="#cb2-224" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb2-225"><a href="#cb2-225" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-226"><a href="#cb2-226" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb2-227"><a href="#cb2-227" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-228"><a href="#cb2-228" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
+<span id="cb2-223"><a href="#cb2-223" aria-hidden="true" tabindex="-1"></a>Because treatment is strongly confounded by baseline CD4 count and age (sicker patients are more likely to start HAART, but also more likely to die), a naive comparison of treated and untreated groups would be misleading. G-computation addresses this by standardizing over the full covariate distribution.</span>
+<span id="cb2-224"><a href="#cb2-224" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-225"><a href="#cb2-225" aria-hidden="true" tabindex="-1"></a>The point-treatment analysis is a useful pedagogical starting point, but it does not fully capture the causal structure of this problem. In reality, HAART initiation is a time-varying treatment whose effect is confounded by evolving CD4 counts, which are themselves affected by prior treatment. Handling this feedback loop requires **longitudinal g-computation** and related methods (marginal structural models, longitudinal TMLE), which are covered in later chapters.</span>
+<span id="cb2-226"><a href="#cb2-226" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-227"><a href="#cb2-227" aria-hidden="true" tabindex="-1"></a>:::{.callout-tip}</span>
+<span id="cb2-228"><a href="#cb2-228" aria-hidden="true" tabindex="-1"></a><span class="fu">## Summary</span></span>
 <span id="cb2-229"><a href="#cb2-229" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-230"><a href="#cb2-230" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb2-231"><a href="#cb2-231" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. You run g-computation using a logistic regression model. A colleague asks: "Isn't this just a regression coefficient?" How do you explain the difference?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb2-230"><a href="#cb2-230" aria-hidden="true" tabindex="-1"></a>G-computation = fit a model, predict under both treatments for everyone, then average. That three-step standardization is what converts a conditional model into a marginal causal estimate. Its main vulnerability is outcome-model misspecification; flexible learners and doubly robust methods (IPTW, TMLE) address this in subsequent chapters.</span>
+<span id="cb2-231"><a href="#cb2-231" aria-hidden="true" tabindex="-1"></a>:::</span>
 <span id="cb2-232"><a href="#cb2-232" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-233"><a href="#cb2-233" aria-hidden="true" tabindex="-1"></a>No. A logistic regression coefficient is a *conditional log-odds ratio* that describes how the log-odds of the outcome change with treatment, holding covariates fixed at particular values. G-computation uses that same model but adds two critical steps: it predicts outcomes for every individual under both $A=1$ and $A=0$, then *averages* those predictions over the entire population. The result is a **marginal risk difference** (the ATE on the risk scale), which answers a different question: "How much would population-level risk change if we could treat everyone versus no one?" The regression coefficient is conditional and on the log-odds scale; the g-computation estimate is marginal and on the risk scale. These are different quantities even when the underlying model is the same.</span>
+<span id="cb2-233"><a href="#cb2-233" aria-hidden="true" tabindex="-1"></a>---</span>
 <span id="cb2-234"><a href="#cb2-234" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-235"><a href="#cb2-235" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
+<span id="cb2-235"><a href="#cb2-235" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
 <span id="cb2-236"><a href="#cb2-236" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb2-237"><a href="#cb2-237" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb2-238"><a href="#cb2-238" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q2. What happens to the g-computation estimate if the outcome model is misspecified?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb2-238"><a href="#cb2-238" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. You run g-computation using a logistic regression model. A colleague asks: "Isn't this just a regression coefficient?" How do you explain the difference?&lt;/strong&gt;&lt;/summary&gt;</span>
 <span id="cb2-239"><a href="#cb2-239" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-240"><a href="#cb2-240" aria-hidden="true" tabindex="-1"></a>G-computation is only as good as its outcome model. If $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$ is misspecified (for example, it assumes a linear relationship when the truth involves interactions or non-linearities), the counterfactual predictions will be systematically wrong, and the ATE estimate will be biased. Unlike doubly robust methods (AIPW, TMLE), g-computation has no second chance: there is no treatment model to compensate for outcome-model errors. This is why diagnostics (residual checks, comparison across model specifications) and flexible modeling strategies (SuperLearner) are important when using g-computation.</span>
+<span id="cb2-240"><a href="#cb2-240" aria-hidden="true" tabindex="-1"></a>No. A logistic regression coefficient is a *conditional log-odds ratio* that describes how the log-odds of the outcome change with treatment, holding covariates fixed at particular values. G-computation uses that same model but adds two critical steps: it predicts outcomes for every individual under both $A=1$ and $A=0$, then *averages* those predictions over the entire population. The result is a **marginal risk difference** (the ATE on the risk scale), which answers a different question: "How much would population-level risk change if we could treat everyone versus no one?" The regression coefficient is conditional and on the log-odds scale; the g-computation estimate is marginal and on the risk scale. These are different quantities even when the underlying model is the same.</span>
 <span id="cb2-241"><a href="#cb2-241" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb2-242"><a href="#cb2-242" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
 <span id="cb2-243"><a href="#cb2-243" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb2-244"><a href="#cb2-244" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb2-245"><a href="#cb2-245" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q3. Why does g-computation produce a marginal (population-level) effect even though it uses a conditional model internally?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb2-245"><a href="#cb2-245" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q2. What happens to the g-computation estimate if the outcome model is misspecified?&lt;/strong&gt;&lt;/summary&gt;</span>
 <span id="cb2-246"><a href="#cb2-246" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-247"><a href="#cb2-247" aria-hidden="true" tabindex="-1"></a>The key is the standardization (averaging) step. The outcome model $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$ is conditional: it gives a predicted outcome for a specific individual with covariates $W=w$ under treatment $A=a$. But g-computation does not report these individual-level predictions. Instead, it predicts for *every person* under $A=1$ and under $A=0$, then takes the population average of the difference. This averaging over the empirical covariate distribution $P(W)$ is exactly the operation $E_W<span class="co">[</span><span class="ot">E[Y \mid A=a, W]</span><span class="co">]</span>$ from the identification formula, and it produces a marginal effect. The conditional model is an intermediate tool; the final quantity is a population-level causal contrast.</span>
+<span id="cb2-247"><a href="#cb2-247" aria-hidden="true" tabindex="-1"></a>G-computation is only as good as its outcome model. If $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$ is misspecified (for example, it assumes a linear relationship when the truth involves interactions or non-linearities), the counterfactual predictions will be systematically wrong, and the ATE estimate will be biased. Unlike doubly robust methods (AIPW, TMLE), g-computation has no second chance: there is no treatment model to compensate for outcome-model errors. This is why diagnostics (residual checks, comparison across model specifications) and flexible modeling strategies (SuperLearner) are important when using g-computation.</span>
 <span id="cb2-248"><a href="#cb2-248" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb2-249"><a href="#cb2-249" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
 <span id="cb2-250"><a href="#cb2-250" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-251"><a href="#cb2-251" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb2-252"><a href="#cb2-252" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-253"><a href="#cb2-253" aria-hidden="true" tabindex="-1"></a><span class="fu">## What comes next</span></span>
-<span id="cb2-254"><a href="#cb2-254" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-255"><a href="#cb2-255" aria-hidden="true" tabindex="-1"></a>G-computation depends entirely on the outcome model being correctly specified. What if we could instead model the treatment mechanism? The next chapter introduces IPTW, which takes exactly that approach: reweighting observations to create a pseudo-population where treatment appears randomized.</span>
-<span id="cb2-256"><a href="#cb2-256" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-257"><a href="#cb2-257" aria-hidden="true" tabindex="-1"></a>---</span></code><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></pre></div>
+<span id="cb2-251"><a href="#cb2-251" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb2-252"><a href="#cb2-252" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q3. Why does g-computation produce a marginal (population-level) effect even though it uses a conditional model internally?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb2-253"><a href="#cb2-253" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-254"><a href="#cb2-254" aria-hidden="true" tabindex="-1"></a>The key is the standardization (averaging) step. The outcome model $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$ is conditional: it gives a predicted outcome for a specific individual with covariates $W=w$ under treatment $A=a$. But g-computation does not report these individual-level predictions. Instead, it predicts for *every person* under $A=1$ and under $A=0$, then takes the population average of the difference. This averaging over the empirical covariate distribution $P(W)$ is exactly the operation $E_W<span class="co">[</span><span class="ot">E[Y \mid A=a, W]</span><span class="co">]</span>$ from the identification formula, and it produces a marginal effect. The conditional model is an intermediate tool; the final quantity is a population-level causal contrast.</span>
+<span id="cb2-255"><a href="#cb2-255" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-256"><a href="#cb2-256" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
+<span id="cb2-257"><a href="#cb2-257" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-258"><a href="#cb2-258" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb2-259"><a href="#cb2-259" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-260"><a href="#cb2-260" aria-hidden="true" tabindex="-1"></a><span class="fu">## What comes next</span></span>
+<span id="cb2-261"><a href="#cb2-261" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-262"><a href="#cb2-262" aria-hidden="true" tabindex="-1"></a>G-computation depends entirely on the outcome model being correctly specified. What if we could instead model the treatment mechanism? The next chapter introduces IPTW, which takes exactly that approach: reweighting observations to create a pseudo-population where treatment appears randomized.</span>
+<span id="cb2-263"><a href="#cb2-263" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-264"><a href="#cb2-264" aria-hidden="true" tabindex="-1"></a>---</span></code><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></pre></div>
 </div></div></div></div></div>
 </div> <!-- /content -->
 <script type="module">

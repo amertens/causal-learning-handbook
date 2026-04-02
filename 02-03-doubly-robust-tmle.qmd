@@ -17,14 +17,6 @@ But what if you could use **both models**, and as long as **either one is correc
 
 This is exactly what **doubly robust estimators** provide.
 
-We explore:
-
-- Why doubly robust estimators matter
-- AIPW (Augmented IPTW)
-- TMLE (Targeted Maximum Likelihood Estimation)
-- How to implement both with tidyverse-friendly R code
-- Why TMLE is preferred in modern causal inference
-
 ---
 
 # Why Doubly Robust Estimators?
@@ -32,7 +24,7 @@ We explore:
 :::{.callout-tip}
 ## Key Idea: Why Doubly Robust Estimators?
 
-A doubly robust estimator is consistent if **either** the treatment model or the outcome model is correctly specified [@vanderLaan2011targeted]. By combining both sources of information, doubly robust estimators provide **two chances to get it right** and often outperform G-computation or IPTW used alone.
+A doubly robust estimator provides consistency if **either** the treatment model or the outcome model is correctly specified [@vanderLaan2011targeted]. By combining both sources of information, doubly robust estimators provide **two chances to get it right** and often outperform g-computation or IPTW used alone. The goal remains the same as in previous chapters: estimate $E[Y(1)] - E[Y(0)]$, the population-level risk difference.
 :::
 
 ---
@@ -48,7 +40,9 @@ AIPW adds a correction term to IPTW using the outcome regression. The key insigh
 - If the **outcome model** is correctly specified, the augmentation (G-computation) component corrects any remaining bias from the weights
 - If **both** are correctly specified, the estimator achieves the **semiparametric efficiency bound**, meaning it has the smallest possible asymptotic variance among all regular asymptotically linear estimators
 
-In other words, AIPW "augments" the weighted estimator with a bias-correction term derived from the outcome model. This makes the estimator consistent under correct specification of either (but not both) nuisance models, plus positivity; hence the name *doubly robust*. Note that "doubly robust" is a *consistency* property: it guarantees the estimator converges to the truth as $n \to \infty$ under the stated conditions, not that it is unbiased in finite samples.
+In other words, AIPW "augments" the weighted estimator with a bias-correction term derived from the outcome model. This makes the estimator consistent under correct specification of either (but not necessarily both) nuisance models, plus positivity; hence the name *doubly robust*.
+
+Note that "doubly robust" is a *consistency* property: it guarantees the estimator converges to the truth as $n \to \infty$ under the stated conditions, not that it is unbiased in finite samples.
 :::
 
 ## Formula
@@ -136,7 +130,7 @@ Each AIPW component starts with the outcome-model prediction and adds a weighted
 :::{.callout-tip}
 ## Key Idea: Why TMLE Over AIPW?
 
-TMLE [@vanderLaan2006tmle] offers several advantages over AIPW: predicted probabilities always stay in $[0, 1]$ (AIPW can fall outside), it integrates naturally with ensemble machine learning (Super Learner), and the fluctuation step solves the efficient influence curve equation by construction, providing a foundation for valid inference under appropriate conditions (correct specification of at least one nuisance model, positivity, and; when data-adaptive learners are used; cross-fitting or CV-TMLE to avoid Donsker-class requirements; see @zheng2011crossvalidated).
+TMLE [@vanderLaan2006tmle] offers several advantages over AIPW: predicted probabilities always stay in $[0, 1]$ (AIPW can fall outside), it integrates naturally with ensemble machine learning (Super Learner), and the fluctuation step solves the efficient influence curve equation by construction. This provides a foundation for valid inference under regularity conditions: correct specification of at least one nuisance model, positivity, and (when data-adaptive learners are used) cross-fitting or CV-TMLE to avoid Donsker-class requirements (see @zheng2011crossvalidated).
 :::
 
 ---
@@ -234,7 +228,7 @@ tmle_ate
 
 # TMLE Inference: Standard Errors and Confidence Intervals
 
-A major advantage of TMLE is that inference follows directly from the **efficient influence curve (EIC)**. Using the clever covariate notation from Section 7; where $H(A, W) = A/g(W) - (1-A)/(1-g(W))$; the EIC for the ATE at the TMLE fit can be written in a single unified form:
+A major advantage of TMLE is that inference follows directly from the **efficient influence curve (EIC)**. Using the clever covariate notation from Section 7, where $H(A, W) = A/g(W) - (1-A)/(1-g(W))$, the EIC for the ATE at the TMLE fit can be written in a single unified form:
 
 $$
 D_i = H(A_i, W_i)\big(Y_i - Q^*(A_i, W_i)\big) + Q^*(1, W_i) - Q^*(0, W_i) - \hat{\psi}
@@ -286,7 +280,7 @@ tibble(
 :::{.callout-tip}
 ## Interpreting TMLE Inference
 
-The EIC-based standard error is a key output of TMLE. Because the fluctuation step solves the EIC estimating equation, the resulting confidence interval has correct coverage under standard regularity conditions, even when machine learning is used for the nuisance models (provided cross-fitting or other sample-splitting techniques are employed).
+The EIC-based standard error is a key output of TMLE. Because the fluctuation step solves the EIC estimating equation, the resulting confidence interval achieves approximately correct coverage under regularity conditions, even when machine learning is used for the nuisance models (provided cross-fitting or other sample-splitting techniques are employed).
 
 If the confidence interval excludes zero, we have evidence that the treatment has a non-null causal effect on the outcome at the 95% confidence level.
 :::
@@ -315,7 +309,7 @@ g_SL <- SuperLearner(
 )
 ```
 
-You can plug these flexible nuisance models directly into TMLE. SuperLearner builds an ensemble (weighted combination) of multiple algorithms, reducing the risk that any single model is badly misspecified. When combined with TMLE's fluctuation step, this provides a powerful, data-adaptive approach to causal inference that maintains valid statistical inference.
+You can plug these flexible nuisance models directly into TMLE. Super Learner builds an ensemble (weighted combination) of multiple algorithms, reducing the risk that any single model is badly misspecified. When combined with TMLE's fluctuation step, this provides a data-adaptive approach to causal inference that maintains valid inference under regularity conditions.
 
 ---
 
@@ -332,7 +326,7 @@ You can plug these flexible nuisance models directly into TMLE. SuperLearner bui
 | Solves EIC equation | Not guaranteed | Yes, by construction |
 | Implementation complexity | Simple | Moderate |
 
-**Key point.** Both AIPW and TMLE are valid doubly robust estimators. TMLE is generally preferred because it respects the bounds of the parameter space (e.g., probabilities stay in $[0,1]$), integrates naturally with ensemble machine learning, and solves the efficient influence curve equation by construction, giving it better finite-sample performance and more trustworthy inference.
+**Key point.** Both AIPW and TMLE are valid doubly robust estimators. TMLE is generally preferred because it respects the bounds of the parameter space (e.g., probabilities stay in $[0,1]$), integrates naturally with ensemble machine learning, and solves the efficient influence curve equation by construction. In practice, this means TMLE tends to have better finite-sample performance and more trustworthy inference.
 
 ---
 
@@ -342,7 +336,7 @@ See the [Running Case Study](00-case-study.qmd) for the full data description.
 
 In this section we apply TMLE to the HIV antiretroviral therapy cohort that serves as the running example throughout this handbook. The goal is to estimate the causal effect of ever initiating HAART (`ever_haart`) on mortality (`died`), adjusting for baseline covariates `age`, `sex`, and `cd4_sqrt_baseline`.
 
-TMLE is a natural fit for this dataset because it offers doubly robust protection against model misspecification. In the HAART cohort, the relationship between CD4 count, treatment initiation, and mortality is complex, so having two chances to get the model right (through the outcome regression and the propensity score) is especially valuable. TMLE also keeps predicted probabilities bounded in [0, 1], which matters when mortality risk is the outcome.
+TMLE is a natural fit for this dataset because the relationship between CD4 count, treatment initiation, and mortality is complex. Having two chances to get the model right (through the outcome regression and the propensity score) is especially valuable when confounding by indication is strong: patients with lower CD4 counts are more likely to initiate HAART and also more likely to die.
 
 This is a **point-treatment** analysis that collapses each patient's longitudinal record into a single baseline snapshot. The original panel data contain time-varying CD4 measurements and treatment switches, but here we simplify to a single treatment indicator (`ever_haart`) and a single outcome (`died`). Longitudinal TMLE, which accounts for time-varying treatment and confounding in the full panel data, is covered in Chapter 3.9.
 

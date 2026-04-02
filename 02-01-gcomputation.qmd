@@ -8,8 +8,7 @@ format: html
 # Chapter 2.1: Outcome Modeling and Standardization
 *G-computation as a foundation for causal estimation*
 
-Outcome modeling and standardization, often referred to as **g-computation**, is one of the oldest and most intuitive approaches to causal inference. In this chapter, we'll build intuition, walk carefully through why the method works, and show where it fails. 
-
+Outcome modeling and standardization, often referred to as **g-computation**, is one of the oldest and most intuitive approaches to causal inference.
 
 ---
 
@@ -85,7 +84,7 @@ Interpret the result as: “If the entire population had initiated HAART rather 
 
 ### Beyond the Risk Difference: Relative Risk and Population Attributable Fraction
 
-One of the strengths of g-computation is that once you have the counterfactual predictions `p1` and `p0`, you can compute *any* contrast --- not just the risk difference. This flexibility is difficult to achieve with a single regression coefficient.
+One of the strengths of g-computation is that once you have the counterfactual predictions `p1` and `p0`, you can compute *any* contrast, not just the risk difference. This flexibility is difficult to achieve with a single regression coefficient.
 
 ```{webr-r}
 # Relative risk (risk ratio)
@@ -103,7 +102,9 @@ knitr::kable(data.frame(
 ))
 ```
 
-The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **population attributable fraction (causal)** tells you what proportion of observed cases would be eliminated if the entire population had received control instead of treatment. Under the identification assumptions (exchangeability, positivity, consistency), this formula has a causal interpretation: it estimates the fraction of cases that would be eliminated if the entire population had been untreated. This differs from the traditional epidemiologic PAF formula, which uses observed prevalence and does not require causal assumptions but also does not have a causal interpretation. Neither of these measures is directly available from a single logistic regression coefficient --- you would need to exponentiate and back-transform, making strong assumptions about the scale. With g-computation, you compute them directly from the predicted counterfactual risks.
+The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **population attributable fraction (causal)** tells you what proportion of observed cases would be eliminated if the entire population had received control instead of treatment. Under the identification assumptions (exchangeability, positivity, consistency), this formula has a causal interpretation: it estimates the fraction of cases that would be eliminated if the entire population had been untreated. This differs from the traditional epidemiologic PAF formula, which uses observed prevalence and does not require causal assumptions but also does not have a causal interpretation.
+
+Neither of these measures is directly available from a single logistic regression coefficient; you would need to exponentiate and back-transform, making strong assumptions about the scale. With g-computation, you compute them directly from the predicted counterfactual risks.
 
 
 # Why G-Computation Works
@@ -113,6 +114,8 @@ It directly implements the identification formula:
 $$
 E_W[ E[Y | A=a, W] ].
 $$
+
+In plain terms, this averages the predicted outcomes under treatment (or control) across the full study population, weighting each prediction by the population's covariate distribution. The goal remains the same: estimate $E[Y(1)] - E[Y(0)]$, the population-level risk difference.
 
 
 
@@ -135,7 +138,7 @@ G-computation bridges the gap: it uses the conditional model internally but **st
 :::{.callout-warning}
 ## Model Misspecification
 
-G-computation rests entirely on the outcome model $E[Y \mid A, W]$. If that model is wrong (e.g., omits interactions, assumes linearity when the truth is non-linear), bias propagates directly into the causal estimate. Always check residuals and consider flexible alternatives (see Chapter 2.3).
+G-computation rests entirely on the outcome model $E[Y \mid A, W]$. If that model is wrong (e.g., omits interactions, assumes linearity when the truth is non-linear), bias propagates directly into the causal estimate. For example, if mortality risk depends on an interaction between CD4 count and age, but your model includes only main effects, the predicted counterfactual outcomes will be systematically off. Always check residuals and consider flexible alternatives (see Chapter 2.3).
 :::
 
 ---
@@ -184,7 +187,9 @@ mean(p1_sl - p0_sl)
 :::{.callout-warning}
 ## Why G-Computation Is Less Common in Practice: No Built-In Inference
 
-A key limitation of g-computation is that it provides a **point estimate but no standard error or confidence interval** from the procedure itself. Unlike a regression model, which produces standard errors from the Fisher information matrix, g-computation's standardization step has no closed-form variance formula in general. To obtain confidence intervals, you must use the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.
+A key limitation of g-computation is that it provides a **point estimate but no standard error or confidence interval** from the procedure itself. Unlike a regression model, which produces standard errors from the Fisher information matrix, g-computation's standardization step has no closed-form variance formula in general.
+
+To obtain confidence intervals, you must use the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.
 
 ```{webr-r, eval=FALSE}
 # Bootstrap confidence interval for g-computation
@@ -204,7 +209,7 @@ for (b in seq_len(n_boot)) {
 quantile(boot_ates, c(0.025, 0.975))
 ```
 
-This works but is computationally expensive and does not benefit from efficiency theory. The methods in the next two chapters --- **IPTW** and especially **TMLE** --- provide analytic standard errors and confidence intervals based on influence function theory, making them more practical for routine use. TMLE in particular combines the outcome-modeling strengths of g-computation with formal inference, which is one reason it is the recommended approach in later chapters.
+This works but is computationally expensive and does not benefit from efficiency theory. The methods in the next two chapters (**IPTW** and especially **TMLE**) provide analytic standard errors and confidence intervals based on influence function theory, making them more practical for routine use. TMLE in particular combines the outcome-modeling strengths of g-computation with formal inference, which is one reason it is the recommended approach in later chapters.
 :::
 
 ## Running Example: Antiretroviral Therapy Cohort
@@ -213,7 +218,9 @@ See the [Running Case Study](00-case-study.qmd) for the full data description.
 
 Throughout this chapter we applied g-computation to a **point-treatment simplification** of the HIV antiretroviral therapy cohort. Rather than modeling HAART initiation as a time-varying decision, we collapsed each patient's treatment history into a single binary indicator: `ever_haart` (1 if the patient initiated HAART at any point, 0 otherwise). The outcome is `died` (1 if the patient died during follow-up, 0 if alive at the end of the study). The baseline confounders we adjusted for are `cd4_sqrt_baseline` (square-root transformed CD4 cell count at baseline), `age`, and `sex`.
 
-This point-treatment setup is a natural fit for g-computation. The method lets us ask a concrete causal question: "What would population mortality have looked like if *everyone* had initiated HAART, compared to a world where *no one* did?" We answered this by fitting an outcome model for `died` as a function of `ever_haart` and the confounders, predicting each patient's mortality risk under both treatment scenarios, and averaging those predictions to obtain the marginal risk difference. Because treatment is strongly confounded by baseline CD4 count and age (sicker patients are more likely to start HAART, but also more likely to die), a naive comparison of treated and untreated groups would be misleading. G-computation addresses this by standardizing over the full covariate distribution.
+The method lets us ask a concrete causal question: "What would population mortality have looked like if *everyone* had initiated HAART, compared to a world where *no one* did?" We answered this by fitting an outcome model for `died` as a function of `ever_haart` and the confounders, predicting each patient's mortality risk under both treatment scenarios, and averaging those predictions to obtain the marginal risk difference.
+
+Because treatment is strongly confounded by baseline CD4 count and age (sicker patients are more likely to start HAART, but also more likely to die), a naive comparison of treated and untreated groups would be misleading. G-computation addresses this by standardizing over the full covariate distribution.
 
 The point-treatment analysis is a useful pedagogical starting point, but it does not fully capture the causal structure of this problem. In reality, HAART initiation is a time-varying treatment whose effect is confounded by evolving CD4 counts, which are themselves affected by prior treatment. Handling this feedback loop requires **longitudinal g-computation** and related methods (marginal structural models, longitudinal TMLE), which are covered in later chapters.
 

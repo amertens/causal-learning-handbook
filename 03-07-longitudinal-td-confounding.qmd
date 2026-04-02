@@ -42,7 +42,7 @@ Before turning to the HIV setting that will carry us through the rest of these c
 
 Suppose we want to estimate the effect of sustained statin use on myocardial infarction over two years using electronic health records. At each annual visit, the clinician measures LDL cholesterol and decides whether to prescribe, continue, or stop statin therapy. LDL is clearly a confounder of the future treatment decision: high LDL makes statin prescribing more likely. But LDL is also affected by past statin use: taking statins lowers cholesterol. This means LDL plays two roles simultaneously.
 
-It is a confounder for future treatment (it affects both next year's prescribing and the outcome), and it is a mediator of past treatment (it lies on the causal pathway from last year's statin use to the outcome).
+It is a **confounder** for future treatment (it affects both next year's prescribing and the outcome), and it is a **mediator** of past treatment (it lies on the causal pathway from last year's statin use to the outcome).
 
 The DAG below makes this explicit.
 
@@ -400,7 +400,7 @@ Generalized estimating equations (GEE) and linear mixed models are standard tool
 
 A natural response to the problems above is: "What if I just adjust for baseline covariates $W$ and leave time-varying covariates out of the regression?" This avoids the mediator-blocking problem (since we never condition on $L_t$), and in some cases the resulting estimates can appear surprisingly close to the causal truth. But this apparent success is misleading for several reasons.
 
-**The estimand is different.** A regression of $Y$ on $\bar{A}$ and $W$, even when combined with G-computation (standardization), does not target the same quantity as the causal interventional risk $E[Y(\bar{a})]$. What the regression converges to in infinite data is a *regression oracle*: the best prediction of $Y$ given treatment and baseline covariates, marginalized over $W$. This is not the same as the counterfactual quantity that integrates over the interventional distribution of time-varying covariates.
+**The estimand is different.** A regression of $Y$ on $\bar{A}$ and $W$, even when combined with G-computation (standardization), does not target the causal interventional risk $E[Y(\bar{a})]$. What the regression converges to in infinite data is a *regression oracle*: the best prediction of $Y$ given treatment and baseline covariates, marginalized over $W$. This differs from the counterfactual quantity that integrates over the interventional distribution of time-varying covariates.
 
 **Coincidental agreement when baseline confounding dominates.** When baseline covariates explain most of the confounding and the time-varying feedback is weak, the regression oracle can happen to be close to the causal truth. This is because with weak feedback, the distribution of $L_t$ under the hypothetical intervention is similar to its observed distribution. The agreement is a coincidence of the DGP, not a property of the method.
 
@@ -438,7 +438,9 @@ The potential outcome $Y(\bar{a})$ is a counterfactual quantity. To estimate it 
 $$
 Y(\bar{a}) \perp\!\!\!\perp A_t \mid \bar{L}_t, \bar{A}_{t-1}, W \quad \text{for all } t.
 $$
-This says that, conditional on everything we have measured up to visit $t$, treatment assignment at visit $t$ is as good as random. In practice, this requires that we have measured every confounder that influences both the treatment decision and the outcome at every visit. Unmeasured confounders (substance use severity, housing instability, clinic-specific prescribing culture) that affect both adherence and virologic failure would violate this assumption.
+This says that, conditional on everything we have measured up to visit $t$, treatment assignment at visit $t$ is as good as random. In practice, this requires measuring every confounder that influences both the treatment decision and the outcome at every visit.
+
+Unmeasured confounders (substance use severity, housing instability, clinic-specific prescribing culture) that affect both adherence and virologic failure would violate this assumption.
 
 **Sequential positivity.** Every treatment level must be possible at every visit for every observed covariate history:
 $$
@@ -446,7 +448,9 @@ P(A_t = a \mid \bar{L}_t, \bar{A}_{t-1}, W) > 0 \quad \text{for all } t, a.
 $$
 If some patient subgroups essentially never achieve high adherence (for example, patients with severe side effects on a particular regimen), then the counterfactual $Y(\bar{1})$ is not well-defined for those subgroups without extrapolation.
 
-These assumptions are substantially harder to satisfy in the longitudinal setting than in the point-treatment case. Sequential exchangeability must hold at every visit, not just at baseline. Sequential positivity must hold at every visit for every covariate history, and the set of possible histories grows with each additional time point. This is a major practical challenge and a key reason why more realistic interventions (stochastic regimes rather than deterministic "always treat" regimes) are often preferred.
+These assumptions are substantially harder to satisfy in the longitudinal setting than in the point-treatment case. Sequential exchangeability must hold at every visit, not just at baseline. Sequential positivity must hold at every visit for every covariate history, and the set of possible histories grows with each additional time point.
+
+This is a major practical challenge and a key reason why more realistic interventions (stochastic regimes rather than deterministic "always treat" regimes) are often preferred. The target quantity remains the same: the counterfactual risk under the hypothetical intervention, adjusted for time-varying confounding. But the choice of intervention determines how much the data can support the estimate.
 
 
 # Why G-Methods Are Needed
@@ -457,7 +461,7 @@ $$
 E[Y(\bar{a})] = \sum_{\bar{l}} E[Y \mid \bar{A} = \bar{a}, \bar{L} = \bar{l}, W] \;\prod_t P(L_t = l_t \mid \bar{A}_{t-1} = \bar{a}_{t-1}, \bar{L}_{t-1} = \bar{l}_{t-1}, W)
 $$
 
-This is a nested integral (or sum) over all possible covariate histories. It says: predict the outcome under the hypothetical treatment sequence, then average over the distribution of time-varying covariates as they would evolve under that treatment sequence.
+In plain English: predict the outcome under the hypothetical treatment sequence, then average over the distribution of time-varying covariates as they would evolve under that treatment sequence. The product term generates the interventional distribution of covariate trajectories (what CD4 counts would look like if everyone followed regime $\bar{a}$), and the expectation at the front gives the outcome under those trajectories. The target quantity is the counterfactual risk under the hypothetical intervention, adjusted for time-varying confounding.
 
 Standard regression cannot compute this quantity because it conditions on the time-varying covariates rather than integrating over their interventional distribution. The class of methods that can (G-computation, inverse probability of treatment weighting (IPTW), and targeted minimum loss-based estimation (TMLE)) are collectively called **g-methods**. They share the property of respecting the temporal ordering of treatment and confounders, conditioning on time-varying covariates where they act as confounders and integrating over them where they act as mediators.
 
@@ -469,7 +473,7 @@ The three main g-methods, each introduced for the point-treatment case in [Chapt
 | IPTW (marginal structural models) | Reweight by inverse of cumulative treatment probability | Cumulative weights become extreme with many time points |
 | Longitudinal TMLE | Sequential regressions plus targeting steps | More complex to implement, but doubly robust |
 
-IPTW was historically the first approach applied to HIV data. It works well with few time points but becomes unstable as the number of visits grows, because the weights are products of time-specific inverse probabilities and these products can become very large. Longitudinal TMLE and the LMTP framework address this instability by using substitution estimators enhanced with targeting steps, avoiding multiplicative weights.
+IPTW was historically the first approach applied to HIV data. It works well with few time points but becomes unstable as the number of visits grows, because the weights are products of time-specific inverse probabilities and these products can become very large. With 10 quarterly visits, the cumulative weight for a patient is the product of 10 inverse probabilities; even if each is modest, the product can be enormous. Longitudinal TMLE and the LMTP framework address this instability by using substitution estimators enhanced with targeting steps, avoiding multiplicative weights.
 
 
 # Preview of L-TMLE and LMTP

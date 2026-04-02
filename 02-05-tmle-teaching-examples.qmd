@@ -10,17 +10,7 @@ format: html
 
 This chapter walks through a complete causal analysis from start to finish, building each estimator step-by-step so you can see exactly where bias enters, how each method addresses it, and why TMLE provides a principled solution [for background on the causal inference framework used here, see @hernan2025whatif].
 
-We use a realistic post-marketing safety scenario: **evaluating the cardiovascular safety of a new diabetes drug**.
-
-By the end of this chapter, you will have implemented:
-
-1. A naive (unadjusted) model
-2. G-computation (outcome modeling)
-3. IPTW (treatment modeling)
-4. AIPW (combining both)
-5. TMLE (targeting the estimate)
-
-Each method builds on what came before. Every step includes code, diagnostics, and interpretation.
+We use a realistic post-marketing safety scenario: **evaluating the cardiovascular safety of a new diabetes drug**. Each method (naive, g-computation, IPTW, AIPW, TMLE) builds on what came before, with code, diagnostics, and interpretation at every step.
 
 ::: {.callout-note}
 ## Learning objectives
@@ -66,7 +56,7 @@ This is a classic **active comparator, new user** design question.
 
 ### Why standard regression falls short
 
-As introduced in [Chapter 1.1](01-01-regression-vs-causal.qmd), regression coefficients from observational data reflect both the treatment effect and confounding. A logistic regression of MACE on treatment will conflate the drug's effect with differences in baseline health, because patients prescribed newer, more expensive agents differ systematically from those prescribed sulfonylureas in age, comorbidity burden, prior cardiovascular history, renal function, and concomitant medications. We need methods that explicitly separate confounding from causal effects.
+As introduced in [Chapter 1.1](01-01-regression-vs-causal.qmd), regression coefficients from observational data reflect both the treatment effect and confounding. A logistic regression of MACE on treatment will conflate the drug's effect with differences in baseline health, because patients prescribed newer, more expensive agents differ systematically from those prescribed sulfonylureas. These groups differ in age, comorbidity burden, prior cardiovascular history, renal function, and concomitant medications. We need methods that explicitly separate confounding from causal effects.
 
 ---
 
@@ -80,7 +70,9 @@ This chapter applies the Causal Roadmap from [Chapter 1.2](01-02-causal-roadmap.
 
 **Causal model.** Confounders $W$ (age, BMI, HbA1c, prior CVD, eGFR, statin use) affect both treatment $A$ and outcome $Y$. The DAG is the standard point-treatment structure: $W \to A$, $W \to Y$, $A \to Y$.
 
-**Identification.** We assume consistency, exchangeability, and positivity as defined in [Chapter 1.2](01-02-causal-roadmap.qmd). In this application, consistency requires that "initiate dapagliflozin" is well-defined across patients. Exchangeability is the most vulnerable assumption: we cannot test it, but we strengthen it by adjusting for a rich set of confounders. Positivity can be violated when, for example, patients with severe renal impairment are never prescribed dapagliflozin.
+**Identification.** We assume consistency, exchangeability, and positivity as defined in [Chapter 1.2](01-02-causal-roadmap.qmd). In this application, consistency requires that "initiate dapagliflozin" is well-defined across patients. Exchangeability is the most vulnerable assumption: we cannot test it, but we strengthen it by adjusting for a rich set of confounders.
+
+Positivity can be violated when certain patient types never receive one treatment. For example, patients with severe renal impairment (eGFR below 30) are typically ineligible for SGLT2 inhibitors; the propensity score for those patients approaches zero, and no statistical method can estimate the drug's effect in that stratum.
 
 **Statistical estimand.** Under identification, the causal ATE equals $E_W[E[Y \mid A=1, W]] - E_W[E[Y \mid A=0, W]]$.
 
@@ -225,7 +217,7 @@ broom::tidy(naive_mod, conf.int = TRUE) |> knitr::kable(digits = 3, caption = "U
 :::{.callout-warning}
 ## What Went Wrong?
 
-The naive estimate is biased because dapagliflozin patients differ systematically from sulfonylurea patients. The treatment groups are not exchangeable (see [Chapter 1.2](01-02-causal-roadmap.qmd)), so the naive comparison conflates the drug effect with confounding by indication. The difference in MACE rates reflects both the drug's effect AND the differences in who gets each drug. This is why unadjusted treatment comparisons cannot be interpreted as causal effects in observational data.
+The naive estimate is biased because dapagliflozin patients differ systematically from sulfonylurea patients. The treatment groups are not exchangeable (see [Chapter 1.2](01-02-causal-roadmap.qmd)), so the naive comparison conflates the drug effect with confounding by indication: physicians prescribe dapagliflozin to younger, healthier patients who would have had lower MACE risk regardless. The difference in MACE rates reflects both the drug's effect AND the differences in who gets each drug.
 :::
 
 ---
@@ -478,7 +470,7 @@ cat("IPTW ATE (truncated weights):", round(iptw_ate_trunc, 4), "\n")
 What if we could use BOTH the outcome model and the treatment model, and as long as EITHER one is correct, get a consistent estimate? This is exactly what AIPW (and TMLE) provide.
 :::
 
-AIPW combines the outcome model and the treatment model. It is **doubly robust**: consistent if either model is correct. The formula starts with the G-computation prediction and adds a weighted residual correction from the propensity score. If the outcome model is already good, the correction is small; if the outcome model is poor but the propensity score is accurate, the correction rescues the estimate.
+AIPW combines the outcome model and the treatment model. It provides consistency if either model is correct (the "doubly robust" property). The formula starts with the g-computation prediction and adds a weighted residual correction from the propensity score. If the outcome model is already good, the correction is small; if the outcome model is poor but the propensity score is accurate, the correction rescues the estimate.
 
 ```{webr-r}
 # Using models from previous steps:
@@ -519,7 +511,7 @@ cat("AIPW ATE:", round(aipw_ate, 4),
     " 95% CI: [", round(aipw_ci[1], 4), ",", round(aipw_ci[2], 4), "]\n")
 ```
 
-**Key insight:** AIPW improves on both g-computation and IPTW by using both models. However, AIPW does not "target" its initial estimates. It can produce predicted probabilities outside [0, 1], and it does not solve the efficient influence curve equation exactly when machine learning is used. TMLE addresses both issues.
+**Key insight.** AIPW improves on both g-computation and IPTW by using both models. However, AIPW does not "target" its initial estimates. It can produce predicted probabilities outside [0, 1] (an analyst might see a risk estimate of 1.03, for instance), and it does not solve the efficient influence curve equation exactly when machine learning is used. TMLE addresses both issues.
 
 ---
 
@@ -528,7 +520,7 @@ cat("AIPW ATE:", round(aipw_ate, 4),
 :::{.callout-tip}
 ## Why TMLE?
 
-TMLE combines the best properties of all previous methods: it uses both outcome and treatment models (doubly robust), targets the specific estimand of interest, respects natural parameter bounds (probabilities stay in [0, 1]), solves the efficient influence curve equation for valid inference, and integrates naturally with machine learning (Super Learner).
+TMLE combines the best properties of all previous methods: it uses both outcome and treatment models (doubly robust), targets the specific estimand of interest, respects natural parameter bounds (probabilities stay in [0, 1]), solves the efficient influence curve equation (providing a basis for valid inference under regularity conditions), and integrates naturally with machine learning (Super Learner).
 :::
 
 ### Conceptual overview
@@ -633,7 +625,7 @@ cat("True ATE:                 ", round(true_ate, 4), "\n")
 :::{.callout-important}
 #### Step 7: Inference via the Efficient Influence Curve
 
-The EIC gives each observation a "score" measuring its contribution to the estimate. The variance of these scores provides asymptotically valid standard errors, with no bootstrap needed.
+The EIC gives each observation a "score" measuring its contribution to the estimate. The variance of these scores provides asymptotically valid standard errors under regularity conditions, with no bootstrap needed.
 :::
 
 ```{webr-r}
@@ -707,12 +699,12 @@ ggplot(plot_df, aes(x = ATE, y = Method)) +
 :::{.callout-warning}
 ## Diagnostics Are Non-Negotiable
 
-Good estimation is nothing without good diagnostics. **Never report a causal estimate without checking these diagnostics.** They tell you whether your assumptions are plausible and whether the estimator is well-behaved.
+Good estimation is nothing without good diagnostics. **Never report a causal estimate without checking these diagnostics.** They help assess whether your assumptions are plausible and whether the estimator is well-behaved.
 :::
 
 ### Propensity Score Overlap
 
-If the propensity score distributions for treated and untreated overlap well, the positivity assumption is plausible. **Gaps** indicate regions where one treatment is rarely or never prescribed. All methods will struggle there, but IPTW is especially vulnerable.
+If the propensity score distributions for treated and untreated overlap well, the positivity assumption is more plausible. **Gaps** indicate regions where one treatment is rarely or never prescribed. All methods will struggle there, but IPTW is especially vulnerable because the weights blow up in sparse regions.
 
 ```{webr-r}
 ggplot(dat, aes(x = ps_tmle, fill = factor(A, labels = c("Sulfonylurea", "Dapagliflozin")))) +
@@ -833,12 +825,12 @@ cat("Q0* range:", round(range(Q0_star), 4), "\n")
 
 In the examples above, we used parametric logistic regression for both the outcome and treatment models. In practice, these models may be misspecified: missing interactions, wrong functional forms, or overly rigid assumptions. **Super Learner** eliminates the need to guess the right model.
 
-**Definition.** Super Learner is an ensemble machine learning method that: (1) takes a library of candidate learners (logistic regression, LASSO, random forest, etc.), (2) uses cross-validation to evaluate each learner's performance, (3) combines them using optimally weighted stacking, and (4) guarantees performance at least as good as the best individual learner (asymptotically).
+**Definition.** Super Learner is an ensemble machine learning method that (1) takes a library of candidate learners (logistic regression, LASSO, random forest, etc.), (2) uses cross-validation to evaluate each learner's performance, (3) combines them using optimally weighted stacking, and (4) achieves performance asymptotically at least as good as the best individual learner.
 
 :::{.callout-tip}
 ## Why This Matters for TMLE
 
-TMLE is doubly robust (consistent if either nuisance model is correct) and **efficient** when both models converge at reasonable rates. Super Learner reduces the risk of misspecifying either model, while its internal cross-validation protects against overfitting. **Bottom line:** Super Learner + TMLE = data-adaptive, doubly robust, efficient estimation with valid inference.
+TMLE provides consistency if either nuisance model is correct, and achieves the semiparametric efficiency bound when both models converge at reasonable rates. Super Learner reduces the risk of misspecifying either model, while its internal cross-validation protects against overfitting. **Bottom line:** Super Learner + TMLE = data-adaptive, doubly robust estimation with valid inference under regularity conditions.
 :::
 
 ### Conceptual demonstration

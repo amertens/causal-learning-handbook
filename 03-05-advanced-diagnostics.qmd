@@ -9,11 +9,20 @@ format: html
 ## Diagnostics and Sensitivity Analyses in Targeted Learning
 *A systematic framework for credible causal inference with modern estimators*
 
-You run a TMLE analysis and get an ATE of 0.05 with a tight confidence interval. Should you believe it? The answer depends on a series of diagnostic checks that most applied analyses skip or report superficially. The propensity scores might pile up near zero for one treatment group, meaning the estimate hinges on a handful of heavily weighted observations. The Super Learner might be placing all its weight on the intercept model, meaning the nuisance functions are not fitting the data. The influence curve might have a few extreme outliers that drive the entire point estimate. Without checking, you cannot distinguish a credible finding from an artifact.
+You run a TMLE analysis and get an ATE of 0.05 with a tight confidence interval. Should you believe it? The answer depends on a series of diagnostic checks that most applied analyses skip or report superficially.
 
-Naive reporting of a point estimate and confidence interval treats the statistical machinery as a black box. But semiparametric estimators like TMLE and AIPW have specific conditions under which they perform well, and specific ways they can fail. Diagnostics make those conditions visible.
+The propensity scores might pile up near zero for one treatment group, meaning the estimate hinges on a handful of heavily weighted observations. The Super Learner might be placing all its weight on the intercept model, meaning the nuisance functions are not fitting the data. The influence curve might have a few extreme outliers that drive the entire point estimate. Without checking, you cannot distinguish a credible finding from an artifact.
 
-This chapter provides a systematic diagnostic framework organized around four categories: (1) identifiability diagnostics that assess whether the causal assumptions are plausible, (2) nuisance model diagnostics that evaluate whether the outcome regression and propensity score are well-estimated, (3) estimator diagnostics that check whether the TMLE or AIPW machinery is behaving as expected, and (4) sensitivity analyses that quantify robustness to unmeasured confounding and modeling choices. The chapter closes with a practical workflow for what to check first, followed by reporting recommendations.
+Semiparametric estimators like TMLE and AIPW have specific conditions under which they perform well, and specific ways they can fail. Diagnostics help assess whether those conditions hold in your data.
+
+The diagnostics fall into four categories:
+
+1. **Identifiability diagnostics** assess whether the causal assumptions are empirically plausible.
+2. **Nuisance model diagnostics** evaluate whether the outcome regression and propensity score are well-estimated.
+3. **Estimator diagnostics** check whether the TMLE or AIPW machinery is behaving as expected.
+4. **Sensitivity analyses** quantify robustness to unmeasured confounding and modeling choices.
+
+The chapter closes with a practical workflow for what to check first, followed by reporting recommendations.
 
 ::: {.callout-note}
 ## Learning objectives
@@ -62,9 +71,9 @@ Diagnostics are decision points, not just reporting exercises. If positivity dia
 
 ## 2. Diagnosing Identifiability Assumptions
 
-The three identification assumptions (exchangeability, positivity, and consistency) connect the causal parameter to the statistical estimand. If any fails, the estimate lacks a causal interpretation regardless of the estimator used. These assumptions are reviewed in detail in [Chapter 1.2](01-02-causal-roadmap.qmd); this section focuses on **diagnostic procedures** for assessing their plausibility in a given dataset.
+The three identification assumptions (exchangeability, positivity, and consistency) connect the causal parameter to the statistical estimand. If any fails, the estimate lacks a causal interpretation regardless of the estimator used.
 
-None of the three assumptions is testable from observed data alone. The diagnostics described here are therefore indirect: they assess plausibility through observable implications, quantify sensitivity to violations, and flag empirical patterns that would be unlikely if the assumptions held.
+None of the three assumptions is testable from observed data alone. The diagnostics here are indirect: they assess plausibility through observable implications, quantify sensitivity to violations, and flag empirical patterns that would be unlikely if the assumptions held.
 
 ### 2.1 Exchangeability (No Unmeasured Confounding)
 
@@ -72,9 +81,13 @@ Exchangeability ($Y(a) \perp\!\!\!\perp A \mid W$) asserts that the potential ou
 
 #### 2.1.1 Conceptual DAG Diagnostics
 
-The directed acyclic graph (DAG) is the primary tool for reasoning about exchangeability. A DAG encodes the qualitative causal structure assumed by the analyst: which variables cause which others, which variables are unmeasured, and which causal pathways connect treatment to outcome. The DAG makes the exchangeability assumption explicit by revealing the adjustment set, the set of variables that, when conditioned upon, blocks all backdoor paths from $A$ to $Y$.
+The directed acyclic graph (DAG) is the primary tool for reasoning about exchangeability. A DAG encodes the qualitative causal structure assumed by the analyst: which variables cause which others, which variables are unmeasured, and which causal pathways connect treatment to outcome. The DAG makes the exchangeability assumption explicit by revealing the adjustment set (the set of variables that, when conditioned upon, blocks all backdoor paths from $A$ to $Y$).
 
-DAG diagnostics are inherently qualitative and require domain expertise. The analyst should construct the DAG in collaboration with subject-matter experts and then systematically interrogate it by asking the following questions. First, are there common causes of $A$ and $Y$ that are not included in $W$? Each such variable represents a potential source of unmeasured confounding. Second, does the DAG include variables that are consequences of both $A$ and $Y$ (colliders on the path between them), and if so, are any of these variables included in $W$? Conditioning on a collider opens a non-causal path and introduces collider bias. Third, does $W$ include any mediators, variables on the causal pathway from $A$ to $Y$? Conditioning on a mediator blocks part of the causal effect and changes the estimand from the total effect to a direct effect.
+DAG diagnostics are inherently qualitative and require domain expertise. The analyst should construct the DAG in collaboration with subject-matter experts and then systematically interrogate it:
+
+- Are there common causes of $A$ and $Y$ that are not included in $W$? Each such variable represents a potential source of unmeasured confounding.
+- Does the DAG include colliders (consequences of both $A$ and $Y$), and are any of them included in $W$? Conditioning on a collider opens a non-causal path and introduces bias.
+- Does $W$ include any mediators (variables on the causal pathway from $A$ to $Y$)? Conditioning on a mediator blocks part of the causal effect and changes the estimand from the total effect to a direct effect.
 
 The DAG should be drawn before any statistical analysis is conducted, and it should be revisited whenever the analysis plan changes. Changes to the covariate adjustment set $W$, for example, adding or removing a variable, should be justified by reference to the DAG, not by statistical criteria such as significance in a regression model.
 
@@ -86,9 +99,9 @@ A structured DAG review with clinical collaborators should proceed as follows. P
 
 #### 2.1.2 Negative Control Exposures and Outcomes
 
-Negative controls are among the most powerful empirical tools for detecting violations of exchangeability. The logic is based on falsification: if the identification assumptions hold, then certain associations should be absent in the data. Finding those associations present provides evidence that the assumptions are violated.
+Negative controls are among the most powerful empirical tools for detecting violations of exchangeability. The logic is falsification: if the identification assumptions hold, then certain associations should be absent in the data. Finding those associations present provides evidence that the assumptions may be violated.
 
-A **negative control outcome** (NCO) is an outcome variable $Y^{nc}$ that is known, on substantive grounds, not to be causally affected by $A$, but that shares the same confounding structure as the primary outcome $Y$. If the analyst estimates the effect of $A$ on $Y^{nc}$ using the same adjustment set $W$ and the same estimation procedure and finds a non-null association, this constitutes evidence that unmeasured confounding is present. The unmeasured confounder that biases the primary analysis also biases the negative control analysis, but because $A$ has no true effect on $Y^{nc}$, any detected association must be attributable to bias.
+A **negative control outcome** (NCO) is an outcome variable $Y^{nc}$ that is known, on substantive grounds, not to be causally affected by $A$, but that shares the same confounding structure as the primary outcome $Y$. If the analyst estimates the effect of $A$ on $Y^{nc}$ using the same adjustment set $W$ and the same estimation procedure and finds a non-null association, this is consistent with the presence of unmeasured confounding. The unmeasured confounder that biases the primary analysis also biases the negative control analysis, but because $A$ has no true effect on $Y^{nc}$, any detected association must be attributable to bias.
 
 A **negative control exposure** (NCE) is a treatment variable $A^{nc}$ that is known not to causally affect $Y$, but that shares the same confounding structure as the primary treatment $A$. Estimating the effect of $A^{nc}$ on $Y$ using the same methods provides an analogous falsification test.
 
@@ -218,7 +231,7 @@ $$
 H(A_i, W_i) = \frac{I(A_i = 1)}{\hat{g}(1 \mid W_i)} - \frac{I(A_i = 0)}{1 - \hat{g}(1 \mid W_i)}
 $$
 
-When propensity scores are near the boundaries, the clever covariate grows without bound, and a small number of observations can dominate the TMLE targeting step. The analyst should examine the distribution of $|H(A_i, W_i)|$ and flag observations with unusually large magnitudes. There is no universal threshold; what constitutes "large" depends on the sample size, the outcome scale, and the degree of practical positivity. As a context-specific starting point, examining observations at multiple thresholds (e.g., $|H| > 10$, $> 20$, $> 50$) and assessing whether they drive the targeting step or inflate the variance estimate is more informative than applying a single cutoff. Large $|H|$ values signal that the estimate depends heavily on a few observations with extreme propensity scores --- a symptom of practical positivity violations rather than a modeling error per se.
+When propensity scores are near the boundaries, the clever covariate grows without bound, and a small number of observations can dominate the TMLE targeting step. The analyst should examine the distribution of $|H(A_i, W_i)|$ and flag observations with unusually large magnitudes. There is no universal threshold; what constitutes "large" depends on the sample size, the outcome scale, and the degree of practical positivity. As a context-specific starting point, examining observations at multiple thresholds (e.g., $|H| > 10$, $> 20$, $> 50$) and assessing whether they drive the targeting step or inflate the variance estimate is more informative than applying a single cutoff. Large $|H|$ values signal that the estimate depends heavily on a few observations with extreme propensity scores, a symptom of practical positivity violations rather than a modeling error per se.
 
 ```{r}
 ## Clever covariate diagnostics for TMLE
@@ -360,11 +373,13 @@ In longitudinal settings, alignment diagnostics require verifying the temporal o
 
 ## 3. Nuisance Model Diagnostics {#sec-nuisance}
 
-The nuisance functions, the outcome regression $\bar{Q}(A, W) = E[Y \mid A, W]$ and the treatment mechanism $g(A \mid W) = P(A \mid W)$, are the workhorses of semiparametric causal inference. They are called "nuisance" functions not because they are unimportant but because they are not the parameters of primary scientific interest; rather, they are intermediate quantities that must be estimated on the way to estimating the causal parameter. Their quality directly determines the finite-sample performance of TMLE, AIPW, and IPTW estimators. Poor nuisance estimation can produce biased causal estimates, inflated variance, invalid confidence intervals, and misleading conclusions, even when the identification assumptions hold perfectly.
+The nuisance functions, the outcome regression $\bar{Q}(A, W) = E[Y \mid A, W]$ and the treatment mechanism $g(A \mid W) = P(A \mid W)$, are intermediate quantities that must be estimated on the way to the causal parameter. Their quality directly determines the finite-sample performance of TMLE, AIPW, and IPTW estimators. Poor nuisance estimation can produce biased causal estimates, inflated variance, and invalid confidence intervals, even when the identification assumptions hold perfectly.
 
-The relationship between nuisance function quality and causal estimator performance depends on the specific estimator. For IPTW, only the treatment mechanism $g$ matters: if $g$ is consistently estimated, IPTW is consistent for the causal parameter regardless of how the outcome regression is specified (or whether it is specified at all). For parametric g-computation, only the outcome regression $\bar{Q}$ matters. For doubly robust estimators, TMLE and AIPW, consistency requires that at least one of $g$ or $\bar{Q}$ be consistently estimated, and efficiency is achieved when both are estimated at sufficiently fast rates. This double robustness property does not, however, eliminate the need for nuisance function diagnostics. In finite samples, the quality of both nuisance functions affects the bias, variance, and coverage of doubly robust estimators, and diagnostics provide the evidence needed to assess whether the asymptotic theory is a reliable guide to finite-sample performance.
+The relationship between nuisance function quality and estimator performance depends on which estimator you use. For IPTW, only $g$ matters. For parametric G-computation, only $\bar{Q}$ matters. For doubly robust estimators (TMLE, AIPW), consistency requires that at least one of the two be consistently estimated, and efficiency is achieved when both are estimated at sufficiently fast rates.
 
-When machine learning methods are used for nuisance estimation, as is increasingly standard, valid inference typically requires either cross-fitting (sample splitting where different folds are used to estimate nuisance functions and to construct the final estimator) or a cross-validated TMLE variant. Without cross-fitting, the overfitting behavior of flexible learners can invalidate the asymptotic linearity of the causal estimator, producing confidence intervals with incorrect coverage even when the nuisance functions are estimated consistently. The diagnostics described in this section address both the quality of the nuisance function estimates and the conditions under which the cross-fitting or cross-validation procedure is functioning as intended.
+Double robustness does not eliminate the need for nuisance function diagnostics. In finite samples, the quality of both functions affects bias, variance, and coverage. Diagnostics provide the evidence needed to assess whether the asymptotic theory is a reliable guide to finite-sample performance.
+
+When machine learning methods are used for nuisance estimation, valid inference typically requires either cross-fitting or a cross-validated TMLE variant. Without cross-fitting, the overfitting behavior of flexible learners can invalidate the asymptotic linearity of the causal estimator, producing confidence intervals with incorrect coverage even when the nuisance functions are estimated consistently.
 
 ### 3.1 Super Learner Diagnostics
 
@@ -410,7 +425,11 @@ cat("Ensemble improvement:",
     "%\n")
 ```
 
-Several patterns in the cross-validated risk comparison are diagnostically informative. When the ensemble risk is substantially lower than that of any individual learner, this indicates that the library captures complementary aspects of the data-generating process, different learners are performing well in different regions of the covariate space, and the ensemble benefits from combining them. When a single learner dominates (receiving nearly all the weight in the convex combination), the ensemble reduces to approximately the discrete Super Learner, which may indicate either that the dominant learner is clearly superior or that the library lacks sufficient diversity. When all learners have similar cross-validated risk, the outcome surface may be relatively simple and well-captured by any reasonable model, or the sample size may be too small to discriminate among learners.
+Several patterns in the cross-validated risk comparison are diagnostically informative:
+
+- **Ensemble risk much lower than any individual learner**: the library captures complementary aspects of the data-generating process, and the ensemble benefits from combining them.
+- **A single learner dominates** (receiving nearly all the weight): the ensemble reduces to approximately the discrete Super Learner. This may mean the dominant learner is clearly superior, or that the library lacks sufficient diversity.
+- **All learners have similar risk**: the outcome surface may be relatively simple, or the sample size may be too small to discriminate among learners.
 
 The analyst should also compare the continuous Super Learner (the convex combination with optimized weights) to the discrete Super Learner (the single best learner selected by cross-validation). When the continuous Super Learner offers a meaningful improvement over the discrete Super Learner, this provides evidence that the ensemble is achieving genuine gains from combining predictions. When the two are essentially equivalent, the analyst may choose to report results using the simpler discrete Super Learner for transparency.
 
@@ -436,9 +455,11 @@ cat("\nEffective number of learners:", round(eff_n_learners, 1),
     "out of", length(SL.library), "\n")
 ```
 
-An effective number of learners close to 1 indicates that the ensemble is dominated by a single algorithm. This is not necessarily problematic, it may simply mean that one learner is clearly best for this problem, but it warrants attention. If the dominant learner is a highly flexible algorithm (such as a deep neural network or a heavily tuned gradient boosting model), the analyst should verify that the cross-validated risk is not overly optimistic due to information leakage or insufficient regularization. If the dominant learner is a simple algorithm (such as a main-terms logistic regression), this may indicate that the outcome surface is genuinely simple, or that the sample size is too small for more flexible learners to outperform simpler ones.
+An effective number of learners close to 1 indicates that the ensemble is dominated by a single algorithm. This is not necessarily problematic (it may simply mean that one learner is clearly best for this problem), but it warrants attention.
 
-The coefficient distribution should be examined separately for the outcome regression $\bar{Q}$ and the treatment mechanism $g$, as the two functions may have different complexity. It is common for the propensity score model to be well-captured by relatively simple learners (because treatment assignment mechanisms in many studies are driven by a moderate number of strong predictors), while the outcome regression requires more flexible modeling (because the relationship between covariates and outcomes is often more complex).
+If the dominant learner is highly flexible (e.g., a heavily tuned gradient boosting model), verify that the cross-validated risk is not overly optimistic due to information leakage or insufficient regularization. If the dominant learner is simple (e.g., main-terms logistic regression), the outcome surface may be genuinely simple, or the sample size may be too small for more flexible learners to outperform simpler ones.
+
+Examine the coefficient distribution separately for $\bar{Q}$ and $g$, as the two functions may have different complexity. In many studies, the propensity score model is well-captured by relatively simple learners (treatment decisions are driven by a moderate number of strong predictors), while the outcome regression requires more flexible modeling.
 
 #### 3.1.3 Library Sensitivity Analysis
 
@@ -649,7 +670,9 @@ This diagnostic can be implemented by computing, for each observation, the stand
 
 ### 3.3 Treatment Mechanism Diagnostics
 
-The treatment mechanism $g(A \mid W) = P(A \mid W)$ enters the causal estimator through the inverse probability weights (in IPTW), the clever covariate (in TMLE), and the augmentation term (in AIPW). Diagnostics for the treatment mechanism are fundamentally different from diagnostics for the outcome regression, because the goal of the treatment model is not prediction per se but confounding control. A treatment model that predicts treatment assignment with high accuracy may produce extreme weights that destabilize the estimator. A treatment model that sacrifices some predictive accuracy for smoother weights may produce a more reliable causal estimate. The diagnostics in this section reflect this distinction.
+The treatment mechanism $g(A \mid W) = P(A \mid W)$ enters through the inverse probability weights (IPTW), the clever covariate (TMLE), and the augmentation term (AIPW). Diagnostics for $g$ differ fundamentally from those for $\bar{Q}$ because the goal is confounding control, not prediction.
+
+A treatment model that predicts treatment assignment with high accuracy may produce extreme weights that destabilize the estimator. A model that sacrifices some predictive accuracy for smoother weights may produce a more reliable causal estimate.
 
 #### 3.3.1 Propensity Score Distribution and Tail Behavior
 
@@ -793,7 +816,7 @@ The practical implication is that the propensity score model should not be const
 
 ## 4. Double Robust and EIF-Based Diagnostics {#sec-eif}
 
-The efficient influence function (EIF) occupies a central position in the theory of semiparametric causal inference. It defines the efficient estimator, characterizes the double robustness property, determines the semiparametric efficiency bound, and provides the basis for inference. Diagnostics derived from the EIF therefore provide a uniquely powerful lens for evaluating the performance of doubly robust estimators such as TMLE and AIPW. This section develops a comprehensive set of EIF-based diagnostics, beginning with the mathematical structure of the EIF and proceeding to its diagnostic implications.
+The efficient influence function (EIF) defines the efficient estimator, characterizes double robustness, determines the semiparametric efficiency bound, and provides the basis for inference. Diagnostics derived from the EIF are therefore uniquely informative for evaluating TMLE and AIPW performance.
 
 ### 4.1 Efficient Influence Function Structure
 

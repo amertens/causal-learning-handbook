@@ -240,6 +240,8 @@ $$
 \hat{g}_{(1,1)}(W, L_1) = \hat{g}_1(W) \times \hat{g}_2(A_1=1, L_1, W)
 $$
 
+This product gives the probability that a patient followed the full "always adhere" regime. A patient who was unlikely to adhere at both visits will have a very small cumulative probability, and inverting it produces a large weight.
+
 ```{r}
 # Evaluate g2 under the intervention value A1=1
 g2_under_a1 <- predict(g2_mod,
@@ -305,7 +307,7 @@ $$
 H_2 = \frac{I(A_1 = 1, A_2 = 1)}{\hat{g}_1(W) \times \hat{g}_2(1, L_1, W)}
 $$
 
-This is the inverse cumulative probability of following the full regime. Fit the fluctuation model and update.
+This is the inverse cumulative probability of following the full regime: it equals zero for patients who deviated from "always adhere" and a large positive number for patients who followed the regime despite having a low probability of doing so. Fit the fluctuation model and update.
 
 ```{r}
 # Clever covariate at time 2
@@ -328,7 +330,7 @@ Q2_star <- plogis(logit(Q2_A2is1) + eps2 / (g1_hat * g2_under_a1))
 cat("Epsilon at time 2:", round(eps2, 5), "\n")
 ```
 
-The fluctuation model regresses $Y$ on the clever covariate $H_2$ using the logit of the initial $\hat{Q}_2$ as an offset. The coefficient $\hat{\epsilon}_2$ measures how much the initial outcome model needs to be corrected. The updated $\hat{Q}_2^*$ now reflects both the outcome regression and the treatment mechanism information.
+The fluctuation model regresses $Y$ on the clever covariate $H_2$ using the logit of the initial $\hat{Q}_2$ as an offset. The coefficient $\hat{\epsilon}_2$ measures how much the initial outcome model needs to be corrected: a small $\hat{\epsilon}_2$ means the outcome model was already well-calibrated for the causal estimand; a large one means the treatment mechanism reveals bias that the outcome model alone missed. The updated $\hat{Q}_2^*$ now reflects both the outcome regression and the treatment mechanism information.
 
 ## Step 3b: Target $\hat{Q}_1$ at time 1
 
@@ -443,7 +445,7 @@ With $T$ time points, L-TMLE follows the same pattern:
 
 1. Estimate treatment mechanisms $\hat{g}_t$ for $t = 1, \ldots, T$.
 2. Start at time $T$: fit $\hat{Q}_T = E[Y \mid \bar{A}_T, \bar{L}_T, W]$.
-3. Target $\hat{Q}_T$ using $H_T = I(\bar{A}_T = \bar{a}_T) / \prod_{s=1}^{T} \hat{g}_s$.
+3. Target $\hat{Q}_T$ using $H_T = I(\bar{A}_T = \bar{a}_T) / \prod_{s=1}^{T} \hat{g}_s$. (The denominator is the cumulative probability of following the full regime through time $T$.)
 4. Move to time $T-1$: fit $\hat{Q}_{T-1} = E[\hat{Q}_T^* \mid \bar{A}_{T-1}, \bar{L}_{T-1}, W]$.
 5. Target $\hat{Q}_{T-1}$ using $H_{T-1}$.
 6. Repeat until $\hat{Q}_1^*$ is obtained.
@@ -506,7 +508,7 @@ For our HIV question, the ATE tells us: how much would the virologic failure rat
 When interpreting, keep in mind:
 
 - The estimate is a **per-protocol causal effect**, not an intention-to-treat effect. It answers "what would happen if patients actually adhered" rather than "what happens when patients are prescribed this drug."
-- The estimate is only as good as the identification assumptions. If unmeasured confounders (substance use, housing instability) affect both adherence and virologic failure, the estimate is biased regardless of the statistical method.
+- The estimate is only as good as the identification assumptions. If unmeasured confounders (substance use, housing instability) affect both adherence and virologic failure, the estimate is biased regardless of the statistical method. The target quantity remains the counterfactual risk under sustained adherence, but unmeasured confounding can corrupt our estimate of it.
 - The static "always adhere" regime may violate positivity for patients who cannot realistically achieve high adherence. The next chapter addresses this with more realistic interventions.
 
 
@@ -625,11 +627,13 @@ This breakdown motivates the LMTP shift approach developed in the next chapter. 
 
 # Summary and Transition
 
-L-TMLE extends point-treatment TMLE to the longitudinal setting through three mechanisms: backwards sequential regressions that respect the temporal ordering of treatment and confounders; targeting steps at each time point that make the estimator doubly robust; and working on the logit scale to maintain numerical stability. The `ltmle` package automates the entire procedure.
+L-TMLE extends point-treatment TMLE to the longitudinal setting through three mechanisms: backwards sequential regressions that respect the temporal ordering of treatment and confounders; targeting steps at each time point that make the estimator doubly robust; and working on the logit scale to maintain numerical stability.
 
-The main limitation of the approach as presented here is the reliance on static interventions. The "always adhere" regime is a useful pedagogic and methodological benchmark, but real adherence interventions are not all-or-nothing. The next chapter uses the LMTP framework to define more realistic distributional adherence interventions: specifically, estimating what would happen if the adherence distribution for one drug were shifted to match that of another drug. This is a qualitatively different kind of causal question, and it requires the modified treatment policy machinery that LMTP provides.
+The main limitation of the approach as presented here is the reliance on static interventions. The "always adhere" regime is a useful pedagogic and methodological benchmark, but real adherence interventions are not all-or-nothing. The next chapter uses the LMTP framework to define more realistic distributional adherence interventions, estimating what would happen if the adherence distribution for one drug were shifted to match that of another drug.
 
-The connection between static-regime estimation and drug comparison runs through the forgiveness curve. Once we can trace how failure risk changes with sustained adherence level for each drug, we can ask: if patients taking Drug A had the same adherence distribution as patients taking Drug B, how much of the outcome gap would close? This is a **quantile-matching** exercise, mapping one drug's adherence distribution onto another's to isolate the pharmacological effect from the adherence effect. The result decomposes the total drug advantage into two components: (1) the portion attributable to improved adherence (because Drug B's formulation is easier to take consistently), and (2) the portion attributable to intrinsic pharmacological forgiveness (because Drug B works even when patients miss doses). This mediation perspective (how much of a drug's advantage operates through adherence versus through forgiveness) is the central question of the applied analysis in later chapters.
+The connection between static-regime estimation and drug comparison runs through the forgiveness curve. Once we can trace how failure risk changes with sustained adherence level for each drug, we can ask: if patients taking Drug A had the same adherence distribution as patients taking Drug B, how much of the outcome gap would close?
+
+This is a **quantile-matching** exercise, mapping one drug's adherence distribution onto another's to isolate the pharmacological effect from the adherence effect. The result decomposes the total drug advantage into two components: (1) the portion attributable to improved adherence (because the formulation is easier to take consistently), and (2) the portion attributable to intrinsic pharmacological forgiveness (because the drug works even when patients miss doses).
 
 ---
 

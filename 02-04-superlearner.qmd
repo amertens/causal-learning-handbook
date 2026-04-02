@@ -8,9 +8,9 @@ format: html
 # Chapter 2.4: Super Learner: Ensemble Machine Learning for Causal Inference
 *Flexible prediction to strengthen causal effect estimation*
 
-In the previous chapters you learned to estimate causal effects using g-computation, IPTW, AIPW, and TMLE. Every one of these estimators depends on **nuisance functions**; the outcome regression $E[Y \mid A, W]$ or the treatment mechanism $P(A = 1 \mid W)$; and if those models are wrong, even the cleverest causal estimator can be biased.
+In the previous chapters you learned to estimate causal effects using g-computation, IPTW, AIPW, and TMLE. Every one of these estimators depends on **nuisance functions** (the outcome regression $E[Y \mid A, W]$ or the treatment mechanism $P(A = 1 \mid W)$), and if those models are wrong, even the cleverest causal estimator can be biased.
 
-So far we have used simple logistic regressions for these nuisance functions. That is fine when the true relationships are approximately linear on the logit scale, but dangerous when they are not. In real data, relationships are often nonlinear, involve interactions, and depend on functional forms we cannot guess in advance.
+So far we have used simple logistic regressions for these nuisance functions. That is fine when the true relationships are approximately linear on the logit scale, but dangerous when they are not. In real data, relationships are often nonlinear, involve interactions, and depend on functional forms we cannot guess in advance. For example, clinicians may initiate treatment based on threshold rules (e.g., start HAART when CD4 drops below 350), creating sharp nonlinearities that a main-terms logistic regression cannot capture.
 
 Rather than gambling on a single model, we can **stack** many candidate learners and let the data decide how to combine them. This is what **Super Learner** [@vanderLaan2007superlearner] does.
 
@@ -61,7 +61,7 @@ In practice, **no single algorithm dominates across all datasets and all problem
 Imagine an oracle who knows the true data-generating process and can tell you which algorithm will perform best. You would always pick the oracle's choice. The **discrete Super Learner** mimics this: it selects whichever candidate algorithm has the lowest cross-validated risk. The **continuous Super Learner** goes further; it finds the *optimal weighted combination* of all candidates, which can perform at least as well as the oracle selector asymptotically.
 :::
 
-This guarantee is formalized as an **oracle inequality** [@vanderLaan2007superlearner]: the Super Learner's risk converges to the risk of the best possible combination of candidates in the library, at a rate that depends on the number of candidates (not the sample size). In plain language: **you pay almost no price for including many diverse learners in your library**.
+This guarantee is formalized as an **oracle inequality** [@vanderLaan2007superlearner]: the Super Learner's risk converges to the risk of the best possible combination of candidates in the library, at a rate that depends on the number of candidates (not the sample size). In plain language, you pay almost no price for including many diverse learners in your library.
 
 ---
 
@@ -294,7 +294,7 @@ Lower risk = better predictions. The **Brier score** (MSE for binary outcomes) r
 
 The metalearner finds the optimal weighted combination of the candidates. We use **non-negative least squares (NNLS)**: minimize $\sum_i (Y_i - \sum_k \alpha_k Z_{ik})^2$ subject to $\alpha_k \geq 0$.
 
-The non-negativity constraint ensures that no learner gets a negative weight (which would mean *anti-correlating* with the outcome; hard to interpret and unstable in practice).
+In plain terms, this finds the combination of learners that best predicts the outcome, with the constraint that no learner can receive a negative weight (which would mean *anti-correlating* with the outcome, producing unstable behavior).
 
 ```{webr-r}
 library(nnls)
@@ -390,7 +390,7 @@ This places greater emphasis on calibration; exactly what we want when the predi
 :::{.callout-important}
 ## Metalearner Choice Matters for Causal Inference
 
-When Super Learner predictions feed into TMLE or AIPW, we need well-calibrated *probabilities*, not just good rankings. Log-likelihood metalearners penalize overconfident wrong predictions (e.g., predicting 0.99 when the truth is 0), which keeps the propensity scores and outcome predictions from behaving badly in downstream causal estimation. AUC-based metalearners optimize rankings but may produce poorly calibrated probabilities; use them for classification, not for nuisance estimation in causal analyses.
+When Super Learner predictions feed into TMLE or AIPW, we need well-calibrated *probabilities*, not just good rankings. Log-likelihood metalearners penalize overconfident wrong predictions (e.g., predicting 0.99 when the truth is 0), which keeps the propensity scores and outcome predictions from behaving badly in downstream causal estimation. An analyst would see the problem as extreme IPTW weights or a destabilized TMLE fluctuation step. AUC-based metalearners optimize rankings but may produce poorly calibrated probabilities; use them for classification, not for nuisance estimation in causal analyses.
 :::
 
 ---
@@ -865,14 +865,14 @@ This library balances interpretable models (GLM, LASSO) with flexible nonparamet
 
 For **larger datasets** (n > 10,000) or **high-dimensional covariates**, consider adding:
 
-- `SL.xgboost`; gradient boosted trees
-- `SL.nnet`; neural networks
+- `SL.xgboost` (gradient boosted trees)
+- `SL.nnet` (neural networks)
 - Multiple tuned variants of ranger and xgboost with different hyperparameters
 :::
 
 ### Practical tips
 
-1. **Always include a simple benchmark.** `SL.mean` and `SL.glm` should always be in the library. If the ensemble gives all weight to `SL.mean`, your covariates are not predictive; which may indicate a problem with your variable set or study design.
+1. **Always include a simple benchmark.** `SL.mean` and `SL.glm` should always be in the library. If the ensemble gives all weight to `SL.mean`, your covariates are not predictive, which may indicate a problem with your variable set or study design.
 
 2. **Match the loss function to the problem.** Use `method.NNloglik` for binary nuisance functions. Use `method.NNLS` for continuous outcomes.
 
@@ -922,10 +922,10 @@ By letting Super Learner select the best combination of learners, we reduce the 
 ## Key Takeaways
 
 - **Super Learner** combines multiple algorithms using cross-validation and a metalearner to produce an ensemble with an oracle guarantee: it performs nearly as well as the best possible combination of candidates
-- The key mechanism is **honest cross-validated predictions**; each learner's quality is assessed on held-out data, preventing overfitting from inflating any learner's contribution
+- The key mechanism is **honest cross-validated predictions**: each learner's quality is assessed on held-out data, preventing overfitting from inflating any learner's contribution
 - For causal inference, use **log-likelihood loss** for binary nuisance functions and **MSE** for continuous outcomes
 - Super Learner is the standard tool for estimating nuisance functions ($E[Y \mid A, W]$ and $P(A \mid W)$) in modern TMLE and AIPW analyses
-- You can (and should) include many diverse learners in the library; the oracle inequality guarantees that "bad" learners receive near-zero weight and do not harm the ensemble
+- You can (and should) include many diverse learners in the library: the oracle inequality guarantees that "bad" learners receive near-zero weight and do not harm the ensemble
 :::
 
 ---

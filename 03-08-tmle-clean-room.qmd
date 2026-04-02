@@ -68,15 +68,19 @@ This question arises in a post-marketing surveillance context where:
 :::{.callout-note}
 ## Why TMLE for Clean-Room?
 
-Traditional regression-based analyses require the analyst to choose a single model specification, a process that invites data-dependent decisions. Every time an analyst looks at the data and adjusts a model, the pre-specification principle is compromised. TMLE with Super Learner reduces reliance on a single parametric model while maintaining a pre-specified workflow:
+Traditional regression-based analyses require the analyst to choose a single model specification, a process that invites data-dependent decisions. Every time an analyst looks at the data and adjusts a model, the pre-specification principle is compromised.
+
+TMLE with Super Learner reduces reliance on a single parametric model while maintaining a pre-specified workflow:
 
 1. **Pre-specify a learner library, not a single model.** The SAP lists the candidate algorithms. Cross-validation, not the analyst, picks the best combination. No post-hoc model selection is required.
-2. **Double robustness provides consistency under partial misspecification.** The TMLE estimate is consistent if at least one of the outcome model or the treatment model is correctly specified (plus positivity). This is a *consistency* property, not a blanket guarantee --- it does not protect against unmeasured confounding or severe positivity violations.
-3. **Influence-curve inference is automatic under regularity conditions.** Standard errors come directly from the efficient influence curve. When data-adaptive learners are used, cross-fitting or CV-TMLE is needed to ensure the regularity conditions hold (see [Chapter 2.3](02-03-doubly-robust-tmle.qmd)).
+2. **Double robustness provides consistency under partial misspecification.** The TMLE estimate is consistent if at least one of the outcome model or the treatment model is correctly specified (plus positivity). This is a *consistency* property, not a blanket guarantee; it does not protect against unmeasured confounding or severe positivity violations.
+3. **Influence-curve inference follows from the targeting step.** Standard errors come directly from the efficient influence curve. When data-adaptive learners are used, cross-fitting or CV-TMLE is needed to ensure the required regularity conditions hold (see [Chapter 2.3](02-03-doubly-robust-tmle.qmd)).
 4. **Full determinism.** Given the same data, learner library, and random seed, the entire pipeline produces bit-identical results. Every run is reproducible.
 5. **The audit trail writes itself.** Cross-validated learner weights, the fluctuation parameter, and every diagnostic are logged as natural byproducts of the algorithm.
 
-TMLE does not eliminate the fundamental threats to causal inference (unmeasured confounding, positivity violations, model extrapolation). What it does is separate the *algorithmic* decisions (model selection, combination weights) from the *substantive* decisions (estimand definition, confounder selection, population definition) that must be made before data access. This separation is what makes it well-suited to clean-room workflows.
+TMLE does not eliminate the fundamental threats to causal inference: unmeasured confounding, positivity violations, and model extrapolation remain.
+
+What it does is separate the *algorithmic* decisions (model selection, combination weights) from the *substantive* decisions (estimand definition, confounder selection, population definition) that must be made before data access. This separation is what makes it well-suited to clean-room workflows.
 :::
 
 ---
@@ -194,7 +198,7 @@ We assume consistency, exchangeability, and positivity as defined in [Chapter 1.
 
 ## Pre-Specified Analysis Plan
 
-The SAP is the contract between the analyst and the regulator. Once signed, every element below is locked.
+The SAP is the contract between the analyst and the regulator. Once signed, every element below is locked. In a regulatory submission, the analyst cannot go back and re-specify the propensity score model after seeing that it produces extreme weights. The model choice must be locked before data access.
 
 :::{.callout-important}
 ## Statistical Analysis Plan: Locked Before Data Access
@@ -650,7 +654,7 @@ Now we apply the epsilon update to get our final, targeted predictions:
 - Average the updated predictions across all patients to get the counterfactual risks
 - Take the difference to get the ATE
 
-The resulting estimate, $\hat{\psi}_{TMLE}$, is doubly robust: it is consistent if either the outcome model or the propensity score model is correctly specified. It also solves the efficient influence curve estimating equation, which means it achieves the smallest possible variance among regular asymptotically linear estimators.
+The resulting estimate, $\hat{\psi}_{TMLE}$, targets the pre-specified estimand: the 90-day AKI risk difference under universal NSAID versus universal opioid initiation. It is doubly robust (consistent if either the outcome model or the propensity score model is correctly specified) and solves the efficient influence curve estimating equation, which means it achieves the smallest possible variance among regular asymptotically linear estimators under appropriate regularity conditions.
 :::
 
 ```{r}
@@ -1092,8 +1096,8 @@ if (tmle_ci[1] > 0) {
 | Pre-specification required | SAP locks the learner library, seed, and analysis code |
 | Must be reproducible | Deterministic given data + seed + code |
 | Model selection bias | Super Learner eliminates manual model selection |
-| Robustness to misspecification | Double robustness: consistency if either nuisance model is correct (plus positivity) |
-| Valid inference | Influence-curve standard errors do not require bootstrap |
+| Robustness to misspecification | Double robustness: consistency under correct specification of at least one nuisance model (plus positivity) |
+| Valid inference under regularity conditions | Influence-curve standard errors do not require bootstrap |
 | Auditable | Cross-validated learner weights, diagnostics, and the fluctuation parameter are all logged |
 | Transparent | Every step (initial model, clever covariate, targeting, inference) has a clear purpose |
 
@@ -1209,9 +1213,9 @@ ggplot(forest_df, aes(x = ate, y = site)) +
 
 4. **The audit trail documents** propensity score overlap, covariate balance, weight distributions, the fluctuation parameter, influence curve behavior, and cross-validated learner weights, providing full transparency.
 
-5. **Double robustness** protects the estimate even when one nuisance model is misspecified, a critical property when the analyst cannot iterate on model specifications.
+5. **Double robustness** provides consistency under correct specification of at least one nuisance model, a critical property when the analyst cannot iterate on model specifications.
 
-6. **Influence-curve inference** provides valid standard errors without the computational burden of bootstrap, which matters in distributed settings where each site runs the analysis independently.
+6. **Influence-curve inference** provides valid standard errors under regularity conditions without the computational burden of bootstrap, which matters in distributed settings where each site runs the analysis independently.
 
 7. **The clean-room framework extends to distributed data networks** by shipping locked code to each site and combining site-level TMLE estimates via meta-analysis.
 
