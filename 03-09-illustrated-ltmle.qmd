@@ -34,7 +34,7 @@ logit <- function(p) log(p / (1 - p))
 
 # Where This Chapter Fits
 
-The previous chapter explained why time-varying confounding affected by prior treatment breaks standard regression, and why g-methods are needed. This chapter shows how one specific g-method --- longitudinal TMLE (L-TMLE) --- works in practice. We use a single HIV cohort example with CD4 count as the time-dependent confounder and virologic failure as the outcome. By the end, you will understand the backwards regression logic, the targeting steps that make L-TMLE doubly robust, and how to implement the procedure with the `ltmle` R package.
+The previous chapter explained why time-varying confounding affected by prior treatment breaks standard regression, and why g-methods are needed. This chapter shows how one specific g-method, longitudinal TMLE (L-TMLE), works in practice. We use a single HIV cohort example with CD4 count as the time-dependent confounder and virologic failure as the outcome. By the end, you will understand the backwards regression logic, the targeting steps that make L-TMLE doubly robust, and how to implement the procedure with the `ltmle` R package.
 
 
 # What L-TMLE Estimates in a Longitudinal HIV Study
@@ -193,22 +193,22 @@ We now walk through each step.
 
 The three ideas above can feel abstract. Here is the same procedure described as a recipe, using the HIV cohort as the running example.
 
-**Step 1 --- Learn the treatment mechanism (the "g-model").**
-At each quarter, build a model that predicts: given a patient's current health status and history, how likely were they to actually have high adherence? This captures real-world patterns --- sicker patients are less likely to be highly adherent, patients who already missed doses are less likely to catch up. These predicted probabilities will be used later to reweight the sample so that the comparison between "high adherence" and "low adherence" groups is fair.
+**Step 1: Learn the treatment mechanism (the "g-model").**
+At each quarter, build a model that predicts: given a patient's current health status and history, how likely were they to actually have high adherence? This captures real-world patterns: sicker patients are less likely to be highly adherent, patients who already missed doses are less likely to catch up. These predicted probabilities will be used later to reweight the sample so that the comparison between "high adherence" and "low adherence" groups is fair.
 
-**Step 2 --- Learn the outcome risk (the "Q-model").**
+**Step 2: Learn the outcome risk (the "Q-model").**
 At each quarter, build a model that predicts: given a patient's health status, adherence level, and history, what is their probability of virologic failure? This is ordinary outcome modeling, but it will be fit at each time point in reverse chronological order.
 
-**Step 3 --- Start at the last time point and work backward.**
-Starting at Visit 2: predict each patient's failure risk *as if* they had high adherence, regardless of what they actually did. Adjust using the g-model --- patients who were unlikely to have high adherence naturally but did anyway get upweighted, and vice versa. This is the "targeting" step: it tilts the Q-model's predictions so they are unbiased for the causal estimand, not just good at prediction.
+**Step 3: Start at the last time point and work backward.**
+Starting at Visit 2: predict each patient's failure risk *as if* they had high adherence, regardless of what they actually did. Adjust using the g-model: patients who were unlikely to have high adherence naturally but did anyway get upweighted, and vice versa. This is the "targeting" step: it tilts the Q-model's predictions so they are unbiased for the causal estimand, not just good at prediction.
 
-Then Visit 1: take the adjusted Visit-2 predictions and treat them as the "outcome" for Visit 1. Fit the Q-model again, plug in "high adherence" for Visit 1, apply targeting. This propagates the causal effect backward through time. Crucially, the Visit-1 model does **not** condition on CD4 at Visit 1 --- because CD4 is a consequence of Visit-1 adherence, and conditioning on it would block the indirect effect.
+Then Visit 1: take the adjusted Visit-2 predictions and treat them as the "outcome" for Visit 1. Fit the Q-model again, plug in "high adherence" for Visit 1, apply targeting. This propagates the causal effect backward through time. Crucially, the Visit-1 model does **not** condition on CD4 at Visit 1, because CD4 is a consequence of Visit-1 adherence, and conditioning on it would block the indirect effect.
 
-**Step 4 --- Average over the population.**
+**Step 4: Average over the population.**
 The final L-TMLE estimate is the average of the Visit-1 adjusted predictions across all patients. This single number answers the question: what would the failure rate be if every patient had maintained high adherence throughout?
 
 **Why this works when standard regression does not.**
-Standard regression *conditions* on adherence --- it compares patients who happened to be adherent with those who did not, at each time point. But these groups differ systematically: the adherent patients tend to be healthier. L-TMLE *intervenes* on adherence --- it sets adherence to the target level for everyone and uses the g-model to reweight so that the comparison is fair even when healthier patients are more likely to adhere. The backward iteration handles the additional complication that adherence at Visit 1 affects CD4, which then affects both adherence at Visit 2 and the outcome. No single regression can untangle this feedback loop; the sequential structure of L-TMLE is specifically designed for it.
+Standard regression *conditions* on adherence: it compares patients who happened to be adherent with those who did not, at each time point. But these groups differ systematically: the adherent patients tend to be healthier. L-TMLE *intervenes* on adherence: it sets adherence to the target level for everyone and uses the g-model to reweight so that the comparison is fair even when healthier patients are more likely to adhere. The backward iteration handles the additional complication that adherence at Visit 1 affects CD4, which then affects both adherence at Visit 2 and the outcome. No single regression can untangle this feedback loop; the sequential structure of L-TMLE is specifically designed for it.
 
 
 # Phase A: Estimate the Treatment Mechanisms
@@ -221,7 +221,7 @@ g1_mod <- glm(A1 ~ W, family = binomial, data = dat)
 g1_hat <- predict(g1_mod, type = "response")
 g1_hat <- pmax(0.01, pmin(0.99, g1_hat))  # bound away from 0/1
 
-# Time 2: P(A2 = 1 | A1, L1, W) --- conditions on full history
+# Time 2: P(A2 = 1 | A1, L1, W) (conditions on full history)
 g2_mod <- glm(A2 ~ L1 + A1 + W, family = binomial, data = dat)
 g2_hat <- predict(g2_mod, type = "response")
 g2_hat <- pmax(0.01, pmin(0.99, g2_hat))
@@ -270,7 +270,7 @@ cat("Q2(A2=1) range:", round(range(Q2_A2is1), 4), "\n")
 
 This conditions on $L_1$ to properly deconfound $A_2$. The prediction $\hat{Q}_2(1, L_1, A_1, W)$ tells us: for each patient, what virologic failure probability would we expect if they had high adherence at visit 2, given their actual CD4 and visit-1 adherence?
 
-## Step 2b: Move backwards --- create a pseudo-outcome
+## Step 2b: Move backwards and create a pseudo-outcome
 
 Now the critical step. We take the predictions $\hat{Q}_2(1, L_1, A_1, W)$ and regress them on $(A_1, W)$ only, **without conditioning on $L_1$**. This averages over $L_1$ as it would arise under the intervention.
 
@@ -403,13 +403,13 @@ In the comparison above, the naive regression estimate is reasonably close to th
 
 The answer lies in the strength of baseline confounding relative to time-varying feedback in this particular data-generating process. The baseline composite score $W$ is a strong predictor of both adherence and the outcome. In this setting, a regression that adjusts for $W$ captures most of the confounding, and the additional bias from mishandling $L_1$ is small.
 
-**But this is a feature of this example, not a general result.** In settings where the time-varying feedback loop is strong --- where CD4 strongly affects future adherence and adherence strongly affects CD4 --- baseline regression fails dramatically. The V4 simulation study explores this systematically by varying the strength of the feedback parameters ($\beta_P$ governing how past adherence affects CD4, and $\gamma_L$ governing how CD4 affects future adherence). Under strong time-varying confounding:
+**But this is a feature of this example, not a general result.** In settings where the time-varying feedback loop is strong (where CD4 strongly affects future adherence and adherence strongly affects CD4), baseline regression fails dramatically. The V4 simulation study explores this systematically by varying the strength of the feedback parameters ($\beta_P$ governing how past adherence affects CD4, and $\gamma_L$ governing how CD4 affects future adherence). Under strong time-varying confounding:
 
 - **Regression with time-varying covariates** (conditioning on $L_1$) has approximately 15 percentage points of mean bias for the causal risk difference.
 - **L-TMLE** maintains approximately 6 percentage points of bias under the same conditions.
-- **Baseline-only regression** (omitting $L_1$) actually performs *better* than regression with time-varying covariates --- a paradox explained by collider bias.
+- **Baseline-only regression** (omitting $L_1$) actually performs *better* than regression with time-varying covariates, a paradox explained by collider bias.
 
-The last point deserves emphasis. When we include the time-varying confounder $L_1$ as a covariate in a standard regression, we condition on a variable that is a common effect of $A_1$ (via the $A_1 \to L_1$ pathway) and an unmeasured cause of $Y$. This opens a non-causal path --- the collider path --- that introduces bias rather than removing it. The regression "adjusts" for $L_1$ in the wrong way. L-TMLE handles $L_1$ correctly by conditioning on it at time 2 (where it is a confounder) and integrating it out at time 1 (where it is a mediator).
+The last point deserves emphasis. When we include the time-varying confounder $L_1$ as a covariate in a standard regression, we condition on a variable that is a common effect of $A_1$ (via the $A_1 \to L_1$ pathway) and an unmeasured cause of $Y$. This opens a non-causal path (the collider path) that introduces bias rather than removing it. The regression "adjusts" for $L_1$ in the wrong way. L-TMLE handles $L_1$ correctly by conditioning on it at time 2 (where it is a confounder) and integrating it out at time 1 (where it is a mediator).
 
 **The estimand diagnostic.** A subtler issue is that regression with time-varying covariates converges to a *different* estimand than L-TMLE, even in infinite samples. The regression coefficient on $A_1$ in a model that includes $L_1$ estimates the *direct effect* of $A_1$ on $Y$ not mediated through $L_1$, whereas L-TMLE estimates the *total effect* including the $A_1 \to L_1 \to Y$ pathway. These are different causal quantities, and comparing them to the same oracle is misleading. The Monte Carlo evidence from the V4 simulation confirms this: regression converges to a systematically different value than the oracle total effect, and this gap is not reducible by increasing sample size.
 
@@ -539,7 +539,7 @@ L-TMLE treats time as discrete. The choice of how finely to discretize follow-up
 
 ## Intervention realism
 
-A static "always treat" intervention is useful for understanding the method but may not correspond to any feasible real-world program. No adherence intervention achieves 100% compliance. If the causal question calls for a more realistic intervention --- such as shifting adherence probabilities rather than forcing them to 1 --- the LMTP framework in the next chapter is the better tool.
+A static "always treat" intervention is useful for understanding the method but may not correspond to any feasible real-world program. No adherence intervention achieves 100% compliance. If the causal question calls for a more realistic intervention, such as shifting adherence probabilities rather than forcing them to 1, the LMTP framework in the next chapter is the better tool.
 
 
 # From static regimes to realistic interventions: the forgiveness curve
@@ -548,7 +548,7 @@ The "always adhere" versus "never adhere" comparison above is informative, but i
 
 ## The forgiveness curve concept
 
-The **forgiveness curve** plots the causal failure risk as a function of the proportion of days covered (PDC) threshold used to define "high adherence." A drug is pharmacologically forgiving if the curve stays flat (low failure risk) across a wide range of PDC levels --- meaning patients who miss occasional doses still achieve viral suppression. A drug with a steep curve requires near-perfect adherence to work.
+The **forgiveness curve** plots the causal failure risk as a function of the proportion of days covered (PDC) threshold used to define "high adherence." A drug is pharmacologically forgiving if the curve stays flat (low failure risk) across a wide range of PDC levels, meaning patients who miss occasional doses still achieve viral suppression. A drug with a steep curve requires near-perfect adherence to work.
 
 Crucially, the forgiveness curve is a *causal* object. It answers: what would the failure rate be if every patient's adherence were at PDC level $p$? This is not the same as the observed failure rate among patients whose PDC happened to equal $p$, because those patients differ from the rest of the cohort in measured and unmeasured ways.
 
@@ -608,13 +608,13 @@ ggplot(forgive_df, aes(x = PDC, y = Risk, color = Source, linetype = Source)) +
 
 ## Where the curve breaks down
 
-In the well-supported region --- typically PDC $\geq$ 70% in the HIV adherence context --- L-TMLE estimates track the oracle truth closely. Below that threshold, positivity breaks down: very few patients with high baseline CD4 have PDC below 50%, so the g-model predicts near-zero treatment probabilities, the clever covariates explode, and the estimates become unstable.
+In the well-supported region (typically PDC $\geq$ 70% in the HIV adherence context), L-TMLE estimates track the oracle truth closely. Below that threshold, positivity breaks down: very few patients with high baseline CD4 have PDC below 50%, so the g-model predicts near-zero treatment probabilities, the clever covariates explode, and the estimates become unstable.
 
 This is not a failure of L-TMLE as a method; it is a fundamental limitation of static interventions. Asking "what if everyone had PDC = 30%?" requires extrapolating far outside observed support for many covariate strata. The V4 simulation demonstrates this clearly with $N = 50{,}000$ patients and 13 sliding bins: the fine-grid L-TMLE curve is reliable from PDC 70% upward but increasingly noisy below that.
 
 ## Motivation for the shift approach
 
-This breakdown motivates the LMTP shift approach developed in the next chapter. Instead of fixing adherence at a specific level, LMTP asks: what would happen if each patient's adherence were *shifted* by a small amount --- say, increasing PDC by 10 percentage points? This intervention stays within the observed support for every patient, because no one is assigned an adherence level that is implausible given their covariate history. The result is a well-defined causal effect that can be estimated with low bias and reasonable variance, even in the tails of the adherence distribution.
+This breakdown motivates the LMTP shift approach developed in the next chapter. Instead of fixing adherence at a specific level, LMTP asks: what would happen if each patient's adherence were *shifted* by a small amount, say, increasing PDC by 10 percentage points? This intervention stays within the observed support for every patient, because no one is assigned an adherence level that is implausible given their covariate history. The result is a well-defined causal effect that can be estimated with low bias and reasonable variance, even in the tails of the adherence distribution.
 
 
 # Summary and Transition
@@ -623,13 +623,13 @@ L-TMLE extends point-treatment TMLE to the longitudinal setting through three me
 
 The main limitation of the approach as presented here is the reliance on static interventions. The "always adhere" regime is a useful pedagogic and methodological benchmark, but real adherence interventions are not all-or-nothing. The next chapter uses the LMTP framework to define more realistic distributional adherence interventions: specifically, estimating what would happen if the adherence distribution for one drug were shifted to match that of another drug. This is a qualitatively different kind of causal question, and it requires the modified treatment policy machinery that LMTP provides.
 
-The connection between static-regime estimation and drug comparison runs through the forgiveness curve. Once we can trace how failure risk changes with sustained adherence level for each drug, we can ask: if patients taking Drug A had the same adherence distribution as patients taking Drug B, how much of the outcome gap would close? This is a **quantile-matching** exercise --- mapping one drug's adherence distribution onto another's to isolate the pharmacological effect from the adherence effect. The result decomposes the total drug advantage into two components: (1) the portion attributable to improved adherence (because Drug B's formulation is easier to take consistently), and (2) the portion attributable to intrinsic pharmacological forgiveness (because Drug B works even when patients miss doses). This mediation perspective --- how much of a drug's advantage operates through adherence versus through forgiveness --- is the central question of the applied analysis in later chapters.
+The connection between static-regime estimation and drug comparison runs through the forgiveness curve. Once we can trace how failure risk changes with sustained adherence level for each drug, we can ask: if patients taking Drug A had the same adherence distribution as patients taking Drug B, how much of the outcome gap would close? This is a **quantile-matching** exercise, mapping one drug's adherence distribution onto another's to isolate the pharmacological effect from the adherence effect. The result decomposes the total drug advantage into two components: (1) the portion attributable to improved adherence (because Drug B's formulation is easier to take consistently), and (2) the portion attributable to intrinsic pharmacological forgiveness (because Drug B works even when patients miss doses). This mediation perspective (how much of a drug's advantage operates through adherence versus through forgiveness) is the central question of the applied analysis in later chapters.
 
 ---
 
 ## Connection to the running case study
 
-The HAART cohort from the [Running Case Study](00-case-study.qmd) has exactly the structure this chapter models: `cd4.sqrt` responds to prior HAART treatment (`haartind`), and `haartind` decisions depend on current `cd4.sqrt` levels. In `haartdat`, the outcome is `event` (death) and informative censoring occurs through `dropout`. The two-time-point simulation used here strips this setting to its pedagogical essentials --- one treatment, one confounder, one outcome --- but the mechanics (backwards regression, targeting, clever covariates) apply directly to the multi-visit HAART data via the `ltmle` package. For a practical application with multiple time points, censoring, and flexible learners, the `ltmle` call shown in the Implementation section can be applied to `haartdat` with `Anodes = "haartind"`, `Lnodes = "cd4.sqrt"`, and `Ynodes = "event"`.
+The HAART cohort from the [Running Case Study](00-case-study.qmd) has exactly the structure this chapter models: `cd4.sqrt` responds to prior HAART treatment (`haartind`), and `haartind` decisions depend on current `cd4.sqrt` levels. In `haartdat`, the outcome is `event` (death) and informative censoring occurs through `dropout`. The two-time-point simulation used here strips this setting to its pedagogical essentials (one treatment, one confounder, one outcome), but the mechanics (backwards regression, targeting, clever covariates) apply directly to the multi-visit HAART data via the `ltmle` package. For a practical application with multiple time points, censoring, and flexible learners, the `ltmle` call shown in the Implementation section can be applied to `haartdat` with `Anodes = "haartind"`, `Lnodes = "cd4.sqrt"`, and `Ynodes = "event"`.
 
 ---
 

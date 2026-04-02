@@ -32,7 +32,7 @@ knitr::opts_chunk$set(
 
 # Why Longitudinal Treatments Are Different
 
-Parts I and II of this handbook dealt with point-treatment settings: a single treatment decision at one moment, followed by an outcome. Real clinical trajectories are rarely that clean. Patients start medications, respond to them, have their health monitored, and then --- on the basis of that monitoring --- clinicians adjust, continue, or stop treatment. This feedback between treatment and health status repeats at every clinical visit. It is the defining feature of longitudinal treatment data, and it is what makes longitudinal causal inference fundamentally harder than the point-treatment case.
+Parts I and II of this handbook dealt with point-treatment settings: a single treatment decision at one moment, followed by an outcome. Real clinical trajectories are rarely that clean. Patients start medications, respond to them, have their health monitored, and then, on the basis of that monitoring, clinicians adjust, continue, or stop treatment. This feedback between treatment and health status repeats at every clinical visit. It is the defining feature of longitudinal treatment data, and it is what makes longitudinal causal inference fundamentally harder than the point-treatment case.
 
 This chapter introduces the problem. We explain why time-varying confounding affected by prior treatment breaks standard regression, lay out the identification assumptions needed for longitudinal causal effects, and preview the two estimation approaches developed in the next two chapters: longitudinal TMLE (L-TMLE) and the longitudinal modified treatment policy framework (LMTP).
 
@@ -82,7 +82,7 @@ L1 <- rnorm(n, 0.5 * A1 + 0.4 * W)
 A2 <- rbinom(n, 1, plogis(0.5 * L1))
 Y  <- rbinom(n, 1, plogis(-1.5 + 0.4 * A1 + 0.4 * A2 + 0.3 * L1 + 0.3 * W))
 
-# Naive regression conditions on L1 --- blocks A1 -> L1 -> Y
+# Naive regression conditions on L1 (blocks A1 -> L1 -> Y)
 naive_mod <- glm(Y ~ A1 + A2 + L1 + W, family = binomial)
 cat("Naive coefficient on A1 (attenuated):", round(coef(naive_mod)["A1"], 3),
     " (true structural coefficient: 0.4)\n")
@@ -109,7 +109,7 @@ The data structure at each clinic visit looks like this:
 | Visit $t$ | Still in study? | Censoring $C_t$ |
 | End of follow-up | Virologic failure (HIV RNA $\geq$ 200 copies/mL) | Outcome $Y$ |
 
-At each visit, CD4 is measured first, then adherence is recorded, then we check whether the patient is still under observation. This ordering is not arbitrary --- it encodes our causal assumptions about the temporal sequence.
+At each visit, CD4 is measured first, then adherence is recorded, then we check whether the patient is still under observation. This ordering is not arbitrary; it encodes our causal assumptions about the temporal sequence.
 
 The feedback loop in HIV works as follows. ART adherence at visit $t-1$ improves CD4 at visit $t$. Higher CD4 at visit $t$ may reduce clinical urgency, potentially affecting adherence decisions at visit $t$. CD4 at visit $t$ also directly affects the risk of virologic failure. The result is the same structure as the statin--LDL example, but with more clinical urgency and more time points.
 
@@ -120,7 +120,7 @@ We have already seen the problem in the statin example, but it is worth stating 
 
 ## The treatment--confounder feedback loop
 
-When a time-varying covariate $L_t$ satisfies two conditions simultaneously --- (1) it is affected by prior treatment $A_{t-1}$ and (2) it confounds the relationship between future treatment $A_t$ and the outcome $Y$ --- we say there is **treatment--confounder feedback**. This is also called time-dependent confounding affected by prior treatment.
+When a time-varying covariate $L_t$ satisfies two conditions simultaneously, (1) it is affected by prior treatment $A_{t-1}$ and (2) it confounds the relationship between future treatment $A_t$ and the outcome $Y$, we say there is **treatment--confounder feedback**. This is also called time-dependent confounding affected by prior treatment.
 
 In the HIV setting, CD4 count satisfies both conditions. ART raises CD4 (condition 1), and CD4 predicts both future adherence decisions and virologic failure (condition 2).
 
@@ -146,7 +146,7 @@ ggdag(dag_hiv, text = FALSE, use_labels = "label", text_size = 2.8) +
 
 ## The dilemma
 
-A standard regression model for the outcome --- whether logistic, Cox, or GEE --- faces a lose-lose choice:
+A standard regression model for the outcome (whether logistic, Cox, or GEE) faces a lose-lose choice:
 
 **If you adjust for $L_t$ (CD4 at visit $t$):** You block part of the causal pathway from $A_{t-1}$ through $L_t$ to $Y$. The coefficient on prior treatment is attenuated. You may also open collider bias paths.
 
@@ -250,7 +250,7 @@ All arrows shown equally. This is the data-generating process: baseline covariat
 
 ```{r}
 #| label: fig-dag-step1
-#| fig-cap: "Step 1 --- Full causal structure. All paths shown, no highlighting."
+#| fig-cap: "Step 1: Full causal structure. All paths shown, no highlighting."
 #| fig-width: 8
 #| fig-height: 3.5
 draw_dag_step(highlight_pairs = list())
@@ -262,7 +262,7 @@ We want to estimate the effect of treatment ($A$) on the outcome ($Y$). The dire
 
 ```{r}
 #| label: fig-dag-step2
-#| fig-cap: "Step 2 --- Causal paths of interest. A -> Y at each period, plus the mediated path A1 -> L2 -> Y."
+#| fig-cap: "Step 2: Causal paths of interest. A -> Y at each period, plus the mediated path A1 -> L2 -> Y."
 #| fig-width: 8
 #| fig-height: 3.5
 draw_dag_step(
@@ -277,7 +277,7 @@ $L_2$ is a common cause of $A_2$ and $Y$. These are the back-door paths that bia
 
 ```{r}
 #| label: fig-dag-step3
-#| fig-cap: "Step 3 --- Confounding paths. L2 is a common cause of A2 and Y --- the back-door path that biases unadjusted analysis."
+#| fig-cap: "Step 3: Confounding paths. L2 is a common cause of A2 and Y, the back-door path that biases unadjusted analysis."
 #| fig-width: 8
 #| fig-height: 3.5
 draw_dag_step(
@@ -288,11 +288,11 @@ draw_dag_step(
 
 ### Step 4: Why adjusting for $L_2$ fails
 
-Conditioning on $L_2$ (shown by the box around the node) blocks the confounding path $L_2 \to A_2$ and $L_2 \to Y$, which is good. But it *also* blocks the causal mediated path $A_1 \to L_2 \to Y$, which we wanted to keep open. The edge $L_2 \to Y$ is on *both* paths --- it is simultaneously part of the confounding problem and part of the causal effect we are trying to estimate. This is why no regression specification can solve both problems at once.
+Conditioning on $L_2$ (shown by the box around the node) blocks the confounding path $L_2 \to A_2$ and $L_2 \to Y$, which is good. But it *also* blocks the causal mediated path $A_1 \to L_2 \to Y$, which we wanted to keep open. The edge $L_2 \to Y$ is on *both* paths: it is simultaneously part of the confounding problem and part of the causal effect we are trying to estimate. This is why no regression specification can solve both problems at once.
 
 ```{r}
 #| label: fig-dag-step4
-#| fig-cap: "Step 4 --- Why adjusting for L2 fails. Red = confounding paths we want to block. Blue = causal mediated path also blocked by conditioning on L2. Purple = L2 -> Y is on BOTH paths. The box around L2 represents conditioning."
+#| fig-cap: "Step 4: Why adjusting for L2 fails. Red = confounding paths we want to block. Blue = causal mediated path also blocked by conditioning on L2. Purple = L2 -> Y is on BOTH paths. The box around L2 represents conditioning."
 #| fig-width: 8
 #| fig-height: 4.5
 
@@ -373,11 +373,11 @@ ggplot(dag_ch_df, aes(x = x, y = y)) +
 
 ### Step 5: The feedback loop
 
-The reason $L_2$ is both a confounder and a mediator is the **feedback loop**: $A_1 \to L_2 \to A_2$. Prior treatment affects the time-varying confounder, which in turn affects future treatment. This is the defining structure of time-dependent confounding affected by prior treatment. No regression specification --- however cleverly you choose your covariates --- can resolve this.
+The reason $L_2$ is both a confounder and a mediator is the **feedback loop**: $A_1 \to L_2 \to A_2$. Prior treatment affects the time-varying confounder, which in turn affects future treatment. This is the defining structure of time-dependent confounding affected by prior treatment. No regression specification, however cleverly you choose your covariates, can resolve this.
 
 ```{r}
 #| label: fig-dag-step5
-#| fig-cap: "Step 5 --- The feedback loop. A1 -> L2 -> A2 is the path that makes L2 simultaneously a confounder and a mediator."
+#| fig-cap: "Step 5: The feedback loop. A1 -> L2 -> A2 is the path that makes L2 simultaneously a confounder and a mediator."
 #| fig-width: 8
 #| fig-height: 3.5
 draw_dag_step(
@@ -400,7 +400,7 @@ Generalized estimating equations (GEE) and linear mixed models are standard tool
 
 A natural response to the problems above is: "What if I just adjust for baseline covariates $W$ and leave time-varying covariates out of the regression?" This avoids the mediator-blocking problem (since we never condition on $L_t$), and in some cases the resulting estimates can appear surprisingly close to the causal truth. But this apparent success is misleading for several reasons.
 
-**The estimand is different.** A regression of $Y$ on $\bar{A}$ and $W$ --- even when combined with G-computation (standardization) --- does not target the same quantity as the causal interventional risk $E[Y(\bar{a})]$. What the regression converges to in infinite data is a *regression oracle*: the best prediction of $Y$ given treatment and baseline covariates, marginalized over $W$. This is not the same as the counterfactual quantity that integrates over the interventional distribution of time-varying covariates.
+**The estimand is different.** A regression of $Y$ on $\bar{A}$ and $W$, even when combined with G-computation (standardization), does not target the same quantity as the causal interventional risk $E[Y(\bar{a})]$. What the regression converges to in infinite data is a *regression oracle*: the best prediction of $Y$ given treatment and baseline covariates, marginalized over $W$. This is not the same as the counterfactual quantity that integrates over the interventional distribution of time-varying covariates.
 
 **Coincidental agreement when baseline confounding dominates.** When baseline covariates explain most of the confounding and the time-varying feedback is weak, the regression oracle can happen to be close to the causal truth. This is because with weak feedback, the distribution of $L_t$ under the hypothetical intervention is similar to its observed distribution. The agreement is a coincidence of the DGP, not a property of the method.
 
@@ -417,7 +417,7 @@ To formalize the causal question, we need notation for hypothetical treatment se
 
 Let $\bar{A} = (A_1, A_2, \ldots, A_T)$ denote the observed treatment history across $T$ visits, and let $\bar{L} = (L_1, \ldots, L_T)$ denote the observed time-varying confounders. Let $\bar{a} = (a_1, \ldots, a_T)$ denote a specific hypothetical treatment sequence. The potential outcome $Y(\bar{a})$ is the outcome that would have been observed if the patient had followed treatment sequence $\bar{a}$, regardless of what actually happened.
 
-A **static regime** assigns the same treatment at every visit regardless of patient history. For instance, $\bar{a} = (1, 1, \ldots, 1)$ means "always maintain high adherence." A **dynamic regime** lets the treatment at each visit depend on the evolving covariate history: $a_t = d_t(\bar{L}_t, \bar{A}_{t-1}, W)$. A **stochastic regime** does not assign a specific treatment value but instead modifies the probability of treatment --- for example, increasing the probability of high adherence by 20 percentage points at each visit.
+A **static regime** assigns the same treatment at every visit regardless of patient history. For instance, $\bar{a} = (1, 1, \ldots, 1)$ means "always maintain high adherence." A **dynamic regime** lets the treatment at each visit depend on the evolving covariate history: $a_t = d_t(\bar{L}_t, \bar{A}_{t-1}, W)$. A **stochastic regime** does not assign a specific treatment value but instead modifies the probability of treatment (for example, increasing the probability of high adherence by 20 percentage points at each visit).
 
 The canonical estimand in the HIV example is the average counterfactual outcome under sustained high adherence versus the observed adherence pattern:
 
@@ -438,7 +438,7 @@ The potential outcome $Y(\bar{a})$ is a counterfactual quantity. To estimate it 
 $$
 Y(\bar{a}) \perp\!\!\!\perp A_t \mid \bar{L}_t, \bar{A}_{t-1}, W \quad \text{for all } t.
 $$
-This says that, conditional on everything we have measured up to visit $t$, treatment assignment at visit $t$ is as good as random. In practice, this requires that we have measured every confounder that influences both the treatment decision and the outcome at every visit. Unmeasured confounders --- substance use severity, housing instability, clinic-specific prescribing culture --- that affect both adherence and virologic failure would violate this assumption.
+This says that, conditional on everything we have measured up to visit $t$, treatment assignment at visit $t$ is as good as random. In practice, this requires that we have measured every confounder that influences both the treatment decision and the outcome at every visit. Unmeasured confounders (substance use severity, housing instability, clinic-specific prescribing culture) that affect both adherence and virologic failure would violate this assumption.
 
 **Sequential positivity.** Every treatment level must be possible at every visit for every observed covariate history:
 $$
@@ -459,9 +459,9 @@ $$
 
 This is a nested integral (or sum) over all possible covariate histories. It says: predict the outcome under the hypothetical treatment sequence, then average over the distribution of time-varying covariates as they would evolve under that treatment sequence.
 
-Standard regression cannot compute this quantity because it conditions on the time-varying covariates rather than integrating over their interventional distribution. The class of methods that can --- G-computation, inverse probability of treatment weighting (IPTW), and targeted minimum loss-based estimation (TMLE) --- are collectively called **g-methods**. They share the property of respecting the temporal ordering of treatment and confounders, conditioning on time-varying covariates where they act as confounders and integrating over them where they act as mediators.
+Standard regression cannot compute this quantity because it conditions on the time-varying covariates rather than integrating over their interventional distribution. The class of methods that can (G-computation, inverse probability of treatment weighting (IPTW), and targeted minimum loss-based estimation (TMLE)) are collectively called **g-methods**. They share the property of respecting the temporal ordering of treatment and confounders, conditioning on time-varying covariates where they act as confounders and integrating over them where they act as mediators.
 
-The three main g-methods --- each introduced for the point-treatment case in [Chapters 2.1--2.3](02-01-gcomputation.qmd) --- each have strengths and limitations in the longitudinal setting:
+The three main g-methods, each introduced for the point-treatment case in [Chapters 2.1--2.3](02-01-gcomputation.qmd), each have strengths and limitations in the longitudinal setting:
 
 | Method | Core idea | Main limitation |
 |--------|-----------|----------------|
@@ -488,7 +488,7 @@ Both approaches build on the identification assumptions laid out in this chapter
 
 ## The forgiveness curve and the counterfactual risk surface
 
-A unifying concept across both L-TMLE and LMTP is the **forgiveness curve**: the mapping from a sustained adherence level to the counterfactual failure risk $E[Y(\bar{a})]$. Each point on this curve answers the question "What would the failure probability be if everyone maintained adherence at level $a$ throughout follow-up?" A drug with a flatter forgiveness curve is more "forgiving" of sub-optimal adherence --- patients can miss some doses without a large increase in failure risk.
+A unifying concept across both L-TMLE and LMTP is the **forgiveness curve**: the mapping from a sustained adherence level to the counterfactual failure risk $E[Y(\bar{a})]$. Each point on this curve answers the question "What would the failure probability be if everyone maintained adherence at level $a$ throughout follow-up?" A drug with a flatter forgiveness curve is more "forgiving" of sub-optimal adherence, meaning patients can miss some doses without a large increase in failure risk.
 
 Static regimes (L-TMLE with categories like "always high" vs "always low"), LMTP distribution shifts, and quantile-matching interventions are all functions of the same underlying counterfactual risk surface. They differ in *which* hypothetical adherence distributions they evaluate, but they all require the same identification assumptions and the same g-method machinery.
 
@@ -511,7 +511,7 @@ Monte Carlo results across 200 iterations under the strong TV confounding DGP il
 - **Regression adjusting for time-varying covariates ($W + L$):** Bias increases to approximately 15 percentage points. Conditioning on L blocks the mediated causal path and amplifies bias, exactly as predicted by the DAG analysis in this chapter.
 - **L-TMLE:** Bias of approximately 6 percentage points with appropriate confidence interval coverage. L-TMLE correctly integrates over the interventional distribution of L rather than conditioning on it.
 
-The **estimand diagnostic** --- comparing what each method converges to under infinite data --- reveals that the regression methods target fundamentally different quantities from the causal interventional risk. The regression oracle (what the regression would estimate with infinite data and a correctly specified parametric model) differs from the G-computation / L-TMLE oracle, confirming that the bias is not due to finite-sample noise or model misspecification but to a mismatch between the statistical estimand and the causal estimand.
+The **estimand diagnostic**, comparing what each method converges to under infinite data, reveals that the regression methods target fundamentally different quantities from the causal interventional risk. The regression oracle (what the regression would estimate with infinite data and a correctly specified parametric model) differs from the G-computation / L-TMLE oracle, confirming that the bias is not due to finite-sample noise or model misspecification but to a mismatch between the statistical estimand and the causal estimand.
 
 These simulation results are developed in full in the Monte Carlo analysis companion, which also explores how the bias pattern changes as the strength of time-varying confounding varies continuously from weak to strong.
 
@@ -519,7 +519,7 @@ These simulation results are developed in full in the Monte Carlo analysis compa
 
 ## Connection to the running case study
 
-The HAART cohort introduced in the [Running Case Study](00-case-study.qmd) is a textbook instance of the treatment--confounder feedback described in this chapter. In `haartdat`, the variable `cd4.sqrt` plays the role of $L_t$: it responds to prior HAART (`haartind`) and simultaneously confounds future treatment decisions. The `dropout` variable creates informative censoring that depends on both CD4 and treatment status. Every concept in this chapter --- the regression trap, the feedback loop, the need for G-methods --- applies directly to the HAART data. The simulated examples here are designed to make the mechanics visible; the HAART cohort demonstrates that these issues arise in real clinical data.
+The HAART cohort introduced in the [Running Case Study](00-case-study.qmd) is a textbook instance of the treatment--confounder feedback described in this chapter. In `haartdat`, the variable `cd4.sqrt` plays the role of $L_t$: it responds to prior HAART (`haartind`) and simultaneously confounds future treatment decisions. The `dropout` variable creates informative censoring that depends on both CD4 and treatment status. Every concept in this chapter (the regression trap, the feedback loop, the need for G-methods) applies directly to the HAART data. The simulated examples here are designed to make the mechanics visible; the HAART cohort demonstrates that these issues arise in real clinical data.
 
 ---
 
@@ -535,14 +535,14 @@ Because time-varying confounders that are affected by prior treatment sit on the
 <details>
 <summary><strong>Q2. What does "sequential exchangeability" require that ordinary exchangeability does not?</strong></summary>
 
-Ordinary (point-treatment) exchangeability requires that treatment is unconfounded conditional on baseline covariates measured at a single time point. **Sequential exchangeability** requires this to hold **at every time point**, conditional on the entire covariate and treatment history up to that point. In practice, this means you must measure every confounder that influences both treatment decisions and the outcome *at every visit* --- a much harder bar to clear, especially when physician judgment, symptom severity, or patient preferences evolve over time and may not be captured in the data.
+Ordinary (point-treatment) exchangeability requires that treatment is unconfounded conditional on baseline covariates measured at a single time point. **Sequential exchangeability** requires this to hold **at every time point**, conditional on the entire covariate and treatment history up to that point. In practice, this means you must measure every confounder that influences both treatment decisions and the outcome *at every visit*, a much harder bar to clear, especially when physician judgment, symptom severity, or patient preferences evolve over time and may not be captured in the data.
 
 </details>
 
 <details>
 <summary><strong>Q3. GEE and mixed models are standard tools for longitudinal data. Do they solve the time-varying confounding problem?</strong></summary>
 
-No. Both GEE and linear mixed models condition on time-varying covariates in the same way as ordinary regression. If those covariates are affected by prior treatment, the same bias arises. The longitudinal correlation structure that GEE and mixed models handle well is a different issue entirely --- it concerns the within-subject dependence of residuals, not the causal structure of the treatment--confounder feedback loop.
+No. Both GEE and linear mixed models condition on time-varying covariates in the same way as ordinary regression. If those covariates are affected by prior treatment, the same bias arises. The longitudinal correlation structure that GEE and mixed models handle well is a different issue entirely: it concerns the within-subject dependence of residuals, not the causal structure of the treatment--confounder feedback loop.
 
 </details>
 

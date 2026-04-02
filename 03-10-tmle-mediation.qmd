@@ -24,7 +24,7 @@ library(ggplot2)
 
 # Why This Matters
 
-Readers who have worked through the LMTP adherence case study in [Chapters 3.3--3.3b](03-03-longitudinal-case-study.qmd) will recognize the idea of decomposing drug effects into adherence-mediated and pharmacological components. That decomposition was *informal* --- it used distribution shifts to approximate a controlled direct effect. This chapter provides the formal mediation framework that places those intuitions on rigorous causal footing, with proper identification conditions and semiparametric efficient estimation.
+Readers who have worked through the LMTP adherence case study in [Chapters 3.3--3.3b](03-03-longitudinal-case-study.qmd) will recognize the idea of decomposing drug effects into adherence-mediated and pharmacological components. That decomposition was *informal*: it used distribution shifts to approximate a controlled direct effect. This chapter provides the formal mediation framework that places those intuitions on rigorous causal footing, with proper identification conditions and semiparametric efficient estimation.
 
 In pharmacoepidemiology, we often want to know not just **whether** a drug works, but **how** it works. Does dapagliflozin reduce cardiovascular events because it lowers blood pressure, because it improves glucose control, or through some other pathway? Mediation analysis decomposes a total causal effect into the part that operates through a specified intermediate variable (the indirect effect) and the part that does not (the direct effect). Getting this decomposition right requires careful attention to the estimand, the causal model, and the assumptions that connect the two. This chapter walks through the logic and implementation of TMLE-based mediation using the `crumble` R package.
 
@@ -534,12 +534,12 @@ fit_natural <- crumble(
   control   = crumble_control(crossfit_folds = 2L, epochs = 20L)  # <7>
 )
 ```
-1. Baseline confounders of the $A \to Y$, $A \to M$, and $M \to Y$ relationships; must all be measured **before** treatment — do not include post-treatment variables here
+1. Baseline confounders of the $A \to Y$, $A \to M$, and $M \to Y$ relationships; must all be measured **before** treatment; do not include post-treatment variables here
 2. The mediator(s) on the causal pathway from $A$ to $Y$; `crumble` models $P(M \mid A, W)$ and uses it in the Riesz representer estimation
 3. `d0` and `d1` are **intervention functions**: they take the data and treatment column name and return the counterfactual treatment value for each observation; `d0` sets everyone to the reference level (treatment = "1", i.e., control), `d1` sets everyone to the active level (treatment = "2")
-4. `effect = "N"` requests **natural direct and indirect effects (NDE/NIE)**; requires the cross-world independence assumption — no treatment-induced confounders of $M \to Y$; use `"RI"` or `"RT"` if intermediate confounders exist
+4. `effect = "N"` requests **natural direct and indirect effects (NDE/NIE)**; requires the cross-world independence assumption (no treatment-induced confounders of $M \to Y$); use `"RI"` or `"RT"` if intermediate confounders exist
 5. `learners`: the Super Learner library used for all nuisance models (outcome $E[Y \mid A, M, W]$, mediator $P(M \mid A, W)$, treatment $P(A \mid W)$); `"earth"` (MARS) and `"ranger"` (random forest) capture nonlinear mediator-outcome relationships
-6. `nn_module = sequential_module()`: a neural network used to estimate the **Riesz representer** — a density ratio of the mediator distribution under treatment vs. control; this avoids explicit density estimation which is difficult in high dimensions
+6. `nn_module = sequential_module()`: a neural network used to estimate the **Riesz representer**, a density ratio of the mediator distribution under treatment vs. control; this avoids explicit density estimation which is difficult in high dimensions
 7. `crumble_control(crossfit_folds = 2L, epochs = 20L)`: controls cross-fitting (2 folds here for speed) and neural network training epochs; increase to `crossfit_folds = 10L, epochs = 100L` for production analyses
 
 ```{r}
@@ -565,7 +565,7 @@ fit_ri <- crumble(
   control   = crumble_control(crossfit_folds = 2L, epochs = 20L)
 )
 ```
-1. `moc` (**mediator-outcome confounder**): the variable "snack" is affected by treatment `A` and confounds the `M → Y` path; by specifying it here, `crumble` models it as an intermediate confounder and adjusts the decomposition accordingly — omitting it would bias the indirect effect
+1. `moc` (**mediator-outcome confounder**): the variable "snack" is affected by treatment `A` and confounds the `M → Y` path; by specifying it here, `crumble` models it as an intermediate confounder and adjusts the decomposition accordingly; omitting it would bias the indirect effect
 2. `effect = "RI"` requests **randomized interventional indirect effects (IDE/IIE)**: instead of cross-world counterfactuals, these draw the mediator from its distribution under control $P(M \mid A=d_0, W)$, avoiding the cross-world independence assumption while still identifying the mediated pathway
 
 ```{r}
@@ -638,8 +638,8 @@ fit_sim_N <- crumble(
   control   = crumble_control(crossfit_folds = 2L, epochs = 5L)
 )
 ```
-1. `d0_fn` and `d1_fn` were defined above as lambda functions that set treatment to `"0"` (control) or `"1"` (treated) for all observations; treatment must be a factor for `crumble` — the levels define what `d0` and `d1` can return
-2. `effect = "N"` fits natural effects — valid here only if the DGP's intermediate confounder $Z$ can be ignored or is absent; since our DGP includes $Z$, this estimate will be biased relative to the true NDE/NIE (compare to `fit_sim_RT`)
+1. `d0_fn` and `d1_fn` were defined above as lambda functions that set treatment to `"0"` (control) or `"1"` (treated) for all observations; treatment must be a factor for `crumble`; the levels define what `d0` and `d1` can return
+2. `effect = "N"` fits natural effects, valid here only if the DGP's intermediate confounder $Z$ can be ignored or is absent; since our DGP includes $Z$, this estimate will be biased relative to the true NDE/NIE (compare to `fit_sim_RT`)
 
 ```{r}
 #| eval: false
@@ -667,7 +667,7 @@ fit_sim_RT <- crumble(
   control   = crumble_control(crossfit_folds = 2L, epochs = 5L)
 )
 ```
-1. `moc = "Z"`: specifies the **measured intermediate confounder** (blood pressure change in the pharmacoepi framing) — the variable affected by treatment $A$ that confounds the $M \to Y$ path; `crumble` now models $P(Z \mid A, W)$ and uses it in the recanting-twins identification formula
+1. `moc = "Z"`: specifies the **measured intermediate confounder** (blood pressure change in the pharmacoepi framing), the variable affected by treatment $A$ that confounds the $M \to Y$ path; `crumble` now models $P(Z \mid A, W)$ and uses it in the recanting-twins identification formula
 2. `effect = "RT"` (recanting twins) is the appropriate estimand when `moc` is present: it correctly handles the $A \to Z \to M$ and $Z \to Y$ paths, producing valid path-specific effect decompositions that the natural effects estimator cannot identify when $Z$ exists
 
 ```{r}
