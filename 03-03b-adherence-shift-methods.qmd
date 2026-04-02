@@ -1,19 +1,10 @@
 ---
-title: "Four Ways to Shift an Adherence Distribution"
-subtitle: "Comparing distribution-shift interventions for a two-drug HIV cohort using LMTP"
+title: "Adherence, Forgiveness, and Distribution-Shift Interventions"
+subtitle: "Comparing drugs under realistic adherence using LMTP"
 format: html
 ---
 
 *Estimated reading time: 55 minutes*
-
-::: {.callout-note}
-## Learning objectives
-- Distinguish four types of adherence distribution shifts and the causal questions each one answers
-- Implement marginal quantile mapping, conditional quantile mapping, mean-calibrated additive shifts, and fixed additive shifts for `lmtp`
-- Compare shift estimates and explain why agreement or disagreement between approaches is informative
-- Connect shift interventions to the forgiveness curve and explain how each approach summarizes the counterfactual risk surface
-- Articulate the mediation decomposition of drug effects into adherence-mediated and pharmacological components
-:::
 
 ```{r}
 #| include: false
@@ -24,758 +15,309 @@ knitr::opts_chunk$set(
   fig.height = 4,
   fig.align = "center"
 )
-```
-
-# Overview
-
-Chapter 3.3 introduced a distribution-shift intervention using quantile mapping to compare two antiretroviral drugs under a common adherence distribution. That approach is one principled way to operationalize the question "what if Drug B patients adhered like Drug A patients?", but it is not the only way. Different shift functions encode different assumptions about what "adhering like Drug A" means, and they answer subtly different causal questions.
-
-This chapter implements four approaches on the same simulated data:
-
-1. **Marginal quantile mapping**: map Drug B adherence to the Drug A distribution via the empirical CDF.
-2. **Conditional distribution mapping**: same idea, but condition on baseline covariates so the mapping respects patient characteristics.
-3. **Mean-calibrated additive shift**: add a constant to Drug B adherence so its mean matches Drug A's.
-4. **Fixed additive shift**: increase every patient's adherence by a small fixed amount, regardless of drug.
-
-Each approach defines a different modified treatment policy for `lmtp` [@diaz2021lmtp]. We run all four, compare estimates, and explain what scientific question each one answers.
-
-
-# Simulated Data
-
-We reproduce the two-drug HIV cohort from Chapter 3.3.
-
-```{r}
 library(tidyverse)
-set.seed(2026)
-n <- 2000
-T_max <- 4
+```
 
-# --- Baseline ---
-W_age    <- rnorm(n, 38, 10)
-W_male   <- rbinom(n, 1, 0.6)
-W_cd4_bl <- pmax(50, rnorm(n, 400, 130))
-W_vl_bl  <- rnorm(n, 4.0, 0.6)
-Drug     <- rbinom(n, 1, 0.5)
 
-# --- Containers ---
-L_cd4  <- matrix(NA, n, T_max)
-L_vl   <- matrix(NA, n, T_max)
-A_adh  <- matrix(NA, n, T_max)
-C_cens <- matrix(0,  n, T_max)
-alive  <- rep(TRUE, n)
+# What this chapter is about
 
-for (t in 1:T_max) {
-  if (t == 1) {
-    cd4_prev <- W_cd4_bl
-    vl_prev  <- W_vl_bl
-    adh_prev <- ifelse(Drug == 1, rbeta(n, 8, 2), rbeta(n, 5, 3))
-  } else {
-    cd4_prev <- L_cd4[, t - 1]
-    vl_prev  <- L_vl[, t - 1]
-    adh_prev <- A_adh[, t - 1]
-    cd4_prev[is.na(cd4_prev)] <- W_cd4_bl[is.na(cd4_prev)]
-    vl_prev[is.na(vl_prev)]   <- W_vl_bl[is.na(vl_prev)]
-    adh_prev[is.na(adh_prev)] <- 0.5
+The previous chapters introduced longitudinal TMLE for static interventions ("always maintain high adherence") and LMTP for modified treatment policies. This chapter brings those tools to bear on a clinically important question: how do two antiretroviral drugs compare when we account for realistic adherence patterns?
+
+The key concept is **regimen forgiveness**: a drug is forgiving if patients can miss some doses without a large increase in treatment failure. A drug with a flat adherence-response curve is forgiving; one with a steep curve is not. Forgiveness is a causal quantity, not an observable property of the data, because the adherence-response relationship is confounded by time-varying health status.
+
+We use a simulated two-drug HIV cohort designed to capture the essential features of the adherence problem: treatment-confounder feedback between adherence and health, differential forgiveness across drugs, and the positivity challenges that arise when targeting extreme adherence levels. The simulation is calibrated to real pharmacoepidemiologic settings and uses continuous proportion of days covered (PDC) as the adherence measure.
+
+
+# The clinical question
+
+Consider two antiretroviral regimens for HIV treatment:
+
+- **Drug A** (e.g., a long-acting formulation): pharmacologically forgiving, meaning that occasional missed doses have a smaller impact on viral suppression.
+- **Drug B** (e.g., a short half-life oral regimen): less forgiving, where missed doses lead to faster viral rebound.
+
+In practice, both drugs are prescribed and adherence varies. The adherence distributions may differ across drugs (one may be easier to take consistently), and the clinical consequences of low adherence differ (one may be more forgiving). The causal question is: **how much of the observed outcome difference between drugs is due to adherence patterns versus pharmacological forgiveness?**
+
+This question requires separating three components:
+
+1. **Adherence distribution**: Do Drug A and Drug B patients adhere at different rates?
+2. **Forgiveness**: At any given adherence level, does one drug produce better outcomes than the other?
+3. **Adherence-mediated effect**: How much of the total drug difference operates through the adherence pathway?
+
+Each component requires longitudinal causal methods because adherence and health co-evolve over time.
+
+
+# The data-generating process
+
+We use a simulation that generates longitudinal data with 90-day blocks over one year (K = 4 blocks). The DGP produces treatment-confounder feedback: poor adherence worsens health (higher L), and worse health reduces future adherence. Drug A is more forgiving at low adherence levels, encoded through a drug-by-adherence interaction in the failure hazard.
+
+```{r}
+#| label: sim-dgp
+# Simplified DGP for the adherence forgiveness simulation
+# Based on sim_v4_dgp.R from the adherence simulation project
+
+simulate_adherence_data <- function(n = 500, K = 4, seed = 2026) {
+  set.seed(seed)
+
+  # Parameters
+  alpha0 <- 1.30; alphaA <- -0.35; alphaW <- -0.20; alphaL <- -0.30
+  rho <- 0.45; sigma_u <- 0.50; sigma_e <- 0.65
+  beta0 <- 0.0; betaW <- 0.30; betaA <- 0.0; betaLag <- 0.35; betaP <- 0.80
+  sigma_L <- 0.50
+  gamma0 <- -3.80; gammaL <- 0.50; gammaW <- 0.30
+  gammaP <- 2.50; gammaA <- 0.0; gammaAP <- -1.20
+
+  # Baseline
+  W0 <- rnorm(n)
+  A0 <- rbinom(n, 1, 0.5)  # 1 = Drug A, 0 = Drug B
+  u_i <- rnorm(n, 0, sigma_u)
+  mu_i <- alpha0 + alphaA * A0 + alphaW * W0 + u_i
+
+  # Storage
+  L_mat <- PDC_mat <- matrix(NA_real_, n, K)
+  Y_mat <- matrix(0L, n, K)
+  eta_prev <- rep(NA_real_, n)
+  failed <- rep(FALSE, n)
+
+  for (t in 1:K) {
+    # Time-varying health confounder L_t
+    noise_L <- rnorm(n, 0, sigma_L)
+    if (t == 1) {
+      L_mat[, t] <- beta0 + betaW * W0 + betaA * A0 + noise_L
+    } else {
+      L_mat[, t] <- beta0 + betaW * W0 + betaA * A0 +
+        betaLag * L_mat[, t-1] + betaP * (1 - PDC_mat[, t-1]) + noise_L
+    }
+
+    # Adherence (PDC) on logit scale with AR(1) persistence
+    noise_e <- rnorm(n, 0, sigma_e)
+    if (t == 1) {
+      eta_t <- mu_i + noise_e
+    } else {
+      eta_t <- (1 - rho) * mu_i + rho * eta_prev + alphaL * L_mat[, t-1] + noise_e
+    }
+    PDC_mat[, t] <- plogis(eta_t)
+    eta_prev <- eta_t
+
+    # Virologic failure (absorbing)
+    at_risk <- !failed
+    if (any(at_risk)) {
+      lp <- gamma0 + gammaL * L_mat[at_risk, t] + gammaW * W0[at_risk] +
+        gammaP * (1 - PDC_mat[at_risk, t]) + gammaA * A0[at_risk] +
+        gammaAP * A0[at_risk] * (1 - PDC_mat[at_risk, t])
+      new_fail <- rbinom(sum(at_risk), 1, plogis(lp)) == 1L
+      idx <- which(at_risk)
+      Y_mat[idx[new_fail], t] <- 1L
+      failed[idx[new_fail]] <- TRUE
+    }
+    if (t > 1) Y_mat[Y_mat[, t-1] == 1L, t] <- 1L
   }
 
-  L_cd4[, t] <- pmax(50,
-    cd4_prev + rnorm(n, mean = 40 * adh_prev + 10 * Drug - 15 * (1 - adh_prev), sd = 35) -
-    0.3 * (W_age - 38)
-  )
-
-  L_vl[, t] <- pmax(0,
-    vl_prev + rnorm(n, mean = -1.5 * adh_prev - 0.2 * Drug + 0.3 * (1 - adh_prev), sd = 0.3)
-  )
-
-  lp_adh <- 0.8 * Drug + 0.3 * adh_prev +
-    0.001 * (L_cd4[, t] - 400) - 0.2 * L_vl[, t] -
-    0.005 * (W_age - 38) + 0.1 * W_male + rnorm(n, 0, 0.3)
-  A_adh[, t] <- plogis(lp_adh)
-
-  # Censoring indicator: lmtp expects 1 = uncensored (still observed), 0 = censored
-  lp_cens <- -4.5 - 0.002 * L_cd4[, t] + 0.4 * L_vl[, t] -
-    0.8 * A_adh[, t] + 0.3 * (1 - Drug)
-  censored_now <- rbinom(n, 1, plogis(lp_cens)) * alive
-  C_cens[, t] <- 1 - censored_now  # flip: 1=observed, 0=censored
-  alive <- alive & (censored_now == 0)
-
-  if (t < T_max) {
-    idx_gone <- !alive
-    A_adh[idx_gone, (t + 1):T_max]  <- NA
-    L_cd4[idx_gone, (t + 1):T_max]  <- NA
-    L_vl[idx_gone, (t + 1):T_max]   <- NA
-    C_cens[idx_gone, (t + 1):T_max] <- NA
+  # Assemble wide data
+  df <- data.frame(id = 1:n, W0 = W0, A0 = A0)
+  for (t in 1:K) {
+    df[[paste0("L_", t)]]   <- L_mat[, t]
+    df[[paste0("PDC_", t)]] <- PDC_mat[, t]
+    df[[paste0("Y_", t)]]   <- Y_mat[, t]
   }
+  df$Y_final <- as.integer(rowSums(Y_mat) > 0)
+  attr(df, "K") <- K
+  df
 }
 
-# --- Outcome ---
-cum_adh   <- rowMeans(A_adh, na.rm = TRUE)
-final_vl  <- apply(L_vl, 1, function(x) { v <- x[!is.na(x)]; if (length(v)) tail(v, 1) else NA })
-final_cd4 <- apply(L_cd4, 1, function(x) { v <- x[!is.na(x)]; if (length(v)) tail(v, 1) else NA })
+dat <- simulate_adherence_data(n = 500, K = 4, seed = 2026)
+```
 
-lp_y <- -1.0 - 2.0 * cum_adh + 0.5 * final_vl - 0.002 * final_cd4 -
-  0.3 * Drug + 0.3 * W_vl_bl
-Y <- rbinom(n, 1, plogis(lp_y))
-Y[!alive] <- NA
+The key structural features of this DGP:
 
-# --- LOCF for censored patients ---
-# lmtp handles censoring via the censoring model, but the data itself
-# must not contain NA values. Fill post-censoring columns with LOCF.
-for (t in 2:T_max) {
-  na_cd4 <- is.na(L_cd4[, t])
-  na_vl  <- is.na(L_vl[, t])
-  na_adh <- is.na(A_adh[, t])
-  L_cd4[na_cd4, t] <- L_cd4[na_cd4, t - 1]
-  L_vl[na_vl, t]   <- L_vl[na_vl, t - 1]
-  A_adh[na_adh, t]  <- A_adh[na_adh, t - 1]
-}
+**Treatment-confounder feedback.** Poor adherence (low PDC) at block $t-1$ worsens health ($L_t$), which then reduces adherence at block $t$ (through `alphaL`) and independently increases failure risk (through `gammaL`). This is the same feedback structure discussed in [Chapter 3.7](03-07-longitudinal-td-confounding.qmd).
 
-# --- Build analysis dataset ---
-# Do NOT include an 'id' column; lmtp uses row indices internally.
-dat_wide <- tibble(
-  Drug = Drug,
-  age = W_age, male = W_male, cd4_bl = W_cd4_bl, vl_bl = W_vl_bl
-)
-for (t in 1:T_max) {
-  dat_wide[[paste0("cd4_", t)]]  <- L_cd4[, t]
-  dat_wide[[paste0("vl_", t)]]   <- L_vl[, t]
-  dat_wide[[paste0("A_", t)]]    <- A_adh[, t]
-  dat_wide[[paste0("C_", t)]]    <- C_cens[, t]
-}
-# Outcome: set censored Y to 0 (arbitrary; censoring model handles it)
-dat_wide$Y <- ifelse(is.na(Y), 0, Y)
+**Drug-by-adherence interaction (the forgiveness mechanism).** The parameter `gammaAP = -1.20` means that Drug A's penalty for poor adherence is smaller than Drug B's. At high adherence, the two drugs perform similarly. At low adherence, Drug A is more forgiving. This interaction is what makes the forgiveness curve differ between drugs.
+
+```{r}
+#| label: fig-adherence-dist
+#| fig-cap: "PDC distributions at block 1 by drug. Drug A patients have slightly lower mean adherence (the drug assignment shifts the adherence intercept), but Drug A is more forgiving of that lower adherence."
+dat |>
+  mutate(Drug = ifelse(A0 == 1, "Drug A", "Drug B")) |>
+  ggplot(aes(x = PDC_1, fill = Drug)) +
+  geom_density(alpha = 0.4) +
+  labs(x = "PDC (block 1)", y = "Density") +
+  scale_fill_manual(values = c("Drug A" = "#228833", "Drug B" = "#EE6677")) +
+  theme_minimal()
 ```
 
 ```{r}
-# Summary
-cat("Drug A patients:", sum(Drug == 1), "\n")
-cat("Drug B patients:", sum(Drug == 0), "\n")
-cat("Censored:", sum(!alive), "(", round(100 * mean(!alive), 1), "%)\n\n")
-
-cat("Mean adherence by drug (visit 1):\n")
-cat("  Drug A:", round(mean(A_adh[Drug == 1, 1]), 3), "\n")
-cat("  Drug B:", round(mean(A_adh[Drug == 0, 1], na.rm = TRUE), 3), "\n\n")
-
-cat("Virologic failure (uncensored):\n")
-cat("  Drug A:", round(mean(Y[alive & Drug == 1]), 3), "\n")
-cat("  Drug B:", round(mean(Y[alive & Drug == 0]), 3), "\n")
+# Cohort summary
+dat |>
+  mutate(Drug = ifelse(A0 == 1, "Drug A", "Drug B")) |>
+  group_by(Drug) |>
+  summarise(
+    n = n(),
+    mean_PDC_1 = round(mean(PDC_1), 3),
+    failure_pct = round(100 * mean(Y_final), 1),
+    .groups = "drop"
+  ) |>
+  as.data.frame()
 ```
 
 
-# Common Setup for LMTP
+# Why naive adherence analysis is biased
 
-All four approaches use the same `lmtp` infrastructure. We define the shared arguments once.
+A naive analysis would stratify patients by observed adherence level and compare outcomes within strata. This is systematically biased because of treatment-confounder feedback: patients with low adherence tend to be sicker (higher $L_t$), and sicker patients have higher failure risk regardless of adherence. The naive analysis overestimates the effect of adherence because the low-adherence stratum is enriched for patients who were going to fail anyway.
 
-```{r, cache=TRUE}
+```{r}
+#| label: fig-naive-forgiveness
+#| fig-cap: "Naive (crude) adherence-outcome relationship. Each point shows the failure rate among patients with PDC in that bin during block 1. The steep relationship is partly causal and partly confounded by the treatment-confounder feedback."
+dat |>
+  mutate(
+    Drug = ifelse(A0 == 1, "Drug A", "Drug B"),
+    PDC_bin = cut(PDC_1, breaks = seq(0, 1, 0.1), include.lowest = TRUE)
+  ) |>
+  group_by(Drug, PDC_bin) |>
+  summarise(failure_rate = mean(Y_final), n = n(), .groups = "drop") |>
+  filter(n >= 5) |>
+  ggplot(aes(x = PDC_bin, y = failure_rate, color = Drug, group = Drug)) +
+  geom_point(size = 2) +
+  geom_line() +
+  labs(x = "PDC bin (block 1)", y = "Failure rate (crude)") +
+  scale_color_manual(values = c("Drug A" = "#228833", "Drug B" = "#EE6677")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The crude curves overestimate the adherence effect because they compare patients who are not exchangeable. The causal adherence-response curve (the forgiveness curve) requires g-methods that account for the feedback between adherence and health. The L-TMLE chapter ([Chapter 3.9](03-09-illustrated-ltmle.qmd)) showed how to estimate static adherence regimes; here we focus on the feasible shift approach using LMTP.
+
+
+# LMTP estimation: feasible adherence shifts
+
+Rather than targeting extreme static interventions ("force everyone to perfect adherence"), which violate positivity for patients who cannot realistically achieve high adherence, we use LMTP to define feasible adherence shifts [@diaz2021lmtp].
+
+The shift function increases each patient's PDC by a fixed amount (e.g., 10 percentage points), capped at 1.0. This stays within the support of the observed data because no patient is assigned an adherence level that is impossible given their covariate history.
+
+```{r}
+#| label: lmtp-estimation
+#| eval: false
 library(lmtp)
 
-trt_vars  <- paste0("A_", 1:T_max)
-cens_vars <- paste0("C_", 1:T_max)
-baseline  <- c("Drug", "age", "male", "cd4_bl", "vl_bl")
-time_vary <- lapply(1:T_max, function(t) c(paste0("cd4_", t), paste0("vl_", t)))
+# Prepare variable names
+K <- 4
+trt_vars     <- paste0("PDC_", 1:K)
+outcome_vars <- paste0("Y_", 1:K)
+baseline     <- c("W0", "A0")
+time_vary    <- lapply(1:K, function(t) paste0("L_", t))
 
-# Shared learner libraries
-sl_outcome <- c("SL.glm", "SL.mean")
-sl_trt     <- c("SL.glm", "SL.mean")
-n_folds    <- 2
-
-# Identity shift for the reference (observed) estimate.
-# shift = NULL can behave unexpectedly in some lmtp versions;
-# an explicit identity function is safer.
-shift_identity <- function(data, trt) data[[trt]]
-```
-
-::: {.callout-note}
-## Note on LMTP API version
-
-This chapter uses `lmtp_sdr()` throughout, which is the sequentially doubly robust estimator. The V4 simulation code uses `lmtp_tmle()` instead. Both functions accept identical arguments (`data`, `trt`, `outcome`, `baseline`, `time_vary`, `cens`, `shift`, `mtp`, `outcome_type`, `folds`, `learners_trt`, `learners_outcome`) and target the same estimand. The choice between them is a matter of estimator preference: `lmtp_tmle()` uses a TMLE-based targeting step, while `lmtp_sdr()` uses a one-step correction. For most practical purposes, they produce similar results.
-
-All shift functions in this chapter use the correct `(data, trt)` signature, and `lmtp_contrast()` calls use the current syntax: `lmtp_contrast(fit_shifted, ref = fit_observed, type = "additive")`. The `mtp = TRUE` flag is required whenever the shift function depends on the natural treatment value.
-
-For survival outcomes (not used in this chapter but relevant to the V4 analysis), `lmtp` returns P(survival), so risk is computed as `1 - theta`. Use `lmtp::tidy(fit)` to extract results as a tidy data frame.
-:::
-
-We also estimate the **observed (unshifted) outcome** as the reference for all contrasts.
-
-```{r, cache=TRUE}
-# Reference: no intervention (natural course)
-fit_observed <- lmtp_sdr(
-  data = dat_wide,
-  trt = trt_vars,
-  outcome = "Y",
-  baseline = baseline,
-  time_vary = time_vary,
-  cens = cens_vars,
-  shift = shift_identity,
-  mtp = TRUE,
-  outcome_type = "binomial",
-  learners_outcome = sl_outcome,
-  learners_trt = sl_trt,
-  folds = n_folds
-)
-cat("Observed (no shift) estimate:", round(fit_observed$estimate@x, 4), "\n")
-```
-
-
----
-
-# Approach 1: Marginal Quantile Mapping
-
-## How it works
-
-For each Drug B patient at each visit, we find where their adherence falls in the Drug B empirical CDF and map it to the corresponding quantile of the Drug A empirical CDF. A Drug B patient at the 30th percentile of Drug B adherence gets mapped to the 30th percentile of Drug A adherence. Drug A patients are left unchanged.
-
-Formally, for Drug B patient $i$ at visit $t$:
-$$
-d_1(a_{it}) = F_{A|D=A}^{-1}\big(F_{A|D=B}(a_{it})\big)
-$$
-
-where $F_{A|D=k}$ is the marginal CDF of adherence among drug $k$ patients.
-
-This is a rank-preserving transformation: a patient who was relatively compliant among Drug B patients stays relatively compliant, but their absolute adherence level shifts to reflect the Drug A distribution.
-
-## What question it answers
-
-*What would happen to Drug B patients' outcomes if their entire adherence distribution (the shape, spread, and location) were transplanted from the Drug A population?*
-
-This captures both the higher mean and any differences in variance or skewness between the two distributions. It asks for a wholesale distributional replacement.
-
-## Implementation
-
-```{r}
-# Precompute marginal ECDFs and quantile functions by drug and time
-ecdf_B_marginal <- list()
-qfun_A_marginal <- list()
-
-for (t in 1:T_max) {
-  col <- paste0("A_", t)
-  vals_A <- dat_wide[[col]][dat_wide$Drug == 1 & !is.na(dat_wide[[col]])]
-  vals_B <- dat_wide[[col]][dat_wide$Drug == 0 & !is.na(dat_wide[[col]])]
-  ecdf_B_marginal[[t]] <- ecdf(vals_B)
-  # Store sorted Drug A values for quantile lookup
-  qfun_A_marginal[[t]] <- sort(vals_A)
+# Additive shift: increase PDC by 10 percentage points
+shift_up <- function(data, trt) {
+  pmin(data[[trt]] + 0.10, 1.0)
 }
 
-shift_marginal_qmap <- function(data, trt) {
-  t_idx <- as.integer(gsub("A_", "", trt))
+# Natural course (no intervention)
+shift_natural <- function(data, trt) data[[trt]]
+
+# Estimate outcomes under each regime
+fit_shifted <- lmtp_tmle(
+  data = dat, trt = trt_vars, outcome = outcome_vars,
+  baseline = baseline, time_vary = time_vary,
+  shift = shift_up, mtp = TRUE, outcome_type = "survival",
+  learners_outcome = c("SL.glm", "SL.mean"),
+  learners_trt = c("SL.glm", "SL.mean"),
+  folds = 2
+)
+
+fit_natural <- lmtp_tmle(
+  data = dat, trt = trt_vars, outcome = outcome_vars,
+  baseline = baseline, time_vary = time_vary,
+  shift = shift_natural, mtp = TRUE, outcome_type = "survival",
+  learners_outcome = c("SL.glm", "SL.mean"),
+  learners_trt = c("SL.glm", "SL.mean"),
+  folds = 2
+)
+
+# Contrast: effect of shifting adherence up by 10pp
+contrast <- lmtp_contrast(fit_shifted, ref = fit_natural, type = "additive")
+contrast
+```
+
+The contrast estimates how much the failure rate would change if every patient's adherence increased by 10 percentage points at each visit. Because `lmtp` uses `outcome_type = "survival"`, it returns $P(\text{survive})$, so the risk is $1 - \theta$. A negative risk difference means the shift reduces failure.
+
+
+# Alternative shift approaches
+
+The additive shift is one way to operationalize "what if adherence were better?" Other approaches answer subtly different questions.
+
+## Quantile matching: what if Drug B adhered like Drug A?
+
+This maps each Drug B patient's adherence to the corresponding quantile of Drug A's distribution. A patient at the 30th percentile of Drug B adherence gets mapped to the 30th percentile of Drug A adherence. This answers: what would happen to Drug B's outcomes if its patients had Drug A's adherence profile?
+
+```{r}
+#| label: quantile-shift
+#| eval: false
+# Build quantile-matching shift function
+ecdf_B <- list()
+sorted_A <- list()
+for (t in 1:K) {
+  col <- paste0("PDC_", t)
+  ecdf_B[[t]] <- ecdf(dat[[col]][dat$A0 == 0])
+  sorted_A[[t]] <- sort(dat[[col]][dat$A0 == 1])
+}
+
+shift_match_A <- function(data, trt) {
+  t_idx <- as.integer(gsub("PDC_", "", trt))
   a_obs <- data[[trt]]
   a_shifted <- a_obs
-
-  is_b <- data$Drug == 0 & !is.na(a_obs)
+  is_b <- data$A0 == 0
   if (any(is_b)) {
-    p_rank <- ecdf_B_marginal[[t_idx]](a_obs[is_b])
+    p_rank <- ecdf_B[[t_idx]](a_obs[is_b])
     p_rank <- pmax(0.01, pmin(0.99, p_rank))
-    sorted_A <- qfun_A_marginal[[t_idx]]
-    # Quantile function: index into sorted Drug A values
-    a_shifted[is_b] <- sorted_A[pmin(length(sorted_A),
-                                      ceiling(p_rank * length(sorted_A)))]
+    a_shifted[is_b] <- sorted_A[[t_idx]][
+      pmin(length(sorted_A[[t_idx]]),
+           ceiling(p_rank * length(sorted_A[[t_idx]])))
+    ]
   }
   a_shifted
 }
 ```
 
-```{r, cache=TRUE}
-fit_qmap <- lmtp_sdr(
-  data = dat_wide,
-  trt = trt_vars,
-  outcome = "Y",
-  baseline = baseline,
-  time_vary = time_vary,
-  cens = cens_vars,
-  shift = shift_marginal_qmap,
-  mtp = TRUE,
-  outcome_type = "binomial",
-  learners_outcome = sl_outcome,
-  learners_trt = sl_trt,
-  folds = n_folds
-)
+## Mean-calibrated additive shift
 
-contrast_qmap <- lmtp_contrast(fit_qmap, ref = fit_observed, type = "additive")
-cat("Marginal quantile mapping:\n")
-cat("  Shifted estimate:", round(fit_qmap$estimate@x, 4), "\n")
-cat("  Contrast vs observed:", round(contrast_qmap$estimates$estimate, 4),
-    " (95% CI:", round(contrast_qmap$estimates$conf.low, 4),
-    "to", round(contrast_qmap$estimates$conf.high, 4), ")\n")
-```
+Add a constant to every Drug B patient's adherence so that Drug B's mean matches Drug A's mean. This is the simplest cross-drug comparison: it shifts the location of the distribution but preserves the shape.
 
-## Interpretation
+## Fixed additive shift (policy evaluation)
 
-A negative contrast means the adherence distribution shift reduces virologic failure. The magnitude tells you how much of the Drug A advantage is explained by adherence differences. However, this approach ignores that the adherence gap may differ across patient subgroups; an older patient's adherence gap between drugs may not be the same as a younger patient's. Approach 2 addresses this.
+The +10pp shift applied to everyone, regardless of drug. This answers a purely policy question: what would a universal adherence support program achieve? It does not reference the other drug at all and has the strongest positivity properties because the shift is small and uniform.
 
 
----
+# The forgiveness curve
 
-# Approach 2: Conditional Distribution Mapping
-
-## How it works
-
-The marginal quantile map treats all Drug B patients as exchangeable within the Drug B group. But adherence depends on patient characteristics: older patients, those with lower CD4, those with higher viral load may adhere differently.
-
-A more principled mapping conditions on covariates, so that the quantile lookup reflects each patient's clinical profile. The idea is the same as approach 1 (find a patient's percentile rank in the Drug B distribution and map it to the corresponding percentile in the Drug A distribution), but now both the CDF and quantile function are conditional on covariates. We estimate these using **conditional quantile regression** via the `quantreg` package, fitting separate models at a grid of quantile levels ($\tau = 0.05, 0.10, \ldots, 0.95$) for each drug. This avoids the normality assumption that a location-scale model would impose, which matters because adherence is bounded on [0,1] and often skewed.
-
-For a Drug B patient with covariates $X$ and observed adherence $a_t$:
-
-1. Evaluate the fitted Drug B conditional quantiles $\hat{Q}_{B}(\tau \mid X)$ across the grid and find the $\tau^*$ where $a_t$ falls (by interpolation).
-2. Evaluate the Drug A conditional quantile at the same level: $a_{\text{shifted}} = \hat{Q}_A(\tau^* \mid X)$.
-
-This is a covariate-conditional version of the CDF-inversion used in approach 1.
-
-## What question it answers
-
-*What would happen if each Drug B patient's adherence were set to the level they would most plausibly have achieved had they been on Drug A, given their specific clinical profile?*
-
-Two Drug B patients with the same adherence but different covariate profiles may get different shifts, because their covariate-conditional distributions under Drug A differ. A 60-year-old with low CD4 might see a larger shift than a 30-year-old with high CD4, if the Drug A advantage is larger for sicker patients.
-
-## Implementation
-
-```{r}
-library(quantreg)
-
-# Grid of quantile levels
-tau_grid <- seq(0.05, 0.95, by = 0.05)
-
-# Fit conditional quantile regressions by drug and time point
-cqr_models <- list()
-
-for (t in 1:T_max) {
-  col <- paste0("A_", t)
-
-  # Covariates available at this time point
-  if (t == 1) {
-    cov_cols <- c("age", "male", "cd4_bl", "vl_bl")
-  } else {
-    cov_cols <- c("age", "male", "cd4_bl", "vl_bl",
-                  paste0("cd4_", t), paste0("vl_", t),
-                  paste0("A_", t - 1))
-  }
-
-  fmla <- as.formula(paste(col, "~", paste(cov_cols, collapse = " + ")))
-
-  dat_A <- dat_wide[dat_wide$Drug == 1, ]
-  dat_B <- dat_wide[dat_wide$Drug == 0, ]
-
-  # Fit quantile regression at each tau for both drugs
-  fits_A <- lapply(tau_grid, function(tau) {
-    suppressWarnings(rq(fmla, tau = tau, data = dat_A))
-  })
-  fits_B <- lapply(tau_grid, function(tau) {
-    suppressWarnings(rq(fmla, tau = tau, data = dat_B))
-  })
-
-  cqr_models[[t]] <- list(fits_A = fits_A, fits_B = fits_B)
-}
-
-# Helper: given a vector of observed values and a matrix of conditional
-# quantile predictions (rows = observations, cols = tau grid), find each
-# observation's percentile rank by interpolation.
-find_tau <- function(a_obs, qmat) {
-  n <- length(a_obs)
-  tau_out <- numeric(n)
-  for (i in seq_len(n)) {
-    qs <- qmat[i, ]
-    if (a_obs[i] <= qs[1]) {
-      tau_out[i] <- tau_grid[1]
-    } else if (a_obs[i] >= qs[length(qs)]) {
-      tau_out[i] <- tau_grid[length(tau_grid)]
-    } else {
-      tau_out[i] <- approx(qs, tau_grid, xout = a_obs[i], rule = 2)$y
-    }
-  }
-  tau_out
-}
-
-# Helper: given tau values and a matrix of Drug A conditional quantiles,
-# return the corresponding adherence values by interpolation.
-map_to_A <- function(tau_vals, qmat_A) {
-  n <- length(tau_vals)
-  a_out <- numeric(n)
-  for (i in seq_len(n)) {
-    a_out[i] <- approx(tau_grid, qmat_A[i, ], xout = tau_vals[i], rule = 2)$y
-  }
-  a_out
-}
-
-shift_conditional_qmap <- function(data, trt) {
-  t_idx <- as.integer(gsub("A_", "", trt))
-  a_obs <- data[[trt]]
-  a_shifted <- a_obs
-
-  is_b <- data$Drug == 0
-  if (any(is_b)) {
-    mods <- cqr_models[[t_idx]]
-
-    # Predict conditional quantiles for Drug B patients under both models
-    qmat_B <- sapply(mods$fits_B, function(fit) predict(fit, newdata = data[is_b, ]))
-    qmat_A <- sapply(mods$fits_A, function(fit) predict(fit, newdata = data[is_b, ]))
-
-    # Ensure quantiles are monotone (fix quantile crossing)
-    for (i in seq_len(nrow(qmat_B))) {
-      qmat_B[i, ] <- sort(qmat_B[i, ])
-      qmat_A[i, ] <- sort(qmat_A[i, ])
-    }
-
-    # Step 1: find each Drug B patient's percentile rank in Drug B distribution
-    tau_star <- find_tau(a_obs[is_b], qmat_B)
-
-    # Step 2: map to Drug A conditional quantile at that rank
-    a_shifted[is_b] <- map_to_A(tau_star, qmat_A)
-
-    # Bound to [0.01, 0.99]
-    a_shifted[is_b] <- pmax(0.01, pmin(0.99, a_shifted[is_b]))
-  }
-  a_shifted
-}
-```
-
-```{r, cache=TRUE}
-fit_cond <- lmtp_sdr(
-  data = dat_wide,
-  trt = trt_vars,
-  outcome = "Y",
-  baseline = baseline,
-  time_vary = time_vary,
-  cens = cens_vars,
-  shift = shift_conditional_qmap,
-  mtp = TRUE,
-  outcome_type = "binomial",
-  learners_outcome = sl_outcome,
-  learners_trt = sl_trt,
-  folds = n_folds
-)
-
-contrast_cond <- lmtp_contrast(fit_cond, ref = fit_observed, type = "additive")
-cat("Conditional distribution mapping:\n")
-cat("  Shifted estimate:", round(fit_cond$estimate@x, 4), "\n")
-cat("  Contrast vs observed:", round(contrast_cond$estimates$estimate, 4),
-    " (95% CI:", round(contrast_cond$estimates$conf.low, 4),
-    "to", round(contrast_cond$estimates$conf.high, 4), ")\n")
-```
-
-## Interpretation
-
-If the conditional and marginal approaches give similar results, the adherence gap between drugs is roughly constant across patient subgroups. If they diverge, the marginal approach is masking heterogeneity: the adherence shift matters more for some patients than others. The conditional approach is generally preferred when covariate-adherence relationships differ meaningfully between drugs, because it avoids shifting patients to implausible adherence levels given their clinical profile.
-
-The quantile regression approach has two advantages over a simpler location-scale normal model. First, it makes no distributional assumption on the residuals, which is important because adherence is bounded on [0,1] and often skewed. Second, it allows the variance and shape of the conditional adherence distribution to vary with covariates, not just the mean. The cost is computational: we fit $2 \times T \times |\tau\text{-grid}|$ quantile regressions. Quantile crossing (where predicted quantiles are not monotone) is handled by sorting, which is a standard practical fix.
-
-
----
-
-# Approach 3: Mean-Calibrated Additive Shift
-
-## How it works
-
-This is the simplest approach. Compute the gap between mean adherence under Drug A and Drug B at each visit, then add that gap to every Drug B patient's adherence. Drug A patients are left unchanged.
-
-$$
-d_3(a_{it}) = \min\big(a_{it} + \delta_t, \; 1\big) \quad \text{where} \quad \delta_t = \bar{A}_t^{D=A} - \bar{A}_t^{D=B}
-$$
-
-In words: add the mean adherence gap between drugs to each Drug B patient's observed adherence, capping at 1 because adherence above 100% is meaningless.
-
-## What question it answers
-
-*What would happen if we could increase every Drug B patient's adherence by a uniform amount, so that Drug B's average adherence matched Drug A's?*
-
-This is a cruder intervention than quantile mapping. It shifts the location of the distribution but preserves the shape (variance, skewness) of Drug B's adherence distribution. A highly adherent Drug B patient and a poorly adherent one both get the same absolute increase, which may push some patients against the ceiling of 1. The question it answers is closer to "what if an adherence support program raised all Drug B patients' compliance by a fixed amount?" than to "what if Drug B patients behaved exactly like Drug A patients?"
-
-## Implementation
-
-```{r}
-# Compute the mean adherence gap at each visit
-adh_gaps <- numeric(T_max)
-for (t in 1:T_max) {
-  col <- paste0("A_", t)
-  mean_A <- mean(dat_wide[[col]][dat_wide$Drug == 1], na.rm = TRUE)
-  mean_B <- mean(dat_wide[[col]][dat_wide$Drug == 0], na.rm = TRUE)
-  adh_gaps[t] <- mean_A - mean_B
-  cat("Visit", t, ": Drug A mean =", round(mean_A, 3),
-      ", Drug B mean =", round(mean_B, 3),
-      ", gap =", round(adh_gaps[t], 3), "\n")
-}
-
-shift_mean_calibrated <- function(data, trt) {
-  t_idx <- as.integer(gsub("A_", "", trt))
-  a_obs <- data[[trt]]
-  a_shifted <- a_obs
-
-  is_b <- data$Drug == 0 & !is.na(a_obs)
-  if (any(is_b)) {
-    a_shifted[is_b] <- pmin(a_obs[is_b] + adh_gaps[t_idx], 1)
-  }
-  a_shifted
-}
-```
-
-```{r, cache=TRUE}
-fit_mean <- lmtp_sdr(
-  data = dat_wide,
-  trt = trt_vars,
-  outcome = "Y",
-  baseline = baseline,
-  time_vary = time_vary,
-  cens = cens_vars,
-  shift = shift_mean_calibrated,
-  mtp = TRUE,
-  outcome_type = "binomial",
-  learners_outcome = sl_outcome,
-  learners_trt = sl_trt,
-  folds = n_folds
-)
-
-contrast_mean <- lmtp_contrast(fit_mean, ref = fit_observed, type = "additive")
-cat("Mean-calibrated additive shift:\n")
-cat("  Shifted estimate:", round(fit_mean$estimate@x, 4), "\n")
-cat("  Contrast vs observed:", round(contrast_mean$estimates$estimate, 4),
-    " (95% CI:", round(contrast_mean$estimates$conf.low, 4),
-    "to", round(contrast_mean$estimates$conf.high, 4), ")\n")
-```
-
-## Interpretation
-
-The mean-calibrated shift tends to produce slightly different results than the quantile map because it does not reshape the distribution. If Drug B's adherence distribution has heavier left tail than Drug A's (more patients with very low adherence), the additive shift pushes those patients up but does not compress the tail the way quantile mapping would. Conversely, high-adherence Drug B patients may hit the ceiling at 1, wasting some of the shift. If the estimate is similar to the quantile-mapping result, the distributional shape difference between drugs is not playing a large role.
-
-This approach is the easiest to explain to a clinical audience: "we added X percentage points to every Drug B patient's adherence at each visit." It is also the most conservative, because it does not attempt to match distributional shape.
-
-
----
-
-# Approach 4: Fixed Additive Shift (Classic LMTP)
-
-## How it works
-
-This is the canonical LMTP modified treatment policy. Instead of calibrating the shift to match Drug A, we apply a fixed, small, uniform increase to **every** patient's adherence at every visit, regardless of drug assignment:
-
-$$
-d_4(a_{it}) = \min(a_{it} + \delta, \; 1)
-$$
-
-where $\delta$ is a prespecified amount (we use $\delta = 0.10$, i.e., a 10 percentage-point increase). In words: add 10 percentage points to every patient's adherence, regardless of drug assignment. This is not a cross-drug comparison at all; it is a within-population policy question.
-
-## What question it answers
-
-*What would happen if a universal adherence support program (SMS reminders, pill organizers, peer support) increased every patient's adherence by 10 percentage points?*
-
-This is the most directly policy-relevant framing. It does not reference Drug A's distribution at all. Instead, it asks about the marginal benefit of a small, feasible adherence improvement across the entire cohort. Because the shift is small, it stays close to the observed data, minimizing positivity concerns. This is the intervention most naturally suited to the LMTP framework.
-
-## Implementation
-
-```{r}
-delta_fixed <- 0.10
-
-shift_fixed <- function(data, trt) {
-  a_obs <- data[[trt]]
-  pmin(a_obs + delta_fixed, 1)
-}
-```
-
-```{r, cache=TRUE}
-fit_fixed <- lmtp_sdr(
-  data = dat_wide,
-  trt = trt_vars,
-  outcome = "Y",
-  baseline = baseline,
-  time_vary = time_vary,
-  cens = cens_vars,
-  shift = shift_fixed,
-  mtp = TRUE,
-  outcome_type = "binomial",
-  learners_outcome = sl_outcome,
-  learners_trt = sl_trt,
-  folds = n_folds
-)
-
-contrast_fixed <- lmtp_contrast(fit_fixed, ref = fit_observed, type = "additive")
-cat("Fixed additive shift (+", delta_fixed * 100, "pp):\n")
-cat("  Shifted estimate:", round(fit_fixed$estimate@x, 4), "\n")
-cat("  Contrast vs observed:", round(contrast_fixed$estimates$estimate, 4),
-    " (95% CI:", round(contrast_fixed$estimates$conf.low, 4),
-    "to", round(contrast_fixed$estimates$conf.high, 4), ")\n")
-```
-
-## Interpretation
-
-The fixed shift typically produces a smaller effect than the cross-drug approaches because the shift magnitude ($\delta = 0.10$) is smaller than the Drug A minus Drug B gap. But the estimand is more directly useful for program planning. If a health system can fund an intervention expected to raise adherence by about 10 percentage points, this estimate tells them the expected outcome improvement.
-
-Note that this approach applies to all patients, not just Drug B. If you want a Drug-B-specific version, wrap the shift in a drug check (as in approaches 1--3). But the universal version is the standard LMTP estimand and has the strongest positivity properties, since the shift is small and applies uniformly.
-
-
----
-
-# Comparison
-
-```{r}
-results <- tibble(
-  Approach = c("Observed (no shift)",
-               "1. Marginal quantile mapping",
-               "2. Conditional distribution mapping",
-               "3. Mean-calibrated additive shift",
-               "4. Fixed additive shift (+10pp)"),
-  Estimate = round(c(fit_observed$estimate@x,
-                      fit_qmap$estimate@x,
-                      fit_cond$estimate@x,
-                      fit_mean$estimate@x,
-                      fit_fixed$estimate@x), 4),
-  Contrast = round(c(NA,
-                      contrast_qmap$estimates$estimate,
-                      contrast_cond$estimates$estimate,
-                      contrast_mean$estimates$estimate,
-                      contrast_fixed$estimates$estimate), 4),
-  CI_low = round(c(NA,
-                    contrast_qmap$estimates$conf.low,
-                    contrast_cond$estimates$conf.low,
-                    contrast_mean$estimates$conf.low,
-                    contrast_fixed$estimates$conf.low), 4),
-  CI_high = round(c(NA,
-                     contrast_qmap$estimates$conf.high,
-                     contrast_cond$estimates$conf.high,
-                     contrast_mean$estimates$conf.high,
-                     contrast_fixed$estimates$conf.high), 4)
-)
-results
-```
-
-```{r}
-#| label: fig-comparison
-#| fig-cap: "Estimated change in virologic failure rate under four adherence shift interventions, compared to observed adherence. Negative values mean the shift reduces failure."
-results_plot <- results %>%
-  filter(!is.na(Contrast)) %>%
-  mutate(Approach = factor(Approach, levels = rev(Approach)))
-
-ggplot(results_plot, aes(x = Contrast, y = Approach)) +
-  geom_point(size = 3) +
-  geom_errorbarh(aes(xmin = CI_low, xmax = CI_high), height = 0.2) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
-  labs(x = "Change in virologic failure rate vs. observed",
-       y = NULL) +
-  theme_minimal() +
-  theme(axis.text.y = element_text(size = 10))
-```
-
-
-# What the Results Show
-
-Under observed adherence, the estimated virologic failure rate is about 22%. All four shift interventions reduce it, but by different amounts and with different precision.
-
-The two approaches that most aggressively reshape the Drug B adherence distribution (marginal quantile mapping and the mean-calibrated additive shift) produce the largest reductions, bringing the estimated failure rate down to roughly 5--6%. These two agree closely despite using very different mechanics, which suggests that in this simulation the adherence gap between drugs is fairly uniform across the distribution. The shape difference between Drug A and Drug B adherence matters less than the location difference.
-
-The conditional distribution mapping may produce a different estimate than the marginal approach. Because it conditions on covariates, the shift is more patient-specific: it only moves each Drug B patient's adherence to what the conditional quantile model predicts they would have achieved under Drug A given their clinical profile.
-
-For patients whose covariates predict similar adherence under both drugs, the shift is small. The quantile regression avoids the normality assumption, so the mapping better respects the bounded, potentially skewed shape of real adherence distributions.
-
-The fixed additive shift (+10 percentage points for everyone) yields a --10 percentage point reduction, also with a CI approaching zero. This is a smaller intervention than the cross-drug shifts (the Drug A--Drug B gap is about 23--28 percentage points per visit), so the smaller effect is expected. But it answers a different, more directly actionable question: a realistic adherence support program that raises compliance by 10 points across the board would cut failure rates nearly in half.
-
-The key takeaway is that a substantial portion of the outcome gap between Drug A and Drug B in this simulation is mediated by adherence. The marginal and mean-calibrated approaches suggest that if Drug B patients could adhere at Drug A levels, their failure rates would approach Drug A's observed rate. The conditional approach is more conservative but still shows a meaningful benefit, and the fixed shift confirms that even a modest, universal adherence improvement would meaningfully reduce virologic failure.
-
-
-## Connecting shifts to the forgiveness curve
-
-Each of the four shift approaches above gives a different slice of a more fundamental object: the **forgiveness curve**. The forgiveness curve maps a sustained adherence level to the counterfactual risk of virologic failure:
+The forgiveness curve maps sustained adherence level to counterfactual failure risk for each drug:
 
 $$
 r_d(a) = P\big(Y = 1 \mid \text{do}(\bar{A} = a), D = d\big)
 $$
 
-where $d$ indexes the drug. This curve captures how a drug responds to adherence variation. A "forgiving" drug has a flat curve over a wide PDC range (failure risk stays low even when adherence drops moderately). A less forgiving drug has a steep curve where small adherence drops produce large risk increases.
+A flat curve means the drug is forgiving (patients can miss doses without large increases in failure risk). A steep curve means small adherence drops produce large outcome differences.
 
-Each of the four shift approaches summarizes this curve differently:
+Static-regime L-TMLE traces this curve by estimating the failure risk at a grid of fixed PDC thresholds. The LMTP shift approach provides a complementary view: it estimates the marginal benefit of a small adherence improvement, integrated over the observed adherence distribution. The two approaches are different summaries of the same counterfactual risk surface.
 
-**Fixed additive shift** moves each patient along the x-axis of the forgiveness curve by a constant $\delta$. The LMTP contrast integrates the slope of the curve over the observed adherence distribution, weighted by the shift magnitude. This tells you the marginal benefit of a small adherence improvement, averaged over the patient population. It is a local derivative-like quantity when $\delta$ is small.
-
-**Mean-calibrated additive shift** also moves along the x-axis, but by a drug-specific amount calibrated to close the mean adherence gap. It integrates over a larger portion of the curve but still preserves the shape of Drug B's adherence distribution. The contrast captures how much of the outcome gap between drugs is explained by the *location* difference in adherence distributions.
-
-**Marginal quantile mapping** transforms the entire shape of Drug B's adherence distribution to match Drug A's. This is not a simple translation along the x-axis; it changes the variance, skewness, and tail behavior. The contrast captures the full distributional difference in adherence, integrating the forgiveness curve under a reshaped distribution.
-
-**Conditional quantile mapping** does the same distributional transformation, but conditions on patient covariates. This produces a patient-specific shift that respects heterogeneity in adherence-drug relationships.
-
-The forgiveness curve itself can be traced directly using **static L-TMLE** at a grid of fixed PDC thresholds. The V4 fine-grid LTMLE analysis does this with 13 sliding bins, estimating $r_d(a)$ at PDC levels from 0.50 to 0.95 in 3--4 percentage-point increments. This traces the curve rather than summarizing it with a single contrast.
-
-**Where the curve is well-estimated.** The forgiveness curve can only be reliably estimated where there is adequate positivity (enough patients maintaining each PDC level given their covariate history). In the V4 simulation, the curve is well-estimated for PDC $\geq 0.70$, where both drugs have substantial density. Below 0.70, positivity breaks down because few patients sustain very low adherence for extended periods (patients who disengage tend to be censored). The LMTP shift approaches have an advantage here: because they stay close to the observed distribution, they avoid the low-positivity region where static regimes fail.
-
-The forgiveness curve is thus the unifying object that connects all the estimands in this chapter and in Chapter 3.3. The different shift approaches are different ways of summarizing the same underlying causal surface, chosen based on the scientific question and the positivity constraints of the data.
+The curve is well-estimated only where there is adequate positivity. Below approximately PDC 0.70, few patients sustain such low adherence for four consecutive blocks, so the estimates become unstable. LMTP shift interventions avoid this problem because they stay close to the observed distribution.
 
 
-## Mediation perspective
+# Interpretation
 
-::: {.callout-note}
-## Informal vs. formal mediation
-The decomposition below provides useful intuition for separating adherence-mediated from pharmacological drug effects, but it is an *informal* controlled direct effect approximation. For a rigorous TMLE-based mediation analysis with formal natural direct and indirect effects (NDE/NIE), identification assumptions, and the `crumble` package, see the [Mediation Analysis chapter](03-10-tmle-mediation.qmd).
-:::
+**Feasible, not hypothetical.** The +10pp shift corresponds to something a real adherence support program might achieve. The estimate answers a concrete policy question.
 
-When comparing two drugs, the total effect on virologic failure has two components:
+**Causal, not descriptive.** The LMTP framework accounts for the treatment-confounder feedback between adherence and health. When adherence changes, health status changes too, and those changes are propagated through the sequential regression structure.
 
-$$
-\underbrace{E[Y(D=A)] - E[Y(D=B)]}_{\text{total effect}} = \underbrace{\text{direct effect}}_{\text{pharmacology}} + \underbrace{\text{indirect effect through adherence}}_{\text{adherence-mediated}}
-$$
-
-The direct effect captures pharmacological differences between drugs (potency, resistance barrier, half-life) that affect outcomes regardless of adherence. The indirect effect captures the pathway where drug assignment affects adherence (e.g., through pill burden or side effects), which in turn affects outcomes.
-
-The quantile-matching approach provides an informal controlled direct effect (CDE). By matching Drug B's adherence distribution to Drug A's, we hold the adherence pathway constant and ask what outcome difference remains.
-
-If the total observed difference between drugs is $\Delta_{\text{total}}$ and the difference under matched adherence is $\Delta_{\text{matched}}$, then:
-
-- $\Delta_{\text{matched}}$ approximates the direct (pharmacological) effect: the outcome difference when both drugs have the same adherence distribution.
-- $\Delta_{\text{total}} - \Delta_{\text{matched}}$ approximates the adherence-mediated component: how much of the drug difference operates through the adherence pathway.
-
-This decomposition is *informal* because a formal causal mediation analysis requires additional assumptions beyond those needed for the shift analysis:
-
-1. **No unmeasured mediator-outcome confounders** affected by treatment. In our setting, this means no unmeasured common cause of adherence and failure that is also affected by drug assignment. Time-varying confounders like CD4 and viral load are measured, but there may be unmeasured factors (e.g., motivation, social support) that affect both adherence and outcomes.
-
-2. **Cross-world independence.** The formal natural indirect effect requires a "cross-world" counterfactual (the outcome under Drug A with the adherence one would have had under Drug B), which involves quantities from two different interventional worlds simultaneously. This is a stronger assumption than anything required for the shift analysis alone.
-
-Despite these caveats, the shift framework provides valuable intuition about the relative importance of adherence versus pharmacology in explaining drug differences. In the V4 talk companion results, the quantile-matched comparison shows that a substantial portion of Drug A's observed advantage comes from its better adherence profile, while a residual direct effect remains that reflects genuine pharmacological differences in forgiveness at low adherence levels.
-
-For a formal mediation analysis using stochastic interventions, see Diaz and Hejazi (2020), who develop identification and estimation results for natural direct and indirect effects under stochastic interventions, using the same `lmtp` infrastructure.
+**Drug-specific effects.** Running the analysis separately by drug reveals whether the marginal return to improved adherence differs by regimen. If Drug A is more forgiving, the benefit of an adherence intervention is smaller for Drug A patients (they are already doing relatively well at moderate adherence) and larger for Drug B patients.
 
 
-# Summary: Which Approach for Which Question?
+# Connection to mediation
 
-The four approaches are not competing methods for the same estimand. They define different interventions and answer different causal questions.
-
-| Approach | Intervention | Scientific question |
-|----------|-------------|-------------------|
-| Marginal quantile mapping | Replace Drug B's adherence distribution with Drug A's | How much of the outcome gap between drugs is due to the full distributional difference in adherence? |
-| Conditional distribution mapping | Replace Drug B's adherence with what it would have been under Drug A, given each patient's covariates | Same as above, but respecting that the adherence gap may vary across patient profiles |
-| Mean-calibrated additive shift | Raise all Drug B patients' adherence by a uniform amount matching Drug A's mean | What if Drug B's average adherence could be brought to Drug A's level via a uniform program? |
-| Fixed additive shift | Raise everyone's adherence by a small fixed amount | What is the marginal benefit of a feasible, universal adherence support program? |
-
-Approaches 1--3 are cross-drug comparisons: they decompose the Drug A versus Drug B outcome difference into adherence-mediated and pharmacology-mediated components. Approach 4 is a policy evaluation: it estimates the benefit of a concrete intervention without reference to the other drug.
-
-### V4 simulation context: static versus shift approaches
-
-The V4 Monte Carlo simulation provides a broader perspective by comparing static and shift-based approaches on the same DGP. The table below summarizes the three main estimation strategies and their properties in the simulation context.
-
-| Approach | Estimand | Scientific question | Positivity | V4 MC finding |
-|----------|----------|-------------------|------------|--------------|
-| Static regime (L-TMLE) | $E[Y(\bar{A} \geq a)]$ at grid of $a$ | Traces the full forgiveness curve: what is risk at each sustained PDC level? | Requires patients at each fixed PDC level; breaks down below PDC $\approx 0.70$ | Well-calibrated coverage at high PDC; bias and variance increase at low PDC where positivity fails |
-| Additive shift (LMTP) | $E[Y(\bar{A} + \delta)]$ | Policy-relevant: what if adherence improved by $\delta$ (e.g., 10 pp)? | Stays within support as long as shift is small; best positivity properties | Low bias ($< 0.01$) under strong time-varying confounding when shift stays within support |
-| Quantile match (LMTP) | $E[Y(\bar{A}^{d_{\text{ref}}})]$ | Isolates pharmacological effect: what if Drug A had Drug B's adherence distribution? | Shifted values are observed values from the reference drug; within-support by construction | Provides informal decomposition of total drug effect into adherence-mediated and direct components |
-
-All three approaches are functions of the same counterfactual risk surface $P(Y \mid \text{do}(\bar{A}), D)$. The static regime evaluates this surface at fixed points; the additive shift integrates it under a translated distribution; and the quantile match integrates it under a reshaped distribution. The choice depends on whether the goal is to map the full dose-response relationship (static), evaluate a realistic policy (additive shift), or decompose the drug comparison (quantile match).
-
-For a comparative effectiveness study, approaches 1 or 2 are most appropriate. Approach 2 is preferred when adherence depends strongly on patient characteristics that differ between drug groups. For health policy planning, approach 4 is the most directly useful. Approach 3 is a middle ground: a cross-drug comparison using the simplest possible shift function.
-
-In all cases, the validity of the estimate depends on the same identification assumptions: consistency, sequential exchangeability, and positivity. The shift-based approaches (especially 3 and 4) have better positivity properties than static interventions like "always adhere," because they keep the shifted values close to the observed distribution.
+The quantile-matching analysis provides an informal decomposition of the total drug effect into an adherence-mediated component and a pharmacological (forgiveness) component. This is not formal mediation analysis; it is an approximation based on distribution shifts. For the formal TMLE-based mediation framework with proper identification conditions, see [Chapter 3.10](03-10-tmle-mediation.qmd).
 
 
-## Check your understanding
+## Sources and further reading
 
-<details>
-<summary><strong>Q1. Two of the four shift approaches give very similar estimates. What does that tell you?</strong></summary>
-
-When the marginal quantile-mapping and mean-calibrated additive shift give similar results, it means the outcome difference between drugs is driven primarily by the *location* (mean) of the adherence distributions, not by differences in their *shape* (variance, skewness, tail behavior). The quantile mapping reshapes the entire distribution while the additive shift only translates it. If both produce similar contrasts, the distributional shape difference between drugs is not playing a large role in explaining outcomes.
-
-</details>
-
-<details>
-<summary><strong>Q2. When would you prefer conditional over marginal quantile mapping?</strong></summary>
-
-When the adherence gap between drugs varies across patient subgroups. If older patients have a larger Drug A--Drug B adherence gap than younger patients, the marginal approach applies a uniform distributional transformation that may be too aggressive for young patients and too conservative for old ones. The conditional approach uses covariate-specific quantile regressions to produce patient-specific shifts, giving each patient a shift that reflects what they specifically would have achieved under the other drug given their clinical profile.
-
-</details>
-
-<details>
-<summary><strong>Q3. The fixed additive shift (+10 pp) is the simplest and most conservative approach. When is it the most useful?</strong></summary>
-
-When the question is about a concrete policy intervention rather than a cross-drug comparison. If a health system is considering funding an adherence support program (SMS reminders, pill organizers, peer counselors) expected to raise adherence by about 10 percentage points, the fixed shift directly estimates the expected outcome improvement. It answers "what would this program achieve?" without reference to any other drug, making it the most directly actionable for policy planning. It also has the strongest positivity properties because the shift is small and uniform.
-
-</details>
+- Diaz I, Williams N, Hoffman KL, Schenck EJ (2023). Nonparametric causal effects based on longitudinal modified treatment policies. *Journal of the American Statistical Association* 118(542):846-856.
+- Bangsberg DR (2006). Less than 95% adherence to nonnucleoside reverse-transcriptase inhibitor therapy can lead to viral suppression. *Clinical Infectious Diseases* 43(7):939-941.
+- Petersen ML, Schwab J, Gruber S, et al. (2014). Targeted maximum likelihood estimation for dynamic and static longitudinal marginal structural working models. *J Causal Inference* 2(2):147-185.
+- `lmtp` R package: [CRAN](https://cran.r-project.org/package=lmtp)

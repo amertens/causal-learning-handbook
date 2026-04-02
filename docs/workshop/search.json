@@ -2073,221 +2073,56 @@
   {
     "objectID": "03-03b-adherence-shift-methods.html",
     "href": "03-03b-adherence-shift-methods.html",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
+    "title": "16  Adherence, Forgiveness, and Distribution-Shift Interventions",
     "section": "",
-    "text": "17 Overview\nEstimated reading time: 55 minutes\nChapter 3.3 introduced a distribution-shift intervention using quantile mapping to compare two antiretroviral drugs under a common adherence distribution. That approach is one principled way to operationalize the question “what if Drug B patients adhered like Drug A patients?”, but it is not the only way. Different shift functions encode different assumptions about what “adhering like Drug A” means, and they answer subtly different causal questions.\nThis chapter implements four approaches on the same simulated data:\nEach approach defines a different modified treatment policy for lmtp (Dı́az et al. 2023). We run all four, compare estimates, and explain what scientific question each one answers.",
+    "text": "17 What this chapter is about\nEstimated reading time: 55 minutes\nThe previous chapters introduced longitudinal TMLE for static interventions (“always maintain high adherence”) and LMTP for modified treatment policies. This chapter brings those tools to bear on a clinically important question: how do two antiretroviral drugs compare when we account for realistic adherence patterns?\nThe key concept is regimen forgiveness: a drug is forgiving if patients can miss some doses without a large increase in treatment failure. A drug with a flat adherence-response curve is forgiving; one with a steep curve is not. Forgiveness is a causal quantity, not an observable property of the data, because the adherence-response relationship is confounded by time-varying health status.\nWe use a simulated two-drug HIV cohort designed to capture the essential features of the adherence problem: treatment-confounder feedback between adherence and health, differential forgiveness across drugs, and the positivity challenges that arise when targeting extreme adherence levels. The simulation is calibrated to real pharmacoepidemiologic settings and uses continuous proportion of days covered (PDC) as the adherence measure.",
     "crumbs": [
       "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
+      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Adherence, Forgiveness, and Distribution-Shift Interventions</span>"
     ]
   },
   {
-    "objectID": "03-03b-adherence-shift-methods.html#how-it-works",
-    "href": "03-03b-adherence-shift-methods.html#how-it-works",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "20.1 How it works",
-    "text": "20.1 How it works\nFor each Drug B patient at each visit, we find where their adherence falls in the Drug B empirical CDF and map it to the corresponding quantile of the Drug A empirical CDF. A Drug B patient at the 30th percentile of Drug B adherence gets mapped to the 30th percentile of Drug A adherence. Drug A patients are left unchanged.\nFormally, for Drug B patient \\(i\\) at visit \\(t\\): \\[\nd_1(a_{it}) = F_{A|D=A}^{-1}\\big(F_{A|D=B}(a_{it})\\big)\n\\]\nwhere \\(F_{A|D=k}\\) is the marginal CDF of adherence among drug \\(k\\) patients.\nThis is a rank-preserving transformation: a patient who was relatively compliant among Drug B patients stays relatively compliant, but their absolute adherence level shifts to reflect the Drug A distribution.",
+    "objectID": "03-03b-adherence-shift-methods.html#quantile-matching-what-if-drug-b-adhered-like-drug-a",
+    "href": "03-03b-adherence-shift-methods.html#quantile-matching-what-if-drug-b-adhered-like-drug-a",
+    "title": "16  Adherence, Forgiveness, and Distribution-Shift Interventions",
+    "section": "22.1 Quantile matching: what if Drug B adhered like Drug A?",
+    "text": "22.1 Quantile matching: what if Drug B adhered like Drug A?\nThis maps each Drug B patient’s adherence to the corresponding quantile of Drug A’s distribution. A patient at the 30th percentile of Drug B adherence gets mapped to the 30th percentile of Drug A adherence. This answers: what would happen to Drug B’s outcomes if its patients had Drug A’s adherence profile?\n\n# Build quantile-matching shift function\necdf_B &lt;- list()\nsorted_A &lt;- list()\nfor (t in 1:K) {\n  col &lt;- paste0(\"PDC_\", t)\n  ecdf_B[[t]] &lt;- ecdf(dat[[col]][dat$A0 == 0])\n  sorted_A[[t]] &lt;- sort(dat[[col]][dat$A0 == 1])\n}\n\nshift_match_A &lt;- function(data, trt) {\n  t_idx &lt;- as.integer(gsub(\"PDC_\", \"\", trt))\n  a_obs &lt;- data[[trt]]\n  a_shifted &lt;- a_obs\n  is_b &lt;- data$A0 == 0\n  if (any(is_b)) {\n    p_rank &lt;- ecdf_B[[t_idx]](a_obs[is_b])\n    p_rank &lt;- pmax(0.01, pmin(0.99, p_rank))\n    a_shifted[is_b] &lt;- sorted_A[[t_idx]][\n      pmin(length(sorted_A[[t_idx]]),\n           ceiling(p_rank * length(sorted_A[[t_idx]])))\n    ]\n  }\n  a_shifted\n}",
     "crumbs": [
       "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
+      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Adherence, Forgiveness, and Distribution-Shift Interventions</span>"
     ]
   },
   {
-    "objectID": "03-03b-adherence-shift-methods.html#what-question-it-answers",
-    "href": "03-03b-adherence-shift-methods.html#what-question-it-answers",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "20.2 What question it answers",
-    "text": "20.2 What question it answers\nWhat would happen to Drug B patients’ outcomes if their entire adherence distribution (the shape, spread, and location) were transplanted from the Drug A population?\nThis captures both the higher mean and any differences in variance or skewness between the two distributions. It asks for a wholesale distributional replacement.",
+    "objectID": "03-03b-adherence-shift-methods.html#mean-calibrated-additive-shift",
+    "href": "03-03b-adherence-shift-methods.html#mean-calibrated-additive-shift",
+    "title": "16  Adherence, Forgiveness, and Distribution-Shift Interventions",
+    "section": "22.2 Mean-calibrated additive shift",
+    "text": "22.2 Mean-calibrated additive shift\nAdd a constant to every Drug B patient’s adherence so that Drug B’s mean matches Drug A’s mean. This is the simplest cross-drug comparison: it shifts the location of the distribution but preserves the shape.",
     "crumbs": [
       "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
+      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Adherence, Forgiveness, and Distribution-Shift Interventions</span>"
     ]
   },
   {
-    "objectID": "03-03b-adherence-shift-methods.html#implementation",
-    "href": "03-03b-adherence-shift-methods.html#implementation",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "20.3 Implementation",
-    "text": "20.3 Implementation\n\n# Precompute marginal ECDFs and quantile functions by drug and time\necdf_B_marginal &lt;- list()\nqfun_A_marginal &lt;- list()\n\nfor (t in 1:T_max) {\n  col &lt;- paste0(\"A_\", t)\n  vals_A &lt;- dat_wide[[col]][dat_wide$Drug == 1 & !is.na(dat_wide[[col]])]\n  vals_B &lt;- dat_wide[[col]][dat_wide$Drug == 0 & !is.na(dat_wide[[col]])]\n  ecdf_B_marginal[[t]] &lt;- ecdf(vals_B)\n  # Store sorted Drug A values for quantile lookup\n  qfun_A_marginal[[t]] &lt;- sort(vals_A)\n}\n\nshift_marginal_qmap &lt;- function(data, trt) {\n  t_idx &lt;- as.integer(gsub(\"A_\", \"\", trt))\n  a_obs &lt;- data[[trt]]\n  a_shifted &lt;- a_obs\n\n  is_b &lt;- data$Drug == 0 & !is.na(a_obs)\n  if (any(is_b)) {\n    p_rank &lt;- ecdf_B_marginal[[t_idx]](a_obs[is_b])\n    p_rank &lt;- pmax(0.01, pmin(0.99, p_rank))\n    sorted_A &lt;- qfun_A_marginal[[t_idx]]\n    # Quantile function: index into sorted Drug A values\n    a_shifted[is_b] &lt;- sorted_A[pmin(length(sorted_A),\n                                      ceiling(p_rank * length(sorted_A)))]\n  }\n  a_shifted\n}\n\n\nfit_qmap &lt;- lmtp_sdr(\n  data = dat_wide,\n  trt = trt_vars,\n  outcome = \"Y\",\n  baseline = baseline,\n  time_vary = time_vary,\n  cens = cens_vars,\n  shift = shift_marginal_qmap,\n  mtp = TRUE,\n  outcome_type = \"binomial\",\n  learners_outcome = sl_outcome,\n  learners_trt = sl_trt,\n  folds = n_folds\n)\n\ncontrast_qmap &lt;- lmtp_contrast(fit_qmap, ref = fit_observed, type = \"additive\")\ncat(\"Marginal quantile mapping:\\n\")\n#&gt; Marginal quantile mapping:\ncat(\"  Shifted estimate:\", round(fit_qmap$estimate@x, 4), \"\\n\")\n#&gt;   Shifted estimate: 0.033\ncat(\"  Contrast vs observed:\", round(contrast_qmap$estimates$estimate, 4),\n    \" (95% CI:\", round(contrast_qmap$estimates$conf.low, 4),\n    \"to\", round(contrast_qmap$estimates$conf.high, 4), \")\\n\")\n#&gt;   Contrast vs observed: -0.1858  (95% CI: -0.2646 to -0.107 )",
+    "objectID": "03-03b-adherence-shift-methods.html#fixed-additive-shift-policy-evaluation",
+    "href": "03-03b-adherence-shift-methods.html#fixed-additive-shift-policy-evaluation",
+    "title": "16  Adherence, Forgiveness, and Distribution-Shift Interventions",
+    "section": "22.3 Fixed additive shift (policy evaluation)",
+    "text": "22.3 Fixed additive shift (policy evaluation)\nThe +10pp shift applied to everyone, regardless of drug. This answers a purely policy question: what would a universal adherence support program achieve? It does not reference the other drug at all and has the strongest positivity properties because the shift is small and uniform.",
     "crumbs": [
       "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
+      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Adherence, Forgiveness, and Distribution-Shift Interventions</span>"
     ]
   },
   {
-    "objectID": "03-03b-adherence-shift-methods.html#interpretation",
-    "href": "03-03b-adherence-shift-methods.html#interpretation",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "20.4 Interpretation",
-    "text": "20.4 Interpretation\nA negative contrast means the adherence distribution shift reduces virologic failure. The magnitude tells you how much of the Drug A advantage is explained by adherence differences. However, this approach ignores that the adherence gap may differ across patient subgroups; an older patient’s adherence gap between drugs may not be the same as a younger patient’s. Approach 2 addresses this.",
+    "objectID": "03-03b-adherence-shift-methods.html#sources-and-further-reading",
+    "href": "03-03b-adherence-shift-methods.html#sources-and-further-reading",
+    "title": "16  Adherence, Forgiveness, and Distribution-Shift Interventions",
+    "section": "25.1 Sources and further reading",
+    "text": "25.1 Sources and further reading\n\nDiaz I, Williams N, Hoffman KL, Schenck EJ (2023). Nonparametric causal effects based on longitudinal modified treatment policies. Journal of the American Statistical Association 118(542):846-856.\nBangsberg DR (2006). Less than 95% adherence to nonnucleoside reverse-transcriptase inhibitor therapy can lead to viral suppression. Clinical Infectious Diseases 43(7):939-941.\nPetersen ML, Schwab J, Gruber S, et al. (2014). Targeted maximum likelihood estimation for dynamic and static longitudinal marginal structural working models. J Causal Inference 2(2):147-185.\nlmtp R package: CRAN\n\n\n\n\n\n\n\nDı́az, Iván, Nicholas Williams, Katherine L Hoffman, and Edward J Schenck. 2023. “Nonparametric Causal Effects Based on Longitudinal Modified Treatment Policies.” Journal of the American Statistical Association 118 (542): 846–56. https://doi.org/10.1080/01621459.2021.1955691.",
     "crumbs": [
       "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#how-it-works-1",
-    "href": "03-03b-adherence-shift-methods.html#how-it-works-1",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "21.1 How it works",
-    "text": "21.1 How it works\nThe marginal quantile map treats all Drug B patients as exchangeable within the Drug B group. But adherence depends on patient characteristics: older patients, those with lower CD4, those with higher viral load may adhere differently.\nA more principled mapping conditions on covariates, so that the quantile lookup reflects each patient’s clinical profile. The idea is the same as approach 1 (find a patient’s percentile rank in the Drug B distribution and map it to the corresponding percentile in the Drug A distribution), but now both the CDF and quantile function are conditional on covariates. We estimate these using conditional quantile regression via the quantreg package, fitting separate models at a grid of quantile levels (\\(\\tau = 0.05, 0.10, \\ldots, 0.95\\)) for each drug. This avoids the normality assumption that a location-scale model would impose, which matters because adherence is bounded on [0,1] and often skewed.\nFor a Drug B patient with covariates \\(X\\) and observed adherence \\(a_t\\):\n\nEvaluate the fitted Drug B conditional quantiles \\(\\hat{Q}_{B}(\\tau \\mid X)\\) across the grid and find the \\(\\tau^*\\) where \\(a_t\\) falls (by interpolation).\nEvaluate the Drug A conditional quantile at the same level: \\(a_{\\text{shifted}} = \\hat{Q}_A(\\tau^* \\mid X)\\).\n\nThis is a covariate-conditional version of the CDF-inversion used in approach 1.",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#what-question-it-answers-1",
-    "href": "03-03b-adherence-shift-methods.html#what-question-it-answers-1",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "21.2 What question it answers",
-    "text": "21.2 What question it answers\nWhat would happen if each Drug B patient’s adherence were set to the level they would most plausibly have achieved had they been on Drug A, given their specific clinical profile?\nTwo Drug B patients with the same adherence but different covariate profiles may get different shifts, because their covariate-conditional distributions under Drug A differ. A 60-year-old with low CD4 might see a larger shift than a 30-year-old with high CD4, if the Drug A advantage is larger for sicker patients.",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#implementation-1",
-    "href": "03-03b-adherence-shift-methods.html#implementation-1",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "21.3 Implementation",
-    "text": "21.3 Implementation\n\nlibrary(quantreg)\n\n# Grid of quantile levels\ntau_grid &lt;- seq(0.05, 0.95, by = 0.05)\n\n# Fit conditional quantile regressions by drug and time point\ncqr_models &lt;- list()\n\nfor (t in 1:T_max) {\n  col &lt;- paste0(\"A_\", t)\n\n  # Covariates available at this time point\n  if (t == 1) {\n    cov_cols &lt;- c(\"age\", \"male\", \"cd4_bl\", \"vl_bl\")\n  } else {\n    cov_cols &lt;- c(\"age\", \"male\", \"cd4_bl\", \"vl_bl\",\n                  paste0(\"cd4_\", t), paste0(\"vl_\", t),\n                  paste0(\"A_\", t - 1))\n  }\n\n  fmla &lt;- as.formula(paste(col, \"~\", paste(cov_cols, collapse = \" + \")))\n\n  dat_A &lt;- dat_wide[dat_wide$Drug == 1, ]\n  dat_B &lt;- dat_wide[dat_wide$Drug == 0, ]\n\n  # Fit quantile regression at each tau for both drugs\n  fits_A &lt;- lapply(tau_grid, function(tau) {\n    suppressWarnings(rq(fmla, tau = tau, data = dat_A))\n  })\n  fits_B &lt;- lapply(tau_grid, function(tau) {\n    suppressWarnings(rq(fmla, tau = tau, data = dat_B))\n  })\n\n  cqr_models[[t]] &lt;- list(fits_A = fits_A, fits_B = fits_B)\n}\n\n# Helper: given a vector of observed values and a matrix of conditional\n# quantile predictions (rows = observations, cols = tau grid), find each\n# observation's percentile rank by interpolation.\nfind_tau &lt;- function(a_obs, qmat) {\n  n &lt;- length(a_obs)\n  tau_out &lt;- numeric(n)\n  for (i in seq_len(n)) {\n    qs &lt;- qmat[i, ]\n    if (a_obs[i] &lt;= qs[1]) {\n      tau_out[i] &lt;- tau_grid[1]\n    } else if (a_obs[i] &gt;= qs[length(qs)]) {\n      tau_out[i] &lt;- tau_grid[length(tau_grid)]\n    } else {\n      tau_out[i] &lt;- approx(qs, tau_grid, xout = a_obs[i], rule = 2)$y\n    }\n  }\n  tau_out\n}\n\n# Helper: given tau values and a matrix of Drug A conditional quantiles,\n# return the corresponding adherence values by interpolation.\nmap_to_A &lt;- function(tau_vals, qmat_A) {\n  n &lt;- length(tau_vals)\n  a_out &lt;- numeric(n)\n  for (i in seq_len(n)) {\n    a_out[i] &lt;- approx(tau_grid, qmat_A[i, ], xout = tau_vals[i], rule = 2)$y\n  }\n  a_out\n}\n\nshift_conditional_qmap &lt;- function(data, trt) {\n  t_idx &lt;- as.integer(gsub(\"A_\", \"\", trt))\n  a_obs &lt;- data[[trt]]\n  a_shifted &lt;- a_obs\n\n  is_b &lt;- data$Drug == 0\n  if (any(is_b)) {\n    mods &lt;- cqr_models[[t_idx]]\n\n    # Predict conditional quantiles for Drug B patients under both models\n    qmat_B &lt;- sapply(mods$fits_B, function(fit) predict(fit, newdata = data[is_b, ]))\n    qmat_A &lt;- sapply(mods$fits_A, function(fit) predict(fit, newdata = data[is_b, ]))\n\n    # Ensure quantiles are monotone (fix quantile crossing)\n    for (i in seq_len(nrow(qmat_B))) {\n      qmat_B[i, ] &lt;- sort(qmat_B[i, ])\n      qmat_A[i, ] &lt;- sort(qmat_A[i, ])\n    }\n\n    # Step 1: find each Drug B patient's percentile rank in Drug B distribution\n    tau_star &lt;- find_tau(a_obs[is_b], qmat_B)\n\n    # Step 2: map to Drug A conditional quantile at that rank\n    a_shifted[is_b] &lt;- map_to_A(tau_star, qmat_A)\n\n    # Bound to [0.01, 0.99]\n    a_shifted[is_b] &lt;- pmax(0.01, pmin(0.99, a_shifted[is_b]))\n  }\n  a_shifted\n}\n\n\nfit_cond &lt;- lmtp_sdr(\n  data = dat_wide,\n  trt = trt_vars,\n  outcome = \"Y\",\n  baseline = baseline,\n  time_vary = time_vary,\n  cens = cens_vars,\n  shift = shift_conditional_qmap,\n  mtp = TRUE,\n  outcome_type = \"binomial\",\n  learners_outcome = sl_outcome,\n  learners_trt = sl_trt,\n  folds = n_folds\n)\n\ncontrast_cond &lt;- lmtp_contrast(fit_cond, ref = fit_observed, type = \"additive\")\ncat(\"Conditional distribution mapping:\\n\")\n#&gt; Conditional distribution mapping:\ncat(\"  Shifted estimate:\", round(fit_cond$estimate@x, 4), \"\\n\")\n#&gt;   Shifted estimate: 0.0755\ncat(\"  Contrast vs observed:\", round(contrast_cond$estimates$estimate, 4),\n    \" (95% CI:\", round(contrast_cond$estimates$conf.low, 4),\n    \"to\", round(contrast_cond$estimates$conf.high, 4), \")\\n\")\n#&gt;   Contrast vs observed: -0.1433  (95% CI: -0.2194 to -0.0671 )",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#interpretation-1",
-    "href": "03-03b-adherence-shift-methods.html#interpretation-1",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "21.4 Interpretation",
-    "text": "21.4 Interpretation\nIf the conditional and marginal approaches give similar results, the adherence gap between drugs is roughly constant across patient subgroups. If they diverge, the marginal approach is masking heterogeneity: the adherence shift matters more for some patients than others. The conditional approach is generally preferred when covariate-adherence relationships differ meaningfully between drugs, because it avoids shifting patients to implausible adherence levels given their clinical profile.\nThe quantile regression approach has two advantages over a simpler location-scale normal model. First, it makes no distributional assumption on the residuals, which is important because adherence is bounded on [0,1] and often skewed. Second, it allows the variance and shape of the conditional adherence distribution to vary with covariates, not just the mean. The cost is computational: we fit \\(2 \\times T \\times |\\tau\\text{-grid}|\\) quantile regressions. Quantile crossing (where predicted quantiles are not monotone) is handled by sorting, which is a standard practical fix.",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#how-it-works-2",
-    "href": "03-03b-adherence-shift-methods.html#how-it-works-2",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "22.1 How it works",
-    "text": "22.1 How it works\nThis is the simplest approach. Compute the gap between mean adherence under Drug A and Drug B at each visit, then add that gap to every Drug B patient’s adherence. Drug A patients are left unchanged.\n\\[\nd_3(a_{it}) = \\min\\big(a_{it} + \\delta_t, \\; 1\\big) \\quad \\text{where} \\quad \\delta_t = \\bar{A}_t^{D=A} - \\bar{A}_t^{D=B}\n\\]\nIn words: add the mean adherence gap between drugs to each Drug B patient’s observed adherence, capping at 1 because adherence above 100% is meaningless.",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#what-question-it-answers-2",
-    "href": "03-03b-adherence-shift-methods.html#what-question-it-answers-2",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "22.2 What question it answers",
-    "text": "22.2 What question it answers\nWhat would happen if we could increase every Drug B patient’s adherence by a uniform amount, so that Drug B’s average adherence matched Drug A’s?\nThis is a cruder intervention than quantile mapping. It shifts the location of the distribution but preserves the shape (variance, skewness) of Drug B’s adherence distribution. A highly adherent Drug B patient and a poorly adherent one both get the same absolute increase, which may push some patients against the ceiling of 1. The question it answers is closer to “what if an adherence support program raised all Drug B patients’ compliance by a fixed amount?” than to “what if Drug B patients behaved exactly like Drug A patients?”",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#implementation-2",
-    "href": "03-03b-adherence-shift-methods.html#implementation-2",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "22.3 Implementation",
-    "text": "22.3 Implementation\n\n# Compute the mean adherence gap at each visit\nadh_gaps &lt;- numeric(T_max)\nfor (t in 1:T_max) {\n  col &lt;- paste0(\"A_\", t)\n  mean_A &lt;- mean(dat_wide[[col]][dat_wide$Drug == 1], na.rm = TRUE)\n  mean_B &lt;- mean(dat_wide[[col]][dat_wide$Drug == 0], na.rm = TRUE)\n  adh_gaps[t] &lt;- mean_A - mean_B\n  cat(\"Visit\", t, \": Drug A mean =\", round(mean_A, 3),\n      \", Drug B mean =\", round(mean_B, 3),\n      \", gap =\", round(adh_gaps[t], 3), \"\\n\")\n}\n#&gt; Visit 1 : Drug A mean = 0.645 , Drug B mean = 0.412 , gap = 0.233 \n#&gt; Visit 2 : Drug A mean = 0.681 , Drug B mean = 0.423 , gap = 0.259 \n#&gt; Visit 3 : Drug A mean = 0.728 , Drug B mean = 0.449 , gap = 0.279 \n#&gt; Visit 4 : Drug A mean = 0.757 , Drug B mean = 0.473 , gap = 0.284\n\nshift_mean_calibrated &lt;- function(data, trt) {\n  t_idx &lt;- as.integer(gsub(\"A_\", \"\", trt))\n  a_obs &lt;- data[[trt]]\n  a_shifted &lt;- a_obs\n\n  is_b &lt;- data$Drug == 0 & !is.na(a_obs)\n  if (any(is_b)) {\n    a_shifted[is_b] &lt;- pmin(a_obs[is_b] + adh_gaps[t_idx], 1)\n  }\n  a_shifted\n}\n\n\nfit_mean &lt;- lmtp_sdr(\n  data = dat_wide,\n  trt = trt_vars,\n  outcome = \"Y\",\n  baseline = baseline,\n  time_vary = time_vary,\n  cens = cens_vars,\n  shift = shift_mean_calibrated,\n  mtp = TRUE,\n  outcome_type = \"binomial\",\n  learners_outcome = sl_outcome,\n  learners_trt = sl_trt,\n  folds = n_folds\n)\n\ncontrast_mean &lt;- lmtp_contrast(fit_mean, ref = fit_observed, type = \"additive\")\ncat(\"Mean-calibrated additive shift:\\n\")\n#&gt; Mean-calibrated additive shift:\ncat(\"  Shifted estimate:\", round(fit_mean$estimate@x, 4), \"\\n\")\n#&gt;   Shifted estimate: 0.0329\ncat(\"  Contrast vs observed:\", round(contrast_mean$estimates$estimate, 4),\n    \" (95% CI:\", round(contrast_mean$estimates$conf.low, 4),\n    \"to\", round(contrast_mean$estimates$conf.high, 4), \")\\n\")\n#&gt;   Contrast vs observed: -0.1859  (95% CI: -0.2558 to -0.116 )",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#interpretation-2",
-    "href": "03-03b-adherence-shift-methods.html#interpretation-2",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "22.4 Interpretation",
-    "text": "22.4 Interpretation\nThe mean-calibrated shift tends to produce slightly different results than the quantile map because it does not reshape the distribution. If Drug B’s adherence distribution has heavier left tail than Drug A’s (more patients with very low adherence), the additive shift pushes those patients up but does not compress the tail the way quantile mapping would. Conversely, high-adherence Drug B patients may hit the ceiling at 1, wasting some of the shift. If the estimate is similar to the quantile-mapping result, the distributional shape difference between drugs is not playing a large role.\nThis approach is the easiest to explain to a clinical audience: “we added X percentage points to every Drug B patient’s adherence at each visit.” It is also the most conservative, because it does not attempt to match distributional shape.",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#how-it-works-3",
-    "href": "03-03b-adherence-shift-methods.html#how-it-works-3",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "23.1 How it works",
-    "text": "23.1 How it works\nThis is the canonical LMTP modified treatment policy. Instead of calibrating the shift to match Drug A, we apply a fixed, small, uniform increase to every patient’s adherence at every visit, regardless of drug assignment:\n\\[\nd_4(a_{it}) = \\min(a_{it} + \\delta, \\; 1)\n\\]\nwhere \\(\\delta\\) is a prespecified amount (we use \\(\\delta = 0.10\\), i.e., a 10 percentage-point increase). In words: add 10 percentage points to every patient’s adherence, regardless of drug assignment. This is not a cross-drug comparison at all; it is a within-population policy question.",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#what-question-it-answers-3",
-    "href": "03-03b-adherence-shift-methods.html#what-question-it-answers-3",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "23.2 What question it answers",
-    "text": "23.2 What question it answers\nWhat would happen if a universal adherence support program (SMS reminders, pill organizers, peer support) increased every patient’s adherence by 10 percentage points?\nThis is the most directly policy-relevant framing. It does not reference Drug A’s distribution at all. Instead, it asks about the marginal benefit of a small, feasible adherence improvement across the entire cohort. Because the shift is small, it stays close to the observed data, minimizing positivity concerns. This is the intervention most naturally suited to the LMTP framework.",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#implementation-3",
-    "href": "03-03b-adherence-shift-methods.html#implementation-3",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "23.3 Implementation",
-    "text": "23.3 Implementation\n\ndelta_fixed &lt;- 0.10\n\nshift_fixed &lt;- function(data, trt) {\n  a_obs &lt;- data[[trt]]\n  pmin(a_obs + delta_fixed, 1)\n}\n\n\nfit_fixed &lt;- lmtp_sdr(\n  data = dat_wide,\n  trt = trt_vars,\n  outcome = \"Y\",\n  baseline = baseline,\n  time_vary = time_vary,\n  cens = cens_vars,\n  shift = shift_fixed,\n  mtp = TRUE,\n  outcome_type = \"binomial\",\n  learners_outcome = sl_outcome,\n  learners_trt = sl_trt,\n  folds = n_folds\n)\n\ncontrast_fixed &lt;- lmtp_contrast(fit_fixed, ref = fit_observed, type = \"additive\")\ncat(\"Fixed additive shift (+\", delta_fixed * 100, \"pp):\\n\")\n#&gt; Fixed additive shift (+ 10 pp):\ncat(\"  Shifted estimate:\", round(fit_fixed$estimate@x, 4), \"\\n\")\n#&gt;   Shifted estimate: 0.1883\ncat(\"  Contrast vs observed:\", round(contrast_fixed$estimates$estimate, 4),\n    \" (95% CI:\", round(contrast_fixed$estimates$conf.low, 4),\n    \"to\", round(contrast_fixed$estimates$conf.high, 4), \")\\n\")\n#&gt;   Contrast vs observed: -0.0305  (95% CI: -0.1005 to 0.0395 )",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#interpretation-3",
-    "href": "03-03b-adherence-shift-methods.html#interpretation-3",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "23.4 Interpretation",
-    "text": "23.4 Interpretation\nThe fixed shift typically produces a smaller effect than the cross-drug approaches because the shift magnitude (\\(\\delta = 0.10\\)) is smaller than the Drug A minus Drug B gap. But the estimand is more directly useful for program planning. If a health system can fund an intervention expected to raise adherence by about 10 percentage points, this estimate tells them the expected outcome improvement.\nNote that this approach applies to all patients, not just Drug B. If you want a Drug-B-specific version, wrap the shift in a drug check (as in approaches 1–3). But the universal version is the standard LMTP estimand and has the strongest positivity properties, since the shift is small and applies uniformly.",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#connecting-shifts-to-the-forgiveness-curve",
-    "href": "03-03b-adherence-shift-methods.html#connecting-shifts-to-the-forgiveness-curve",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "25.1 Connecting shifts to the forgiveness curve",
-    "text": "25.1 Connecting shifts to the forgiveness curve\nEach of the four shift approaches above gives a different slice of a more fundamental object: the forgiveness curve. The forgiveness curve maps a sustained adherence level to the counterfactual risk of virologic failure:\n\\[\nr_d(a) = P\\big(Y = 1 \\mid \\text{do}(\\bar{A} = a), D = d\\big)\n\\]\nwhere \\(d\\) indexes the drug. This curve captures how a drug responds to adherence variation. A “forgiving” drug has a flat curve over a wide PDC range (failure risk stays low even when adherence drops moderately). A less forgiving drug has a steep curve where small adherence drops produce large risk increases.\nEach of the four shift approaches summarizes this curve differently:\nFixed additive shift moves each patient along the x-axis of the forgiveness curve by a constant \\(\\delta\\). The LMTP contrast integrates the slope of the curve over the observed adherence distribution, weighted by the shift magnitude. This tells you the marginal benefit of a small adherence improvement, averaged over the patient population. It is a local derivative-like quantity when \\(\\delta\\) is small.\nMean-calibrated additive shift also moves along the x-axis, but by a drug-specific amount calibrated to close the mean adherence gap. It integrates over a larger portion of the curve but still preserves the shape of Drug B’s adherence distribution. The contrast captures how much of the outcome gap between drugs is explained by the location difference in adherence distributions.\nMarginal quantile mapping transforms the entire shape of Drug B’s adherence distribution to match Drug A’s. This is not a simple translation along the x-axis; it changes the variance, skewness, and tail behavior. The contrast captures the full distributional difference in adherence, integrating the forgiveness curve under a reshaped distribution.\nConditional quantile mapping does the same distributional transformation, but conditions on patient covariates. This produces a patient-specific shift that respects heterogeneity in adherence-drug relationships.\nThe forgiveness curve itself can be traced directly using static L-TMLE at a grid of fixed PDC thresholds. The V4 fine-grid LTMLE analysis does this with 13 sliding bins, estimating \\(r_d(a)\\) at PDC levels from 0.50 to 0.95 in 3–4 percentage-point increments. This traces the curve rather than summarizing it with a single contrast.\nWhere the curve is well-estimated. The forgiveness curve can only be reliably estimated where there is adequate positivity (enough patients maintaining each PDC level given their covariate history). In the V4 simulation, the curve is well-estimated for PDC \\(\\geq 0.70\\), where both drugs have substantial density. Below 0.70, positivity breaks down because few patients sustain very low adherence for extended periods (patients who disengage tend to be censored). The LMTP shift approaches have an advantage here: because they stay close to the observed distribution, they avoid the low-positivity region where static regimes fail.\nThe forgiveness curve is thus the unifying object that connects all the estimands in this chapter and in Chapter 3.3. The different shift approaches are different ways of summarizing the same underlying causal surface, chosen based on the scientific question and the positivity constraints of the data.",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#mediation-perspective",
-    "href": "03-03b-adherence-shift-methods.html#mediation-perspective",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "25.2 Mediation perspective",
-    "text": "25.2 Mediation perspective\n\n\n\n\n\n\nInformal vs. formal mediation\n\n\n\nThe decomposition below provides useful intuition for separating adherence-mediated from pharmacological drug effects, but it is an informal controlled direct effect approximation. For a rigorous TMLE-based mediation analysis with formal natural direct and indirect effects (NDE/NIE), identification assumptions, and the crumble package, see the Mediation Analysis chapter.\n\n\nWhen comparing two drugs, the total effect on virologic failure has two components:\n\\[\n\\underbrace{E[Y(D=A)] - E[Y(D=B)]}_{\\text{total effect}} = \\underbrace{\\text{direct effect}}_{\\text{pharmacology}} + \\underbrace{\\text{indirect effect through adherence}}_{\\text{adherence-mediated}}\n\\]\nThe direct effect captures pharmacological differences between drugs (potency, resistance barrier, half-life) that affect outcomes regardless of adherence. The indirect effect captures the pathway where drug assignment affects adherence (e.g., through pill burden or side effects), which in turn affects outcomes.\nThe quantile-matching approach provides an informal controlled direct effect (CDE). By matching Drug B’s adherence distribution to Drug A’s, we hold the adherence pathway constant and ask what outcome difference remains.\nIf the total observed difference between drugs is \\(\\Delta_{\\text{total}}\\) and the difference under matched adherence is \\(\\Delta_{\\text{matched}}\\), then:\n\n\\(\\Delta_{\\text{matched}}\\) approximates the direct (pharmacological) effect: the outcome difference when both drugs have the same adherence distribution.\n\\(\\Delta_{\\text{total}} - \\Delta_{\\text{matched}}\\) approximates the adherence-mediated component: how much of the drug difference operates through the adherence pathway.\n\nThis decomposition is informal because a formal causal mediation analysis requires additional assumptions beyond those needed for the shift analysis:\n\nNo unmeasured mediator-outcome confounders affected by treatment. In our setting, this means no unmeasured common cause of adherence and failure that is also affected by drug assignment. Time-varying confounders like CD4 and viral load are measured, but there may be unmeasured factors (e.g., motivation, social support) that affect both adherence and outcomes.\nCross-world independence. The formal natural indirect effect requires a “cross-world” counterfactual (the outcome under Drug A with the adherence one would have had under Drug B), which involves quantities from two different interventional worlds simultaneously. This is a stronger assumption than anything required for the shift analysis alone.\n\nDespite these caveats, the shift framework provides valuable intuition about the relative importance of adherence versus pharmacology in explaining drug differences. In the V4 talk companion results, the quantile-matched comparison shows that a substantial portion of Drug A’s observed advantage comes from its better adherence profile, while a residual direct effect remains that reflects genuine pharmacological differences in forgiveness at low adherence levels.\nFor a formal mediation analysis using stochastic interventions, see Diaz and Hejazi (2020), who develop identification and estimation results for natural direct and indirect effects under stochastic interventions, using the same lmtp infrastructure.",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
-    ]
-  },
-  {
-    "objectID": "03-03b-adherence-shift-methods.html#check-your-understanding",
-    "href": "03-03b-adherence-shift-methods.html#check-your-understanding",
-    "title": "16  Four Ways to Shift an Adherence Distribution",
-    "section": "26.1 Check your understanding",
-    "text": "26.1 Check your understanding\n\n\nQ1. Two of the four shift approaches give very similar estimates. What does that tell you?\n\nWhen the marginal quantile-mapping and mean-calibrated additive shift give similar results, it means the outcome difference between drugs is driven primarily by the location (mean) of the adherence distributions, not by differences in their shape (variance, skewness, tail behavior). The quantile mapping reshapes the entire distribution while the additive shift only translates it. If both produce similar contrasts, the distributional shape difference between drugs is not playing a large role in explaining outcomes.\n\n\n\nQ2. When would you prefer conditional over marginal quantile mapping?\n\nWhen the adherence gap between drugs varies across patient subgroups. If older patients have a larger Drug A–Drug B adherence gap than younger patients, the marginal approach applies a uniform distributional transformation that may be too aggressive for young patients and too conservative for old ones. The conditional approach uses covariate-specific quantile regressions to produce patient-specific shifts, giving each patient a shift that reflects what they specifically would have achieved under the other drug given their clinical profile.\n\n\n\nQ3. The fixed additive shift (+10 pp) is the simplest and most conservative approach. When is it the most useful?\n\nWhen the question is about a concrete policy intervention rather than a cross-drug comparison. If a health system is considering funding an adherence support program (SMS reminders, pill organizers, peer counselors) expected to raise adherence by about 10 percentage points, the fixed shift directly estimates the expected outcome improvement. It answers “what would this program achieve?” without reference to any other drug, making it the most directly actionable for policy planning. It also has the strongest positivity properties because the shift is small and uniform.\n\n\n\n\n\n\n\nDı́az, Iván, Nicholas Williams, Katherine L Hoffman, and Edward J Schenck. 2023. “Nonparametric Causal Effects Based on Longitudinal Modified Treatment Policies.” Journal of the American Statistical Association 118 (542): 846–56. https://doi.org/10.1080/01621459.2021.1955691.",
-    "crumbs": [
-      "Part IV: Longitudinal Causal Inference",
-      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Four Ways to Shift an Adherence Distribution</span>"
+      "<span class='chapter-number'>16</span>  <span class='chapter-title'>Adherence, Forgiveness, and Distribution-Shift Interventions</span>"
     ]
   },
   {
