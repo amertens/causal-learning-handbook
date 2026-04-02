@@ -17,7 +17,7 @@ cd "$SCRIPT_DIR"
 
 QUARTO="/c/Program Files/RStudio/resources/app/bin/quarto/bin/quarto.exe"
 
-PART2_FILES="02-01-gcomputation.qmd 02-02-iptw.qmd 02-03-doubly-robust-tmle.qmd 02-04-superlearner.qmd 02-05-tmle-teaching-examples.qmd"
+PART2_FILES="02-01-gcomputation.qmd 02-02-iptw.qmd 02-03-doubly-robust-tmle.qmd 02-04-superlearner.qmd"
 
 echo "=== Step 1: Back up originals ==="
 mkdir -p _originals_backup
@@ -70,9 +70,7 @@ for f in $PART2_FILES; do
   sed -i 's|source("_data/load-haart-cohort.R")|download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")\nsource("load-haart-cohort.R")|g' "$f" 2>/dev/null
 done
 
-echo "=== Step 4: Fix inline R in 02-05 ==="
-sed -i "s|\`r round(abs(tmle_ate)\*100, 1)\`|several|g" 02-05-tmle-teaching-examples.qmd 2>/dev/null
-sed -i "s|\`r round(tmle_ci\[1\]\*100, 1)\`, \`r round(tmle_ci\[2\]\*100, 1)\`|see results table above|g" 02-05-tmle-teaching-examples.qmd 2>/dev/null
+echo "=== Step 4: No inline R fixes needed ==="
 
 echo "=== Step 5: Render workshop ==="
 "$QUARTO" render --profile workshop
