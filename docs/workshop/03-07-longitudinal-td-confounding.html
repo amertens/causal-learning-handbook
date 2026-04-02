@@ -1525,357 +1525,365 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 <span id="cb7-101"><a href="#cb7-101" aria-hidden="true" tabindex="-1"></a>| Visit $t$ | Still in study? | Censoring $C_t$ |</span>
 <span id="cb7-102"><a href="#cb7-102" aria-hidden="true" tabindex="-1"></a>| End of follow-up | Virologic failure (HIV RNA $\geq$ 200 copies/mL) | Outcome $Y$ |</span>
 <span id="cb7-103"><a href="#cb7-103" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-104"><a href="#cb7-104" aria-hidden="true" tabindex="-1"></a>ART adherence at visit $t-1$ improves CD4 at visit $t$; higher CD4 may reduce clinical urgency and affect adherence decisions; CD4 also directly affects virologic failure risk. The same feedback structure as the statin--LDL example, with more time points.</span>
+<span id="cb7-104"><a href="#cb7-104" aria-hidden="true" tabindex="-1"></a>At each visit, CD4 is measured first, then adherence is recorded, then we check whether the patient is still under observation. This ordering is not arbitrary; it encodes our causal assumptions about the temporal sequence.</span>
 <span id="cb7-105"><a href="#cb7-105" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-106"><a href="#cb7-106" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-107"><a href="#cb7-107" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why Standard Regression Fails</span></span>
+<span id="cb7-106"><a href="#cb7-106" aria-hidden="true" tabindex="-1"></a>ART adherence at visit $t-1$ improves CD4 at visit $t$; higher CD4 may reduce clinical urgency and affect adherence decisions; CD4 also directly affects virologic failure risk. The same feedback structure as the statin--LDL example, with more time points.</span>
+<span id="cb7-107"><a href="#cb7-107" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb7-108"><a href="#cb7-108" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-109"><a href="#cb7-109" aria-hidden="true" tabindex="-1"></a>We have already seen the problem in the statin example, but it is worth stating precisely what goes wrong and why.</span>
+<span id="cb7-109"><a href="#cb7-109" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why Standard Regression Fails</span></span>
 <span id="cb7-110"><a href="#cb7-110" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-111"><a href="#cb7-111" aria-hidden="true" tabindex="-1"></a><span class="fu">## The treatment--confounder feedback loop</span></span>
+<span id="cb7-111"><a href="#cb7-111" aria-hidden="true" tabindex="-1"></a>We have already seen the problem in the statin example, but it is worth stating precisely what goes wrong and why.</span>
 <span id="cb7-112"><a href="#cb7-112" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-113"><a href="#cb7-113" aria-hidden="true" tabindex="-1"></a>When a time-varying covariate $L_t$ is (1) affected by prior treatment $A_{t-1}$ and (2) confounds the relationship between $A_t$ and $Y$, we say there is **treatment--confounder feedback**. In HIV, CD4 count satisfies both conditions: ART raises CD4, and CD4 predicts both future adherence decisions and virologic failure.</span>
+<span id="cb7-113"><a href="#cb7-113" aria-hidden="true" tabindex="-1"></a><span class="fu">## The treatment--confounder feedback loop</span></span>
 <span id="cb7-114"><a href="#cb7-114" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-117"><a href="#cb7-117" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb7-118"><a href="#cb7-118" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-hiv-feedback</span></span>
-<span id="cb7-119"><a href="#cb7-119" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Treatment--confounder feedback in an HIV cohort. CD4 count at each visit is affected by prior ART adherence and also confounds the relationship between future adherence and the outcome."</span></span>
-<span id="cb7-120"><a href="#cb7-120" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-width: 9</span></span>
-<span id="cb7-121"><a href="#cb7-121" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-height: 4</span></span>
-<span id="cb7-122"><a href="#cb7-122" aria-hidden="true" tabindex="-1"></a>dag_hiv <span class="ot">&lt;-</span> <span class="fu">dagify</span>(</span>
-<span id="cb7-123"><a href="#cb7-123" aria-hidden="true" tabindex="-1"></a>  A1 <span class="sc">~</span> W, L1 <span class="sc">~</span> A1 <span class="sc">+</span> W, A2 <span class="sc">~</span> L1 <span class="sc">+</span> A1 <span class="sc">+</span> W, Y <span class="sc">~</span> A1 <span class="sc">+</span> A2 <span class="sc">+</span> L1 <span class="sc">+</span> W,</span>
-<span id="cb7-124"><a href="#cb7-124" aria-hidden="true" tabindex="-1"></a>  <span class="at">exposure =</span> <span class="st">"A1"</span>, <span class="at">outcome =</span> <span class="st">"Y"</span>,</span>
-<span id="cb7-125"><a href="#cb7-125" aria-hidden="true" tabindex="-1"></a>  <span class="at">labels =</span> <span class="fu">c</span>(<span class="at">W =</span> <span class="st">"Baseline</span><span class="sc">\n</span><span class="st">(age, sex, CD4_0)"</span>, <span class="at">A1 =</span> <span class="st">"ART adherence</span><span class="sc">\n</span><span class="st">visit 1"</span>,</span>
-<span id="cb7-126"><a href="#cb7-126" aria-hidden="true" tabindex="-1"></a>             <span class="at">L1 =</span> <span class="st">"CD4 count</span><span class="sc">\n</span><span class="st">visit 1"</span>, <span class="at">A2 =</span> <span class="st">"ART adherence</span><span class="sc">\n</span><span class="st">visit 2"</span>,</span>
-<span id="cb7-127"><a href="#cb7-127" aria-hidden="true" tabindex="-1"></a>             <span class="at">Y =</span> <span class="st">"Virologic</span><span class="sc">\n</span><span class="st">failure"</span>),</span>
-<span id="cb7-128"><a href="#cb7-128" aria-hidden="true" tabindex="-1"></a>  <span class="at">coords =</span> <span class="fu">list</span>(</span>
-<span id="cb7-129"><a href="#cb7-129" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="fu">c</span>(<span class="at">W =</span> <span class="dv">0</span>, <span class="at">A1 =</span> <span class="dv">1</span>, <span class="at">L1 =</span> <span class="dv">2</span>, <span class="at">A2 =</span> <span class="dv">3</span>, <span class="at">Y =</span> <span class="dv">4</span>),</span>
-<span id="cb7-130"><a href="#cb7-130" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="fu">c</span>(<span class="at">W =</span> <span class="dv">1</span>, <span class="at">A1 =</span> <span class="dv">0</span>, <span class="at">L1 =</span> <span class="fl">0.8</span>, <span class="at">A2 =</span> <span class="dv">0</span>, <span class="at">Y =</span> <span class="dv">0</span>)</span>
-<span id="cb7-131"><a href="#cb7-131" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb7-132"><a href="#cb7-132" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb7-133"><a href="#cb7-133" aria-hidden="true" tabindex="-1"></a><span class="fu">ggdag</span>(dag_hiv, <span class="at">text =</span> <span class="cn">FALSE</span>, <span class="at">use_labels =</span> <span class="st">"label"</span>, <span class="at">text_size =</span> <span class="fl">2.8</span>) <span class="sc">+</span></span>
-<span id="cb7-134"><a href="#cb7-134" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_dag</span>()</span>
-<span id="cb7-135"><a href="#cb7-135" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb7-136"><a href="#cb7-136" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-137"><a href="#cb7-137" aria-hidden="true" tabindex="-1"></a><span class="fu">## The dilemma</span></span>
+<span id="cb7-115"><a href="#cb7-115" aria-hidden="true" tabindex="-1"></a>When a time-varying covariate $L_t$ is (1) affected by prior treatment $A_{t-1}$ and (2) confounds the relationship between $A_t$ and $Y$, we say there is **treatment--confounder feedback**. In HIV, CD4 count satisfies both conditions: ART raises CD4, and CD4 predicts both future adherence decisions and virologic failure.</span>
+<span id="cb7-116"><a href="#cb7-116" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-119"><a href="#cb7-119" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb7-120"><a href="#cb7-120" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-hiv-feedback</span></span>
+<span id="cb7-121"><a href="#cb7-121" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Treatment--confounder feedback in an HIV cohort. CD4 count at each visit is affected by prior ART adherence and also confounds the relationship between future adherence and the outcome."</span></span>
+<span id="cb7-122"><a href="#cb7-122" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-width: 9</span></span>
+<span id="cb7-123"><a href="#cb7-123" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-height: 4</span></span>
+<span id="cb7-124"><a href="#cb7-124" aria-hidden="true" tabindex="-1"></a>dag_hiv <span class="ot">&lt;-</span> <span class="fu">dagify</span>(</span>
+<span id="cb7-125"><a href="#cb7-125" aria-hidden="true" tabindex="-1"></a>  A1 <span class="sc">~</span> W, L1 <span class="sc">~</span> A1 <span class="sc">+</span> W, A2 <span class="sc">~</span> L1 <span class="sc">+</span> A1 <span class="sc">+</span> W, Y <span class="sc">~</span> A1 <span class="sc">+</span> A2 <span class="sc">+</span> L1 <span class="sc">+</span> W,</span>
+<span id="cb7-126"><a href="#cb7-126" aria-hidden="true" tabindex="-1"></a>  <span class="at">exposure =</span> <span class="st">"A1"</span>, <span class="at">outcome =</span> <span class="st">"Y"</span>,</span>
+<span id="cb7-127"><a href="#cb7-127" aria-hidden="true" tabindex="-1"></a>  <span class="at">labels =</span> <span class="fu">c</span>(<span class="at">W =</span> <span class="st">"Baseline</span><span class="sc">\n</span><span class="st">(age, sex, CD4_0)"</span>, <span class="at">A1 =</span> <span class="st">"ART adherence</span><span class="sc">\n</span><span class="st">visit 1"</span>,</span>
+<span id="cb7-128"><a href="#cb7-128" aria-hidden="true" tabindex="-1"></a>             <span class="at">L1 =</span> <span class="st">"CD4 count</span><span class="sc">\n</span><span class="st">visit 1"</span>, <span class="at">A2 =</span> <span class="st">"ART adherence</span><span class="sc">\n</span><span class="st">visit 2"</span>,</span>
+<span id="cb7-129"><a href="#cb7-129" aria-hidden="true" tabindex="-1"></a>             <span class="at">Y =</span> <span class="st">"Virologic</span><span class="sc">\n</span><span class="st">failure"</span>),</span>
+<span id="cb7-130"><a href="#cb7-130" aria-hidden="true" tabindex="-1"></a>  <span class="at">coords =</span> <span class="fu">list</span>(</span>
+<span id="cb7-131"><a href="#cb7-131" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="fu">c</span>(<span class="at">W =</span> <span class="dv">0</span>, <span class="at">A1 =</span> <span class="dv">1</span>, <span class="at">L1 =</span> <span class="dv">2</span>, <span class="at">A2 =</span> <span class="dv">3</span>, <span class="at">Y =</span> <span class="dv">4</span>),</span>
+<span id="cb7-132"><a href="#cb7-132" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="fu">c</span>(<span class="at">W =</span> <span class="dv">1</span>, <span class="at">A1 =</span> <span class="dv">0</span>, <span class="at">L1 =</span> <span class="fl">0.8</span>, <span class="at">A2 =</span> <span class="dv">0</span>, <span class="at">Y =</span> <span class="dv">0</span>)</span>
+<span id="cb7-133"><a href="#cb7-133" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb7-134"><a href="#cb7-134" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb7-135"><a href="#cb7-135" aria-hidden="true" tabindex="-1"></a><span class="fu">ggdag</span>(dag_hiv, <span class="at">text =</span> <span class="cn">FALSE</span>, <span class="at">use_labels =</span> <span class="st">"label"</span>, <span class="at">text_size =</span> <span class="fl">2.8</span>) <span class="sc">+</span></span>
+<span id="cb7-136"><a href="#cb7-136" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_dag</span>()</span>
+<span id="cb7-137"><a href="#cb7-137" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
 <span id="cb7-138"><a href="#cb7-138" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-139"><a href="#cb7-139" aria-hidden="true" tabindex="-1"></a>A standard regression model (logistic, Cox, or GEE) faces a lose-lose choice: **adjust for $L_t$** and block the causal pathway $A_{t-1} \to L_t \to Y$, or **omit $L_t$** and leave $A_t$ confounded. No regression specification simultaneously deconfounds future treatment and preserves the mediated effect of past treatment.</span>
+<span id="cb7-139"><a href="#cb7-139" aria-hidden="true" tabindex="-1"></a><span class="fu">## The dilemma</span></span>
 <span id="cb7-140"><a href="#cb7-140" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-141"><a href="#cb7-141" aria-hidden="true" tabindex="-1"></a><span class="fu">## Seeing the dilemma step by step</span></span>
+<span id="cb7-141"><a href="#cb7-141" aria-hidden="true" tabindex="-1"></a>A standard regression model (logistic, Cox, or GEE) faces a lose-lose choice: **adjust for $L_t$** and block the causal pathway $A_{t-1} \to L_t \to Y$, or **omit $L_t$** and leave $A_t$ confounded. No regression specification simultaneously deconfounds future treatment and preserves the mediated effect of past treatment.</span>
 <span id="cb7-142"><a href="#cb7-142" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-143"><a href="#cb7-143" aria-hidden="true" tabindex="-1"></a>The following DAG panels isolate each component using a simplified two-period version of the HIV DAG.</span>
+<span id="cb7-143"><a href="#cb7-143" aria-hidden="true" tabindex="-1"></a><span class="fu">## Seeing the dilemma step by step</span></span>
 <span id="cb7-144"><a href="#cb7-144" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-147"><a href="#cb7-147" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb7-148"><a href="#cb7-148" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: dag-step-setup</span></span>
-<span id="cb7-149"><a href="#cb7-149" aria-hidden="true" tabindex="-1"></a><span class="co">#| include: false</span></span>
-<span id="cb7-150"><a href="#cb7-150" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-151"><a href="#cb7-151" aria-hidden="true" tabindex="-1"></a><span class="co"># Tableau 10 colour palette</span></span>
-<span id="cb7-152"><a href="#cb7-152" aria-hidden="true" tabindex="-1"></a>tab10 <span class="ot">&lt;-</span> <span class="fu">c</span>(</span>
-<span id="cb7-153"><a href="#cb7-153" aria-hidden="true" tabindex="-1"></a>  <span class="at">blue   =</span> <span class="st">"#4E79A7"</span>, <span class="at">orange =</span> <span class="st">"#F28E2B"</span>, <span class="at">red    =</span> <span class="st">"#E15759"</span>,</span>
-<span id="cb7-154"><a href="#cb7-154" aria-hidden="true" tabindex="-1"></a>  <span class="at">teal   =</span> <span class="st">"#76B7B2"</span>, <span class="at">green  =</span> <span class="st">"#59A14F"</span>, <span class="at">yellow =</span> <span class="st">"#EDC948"</span>,</span>
-<span id="cb7-155"><a href="#cb7-155" aria-hidden="true" tabindex="-1"></a>  <span class="at">purple =</span> <span class="st">"#B07AA1"</span>, <span class="at">pink   =</span> <span class="st">"#FF9DA7"</span>, <span class="at">brown  =</span> <span class="st">"#9C755F"</span>,</span>
-<span id="cb7-156"><a href="#cb7-156" aria-hidden="true" tabindex="-1"></a>  <span class="at">grey   =</span> <span class="st">"#BAB0AC"</span></span>
-<span id="cb7-157"><a href="#cb7-157" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb7-158"><a href="#cb7-158" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-159"><a href="#cb7-159" aria-hidden="true" tabindex="-1"></a><span class="co"># Two-period DAG: W -&gt; A1 -&gt; L -&gt; A2 -&gt; Y, with feedback</span></span>
-<span id="cb7-160"><a href="#cb7-160" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dagitty)</span>
-<span id="cb7-161"><a href="#cb7-161" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggdag)</span>
-<span id="cb7-162"><a href="#cb7-162" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-163"><a href="#cb7-163" aria-hidden="true" tabindex="-1"></a>dag_ch <span class="ot">&lt;-</span> <span class="fu">dagitty</span>(<span class="st">'dag {</span></span>
-<span id="cb7-164"><a href="#cb7-164" aria-hidden="true" tabindex="-1"></a><span class="st">  W   [pos="0,0.8"]</span></span>
-<span id="cb7-165"><a href="#cb7-165" aria-hidden="true" tabindex="-1"></a><span class="st">  A1  [pos="1,0"]</span></span>
-<span id="cb7-166"><a href="#cb7-166" aria-hidden="true" tabindex="-1"></a><span class="st">  L2  [pos="2,0.8"]</span></span>
-<span id="cb7-167"><a href="#cb7-167" aria-hidden="true" tabindex="-1"></a><span class="st">  A2  [pos="3,0"]</span></span>
-<span id="cb7-168"><a href="#cb7-168" aria-hidden="true" tabindex="-1"></a><span class="st">  Y   [pos="4,0"]</span></span>
-<span id="cb7-169"><a href="#cb7-169" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-170"><a href="#cb7-170" aria-hidden="true" tabindex="-1"></a><span class="st">  W -&gt; A1</span></span>
-<span id="cb7-171"><a href="#cb7-171" aria-hidden="true" tabindex="-1"></a><span class="st">  W -&gt; L2</span></span>
-<span id="cb7-172"><a href="#cb7-172" aria-hidden="true" tabindex="-1"></a><span class="st">  W -&gt; A2</span></span>
-<span id="cb7-173"><a href="#cb7-173" aria-hidden="true" tabindex="-1"></a><span class="st">  W -&gt; Y</span></span>
-<span id="cb7-174"><a href="#cb7-174" aria-hidden="true" tabindex="-1"></a><span class="st">  A1 -&gt; L2</span></span>
-<span id="cb7-175"><a href="#cb7-175" aria-hidden="true" tabindex="-1"></a><span class="st">  A1 -&gt; Y</span></span>
-<span id="cb7-176"><a href="#cb7-176" aria-hidden="true" tabindex="-1"></a><span class="st">  L2 -&gt; A2</span></span>
-<span id="cb7-177"><a href="#cb7-177" aria-hidden="true" tabindex="-1"></a><span class="st">  L2 -&gt; Y</span></span>
-<span id="cb7-178"><a href="#cb7-178" aria-hidden="true" tabindex="-1"></a><span class="st">  A2 -&gt; Y</span></span>
-<span id="cb7-179"><a href="#cb7-179" aria-hidden="true" tabindex="-1"></a><span class="st">}'</span>)</span>
-<span id="cb7-180"><a href="#cb7-180" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-181"><a href="#cb7-181" aria-hidden="true" tabindex="-1"></a>dag_ch_tidy <span class="ot">&lt;-</span> <span class="fu">tidy_dagitty</span>(dag_ch)</span>
-<span id="cb7-182"><a href="#cb7-182" aria-hidden="true" tabindex="-1"></a>dag_ch_df   <span class="ot">&lt;-</span> dag_ch_tidy<span class="sc">$</span>data</span>
-<span id="cb7-183"><a href="#cb7-183" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-184"><a href="#cb7-184" aria-hidden="true" tabindex="-1"></a><span class="co"># Node roles for fill colour</span></span>
-<span id="cb7-185"><a href="#cb7-185" aria-hidden="true" tabindex="-1"></a>node_roles_ch <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="at">W =</span> <span class="st">"baseline"</span>, <span class="at">A1 =</span> <span class="st">"treatment"</span>, <span class="at">L2 =</span> <span class="st">"confounder"</span>,</span>
-<span id="cb7-186"><a href="#cb7-186" aria-hidden="true" tabindex="-1"></a>                   <span class="at">A2 =</span> <span class="st">"treatment"</span>, <span class="at">Y =</span> <span class="st">"outcome"</span>)</span>
-<span id="cb7-187"><a href="#cb7-187" aria-hidden="true" tabindex="-1"></a>dag_ch_df<span class="sc">$</span>role <span class="ot">&lt;-</span> node_roles_ch[dag_ch_df<span class="sc">$</span>name]</span>
-<span id="cb7-188"><a href="#cb7-188" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-189"><a href="#cb7-189" aria-hidden="true" tabindex="-1"></a>role_fills_ch <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"baseline"</span>   <span class="ot">=</span> <span class="st">"#F0F0F0"</span>,</span>
-<span id="cb7-190"><a href="#cb7-190" aria-hidden="true" tabindex="-1"></a>                   <span class="st">"confounder"</span> <span class="ot">=</span> <span class="st">"#FEE0D2"</span>,</span>
-<span id="cb7-191"><a href="#cb7-191" aria-hidden="true" tabindex="-1"></a>                   <span class="st">"treatment"</span>  <span class="ot">=</span> <span class="st">"#DEEBF7"</span>,</span>
-<span id="cb7-192"><a href="#cb7-192" aria-hidden="true" tabindex="-1"></a>                   <span class="st">"outcome"</span>    <span class="ot">=</span> <span class="st">"#E5F5E0"</span>)</span>
-<span id="cb7-193"><a href="#cb7-193" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-194"><a href="#cb7-194" aria-hidden="true" tabindex="-1"></a><span class="co"># Helper: draw the DAG with optional edge highlighting</span></span>
-<span id="cb7-195"><a href="#cb7-195" aria-hidden="true" tabindex="-1"></a>draw_dag_step <span class="ot">&lt;-</span> <span class="cf">function</span>(<span class="at">highlight_pairs =</span> <span class="fu">list</span>(),</span>
-<span id="cb7-196"><a href="#cb7-196" aria-hidden="true" tabindex="-1"></a>                          <span class="at">highlight_colour =</span> tab10[[<span class="st">"red"</span>]],</span>
-<span id="cb7-197"><a href="#cb7-197" aria-hidden="true" tabindex="-1"></a>                          <span class="at">df =</span> dag_ch_df) {</span>
-<span id="cb7-198"><a href="#cb7-198" aria-hidden="true" tabindex="-1"></a>  edges_all <span class="ot">&lt;-</span> df[<span class="sc">!</span><span class="fu">is.na</span>(df<span class="sc">$</span>to), ]</span>
-<span id="cb7-199"><a href="#cb7-199" aria-hidden="true" tabindex="-1"></a>  edges_all<span class="sc">$</span>highlighted <span class="ot">&lt;-</span> <span class="cn">FALSE</span></span>
-<span id="cb7-200"><a href="#cb7-200" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (hp <span class="cf">in</span> highlight_pairs) {</span>
-<span id="cb7-201"><a href="#cb7-201" aria-hidden="true" tabindex="-1"></a>    idx <span class="ot">&lt;-</span> edges_all<span class="sc">$</span>name <span class="sc">==</span> hp[<span class="dv">1</span>] <span class="sc">&amp;</span> edges_all<span class="sc">$</span>to <span class="sc">==</span> hp[<span class="dv">2</span>]</span>
-<span id="cb7-202"><a href="#cb7-202" aria-hidden="true" tabindex="-1"></a>    edges_all<span class="sc">$</span>highlighted[idx] <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
-<span id="cb7-203"><a href="#cb7-203" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb7-204"><a href="#cb7-204" aria-hidden="true" tabindex="-1"></a>  has_hl <span class="ot">&lt;-</span> <span class="fu">length</span>(highlight_pairs) <span class="sc">&gt;</span> <span class="dv">0</span></span>
-<span id="cb7-205"><a href="#cb7-205" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-206"><a href="#cb7-206" aria-hidden="true" tabindex="-1"></a>  xrng <span class="ot">&lt;-</span> <span class="fu">range</span>(df<span class="sc">$</span>x, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb7-207"><a href="#cb7-207" aria-hidden="true" tabindex="-1"></a>  yrng <span class="ot">&lt;-</span> <span class="fu">range</span>(df<span class="sc">$</span>y, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb7-208"><a href="#cb7-208" aria-hidden="true" tabindex="-1"></a>  pad  <span class="ot">&lt;-</span> <span class="fl">0.6</span></span>
-<span id="cb7-209"><a href="#cb7-209" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-210"><a href="#cb7-210" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(df, <span class="fu">aes</span>(<span class="at">x =</span> x, <span class="at">y =</span> y)) <span class="sc">+</span></span>
-<span id="cb7-211"><a href="#cb7-211" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_all,</span>
-<span id="cb7-212"><a href="#cb7-212" aria-hidden="true" tabindex="-1"></a>                 <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
-<span id="cb7-213"><a href="#cb7-213" aria-hidden="true" tabindex="-1"></a>                 <span class="at">colour =</span> <span class="cf">if</span> (has_hl) <span class="st">"grey70"</span> <span class="cf">else</span> <span class="st">"grey30"</span>,</span>
-<span id="cb7-214"><a href="#cb7-214" aria-hidden="true" tabindex="-1"></a>                 <span class="at">linewidth =</span> <span class="cf">if</span> (has_hl) <span class="fl">0.4</span> <span class="cf">else</span> <span class="fl">0.6</span>,</span>
-<span id="cb7-215"><a href="#cb7-215" aria-hidden="true" tabindex="-1"></a>                 <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.08</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
-<span id="cb7-216"><a href="#cb7-216" aria-hidden="true" tabindex="-1"></a>    {<span class="cf">if</span> (has_hl)</span>
-<span id="cb7-217"><a href="#cb7-217" aria-hidden="true" tabindex="-1"></a>      <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_all[edges_all<span class="sc">$</span>highlighted, ],</span>
-<span id="cb7-218"><a href="#cb7-218" aria-hidden="true" tabindex="-1"></a>                   <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
-<span id="cb7-219"><a href="#cb7-219" aria-hidden="true" tabindex="-1"></a>                   <span class="at">colour =</span> highlight_colour, <span class="at">linewidth =</span> <span class="fl">1.0</span>,</span>
-<span id="cb7-220"><a href="#cb7-220" aria-hidden="true" tabindex="-1"></a>                   <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.12</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>))</span>
-<span id="cb7-221"><a href="#cb7-221" aria-hidden="true" tabindex="-1"></a>    } <span class="sc">+</span></span>
-<span id="cb7-222"><a href="#cb7-222" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_point</span>(<span class="fu">aes</span>(<span class="at">fill =</span> role), <span class="at">size =</span> <span class="dv">16</span>, <span class="at">shape =</span> <span class="dv">21</span>,</span>
-<span id="cb7-223"><a href="#cb7-223" aria-hidden="true" tabindex="-1"></a>               <span class="at">colour =</span> <span class="st">"grey30"</span>, <span class="at">stroke =</span> <span class="fl">0.6</span>) <span class="sc">+</span></span>
-<span id="cb7-224"><a href="#cb7-224" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> name), <span class="at">size =</span> <span class="fl">3.5</span>, <span class="at">fontface =</span> <span class="st">"bold"</span>) <span class="sc">+</span></span>
-<span id="cb7-225"><a href="#cb7-225" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_fill_manual</span>(<span class="at">values =</span> role_fills_ch, <span class="at">guide =</span> <span class="st">"none"</span>) <span class="sc">+</span></span>
-<span id="cb7-226"><a href="#cb7-226" aria-hidden="true" tabindex="-1"></a>    <span class="fu">coord_cartesian</span>(<span class="at">xlim =</span> <span class="fu">c</span>(xrng[<span class="dv">1</span>] <span class="sc">-</span> pad, xrng[<span class="dv">2</span>] <span class="sc">+</span> pad),</span>
-<span id="cb7-227"><a href="#cb7-227" aria-hidden="true" tabindex="-1"></a>                    <span class="at">ylim =</span> <span class="fu">c</span>(yrng[<span class="dv">1</span>] <span class="sc">-</span> pad, yrng[<span class="dv">2</span>] <span class="sc">+</span> pad),</span>
-<span id="cb7-228"><a href="#cb7-228" aria-hidden="true" tabindex="-1"></a>                    <span class="at">clip =</span> <span class="st">"off"</span>) <span class="sc">+</span></span>
-<span id="cb7-229"><a href="#cb7-229" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_dag</span>(<span class="at">base_size =</span> <span class="dv">14</span>)</span>
-<span id="cb7-230"><a href="#cb7-230" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb7-231"><a href="#cb7-231" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb7-232"><a href="#cb7-232" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-233"><a href="#cb7-233" aria-hidden="true" tabindex="-1"></a><span class="fu">### Step 1: The full causal structure</span></span>
+<span id="cb7-145"><a href="#cb7-145" aria-hidden="true" tabindex="-1"></a>The following DAG panels isolate each component using a simplified two-period version of the HIV DAG.</span>
+<span id="cb7-146"><a href="#cb7-146" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-149"><a href="#cb7-149" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb7-150"><a href="#cb7-150" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: dag-step-setup</span></span>
+<span id="cb7-151"><a href="#cb7-151" aria-hidden="true" tabindex="-1"></a><span class="co">#| include: false</span></span>
+<span id="cb7-152"><a href="#cb7-152" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-153"><a href="#cb7-153" aria-hidden="true" tabindex="-1"></a><span class="co"># Tableau 10 colour palette</span></span>
+<span id="cb7-154"><a href="#cb7-154" aria-hidden="true" tabindex="-1"></a>tab10 <span class="ot">&lt;-</span> <span class="fu">c</span>(</span>
+<span id="cb7-155"><a href="#cb7-155" aria-hidden="true" tabindex="-1"></a>  <span class="at">blue   =</span> <span class="st">"#4E79A7"</span>, <span class="at">orange =</span> <span class="st">"#F28E2B"</span>, <span class="at">red    =</span> <span class="st">"#E15759"</span>,</span>
+<span id="cb7-156"><a href="#cb7-156" aria-hidden="true" tabindex="-1"></a>  <span class="at">teal   =</span> <span class="st">"#76B7B2"</span>, <span class="at">green  =</span> <span class="st">"#59A14F"</span>, <span class="at">yellow =</span> <span class="st">"#EDC948"</span>,</span>
+<span id="cb7-157"><a href="#cb7-157" aria-hidden="true" tabindex="-1"></a>  <span class="at">purple =</span> <span class="st">"#B07AA1"</span>, <span class="at">pink   =</span> <span class="st">"#FF9DA7"</span>, <span class="at">brown  =</span> <span class="st">"#9C755F"</span>,</span>
+<span id="cb7-158"><a href="#cb7-158" aria-hidden="true" tabindex="-1"></a>  <span class="at">grey   =</span> <span class="st">"#BAB0AC"</span></span>
+<span id="cb7-159"><a href="#cb7-159" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb7-160"><a href="#cb7-160" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-161"><a href="#cb7-161" aria-hidden="true" tabindex="-1"></a><span class="co"># Two-period DAG: W -&gt; A1 -&gt; L -&gt; A2 -&gt; Y, with feedback</span></span>
+<span id="cb7-162"><a href="#cb7-162" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dagitty)</span>
+<span id="cb7-163"><a href="#cb7-163" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggdag)</span>
+<span id="cb7-164"><a href="#cb7-164" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-165"><a href="#cb7-165" aria-hidden="true" tabindex="-1"></a>dag_ch <span class="ot">&lt;-</span> <span class="fu">dagitty</span>(<span class="st">'dag {</span></span>
+<span id="cb7-166"><a href="#cb7-166" aria-hidden="true" tabindex="-1"></a><span class="st">  W   [pos="0,0.8"]</span></span>
+<span id="cb7-167"><a href="#cb7-167" aria-hidden="true" tabindex="-1"></a><span class="st">  A1  [pos="1,0"]</span></span>
+<span id="cb7-168"><a href="#cb7-168" aria-hidden="true" tabindex="-1"></a><span class="st">  L2  [pos="2,0.8"]</span></span>
+<span id="cb7-169"><a href="#cb7-169" aria-hidden="true" tabindex="-1"></a><span class="st">  A2  [pos="3,0"]</span></span>
+<span id="cb7-170"><a href="#cb7-170" aria-hidden="true" tabindex="-1"></a><span class="st">  Y   [pos="4,0"]</span></span>
+<span id="cb7-171"><a href="#cb7-171" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-172"><a href="#cb7-172" aria-hidden="true" tabindex="-1"></a><span class="st">  W -&gt; A1</span></span>
+<span id="cb7-173"><a href="#cb7-173" aria-hidden="true" tabindex="-1"></a><span class="st">  W -&gt; L2</span></span>
+<span id="cb7-174"><a href="#cb7-174" aria-hidden="true" tabindex="-1"></a><span class="st">  W -&gt; A2</span></span>
+<span id="cb7-175"><a href="#cb7-175" aria-hidden="true" tabindex="-1"></a><span class="st">  W -&gt; Y</span></span>
+<span id="cb7-176"><a href="#cb7-176" aria-hidden="true" tabindex="-1"></a><span class="st">  A1 -&gt; L2</span></span>
+<span id="cb7-177"><a href="#cb7-177" aria-hidden="true" tabindex="-1"></a><span class="st">  A1 -&gt; Y</span></span>
+<span id="cb7-178"><a href="#cb7-178" aria-hidden="true" tabindex="-1"></a><span class="st">  L2 -&gt; A2</span></span>
+<span id="cb7-179"><a href="#cb7-179" aria-hidden="true" tabindex="-1"></a><span class="st">  L2 -&gt; Y</span></span>
+<span id="cb7-180"><a href="#cb7-180" aria-hidden="true" tabindex="-1"></a><span class="st">  A2 -&gt; Y</span></span>
+<span id="cb7-181"><a href="#cb7-181" aria-hidden="true" tabindex="-1"></a><span class="st">}'</span>)</span>
+<span id="cb7-182"><a href="#cb7-182" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-183"><a href="#cb7-183" aria-hidden="true" tabindex="-1"></a>dag_ch_tidy <span class="ot">&lt;-</span> <span class="fu">tidy_dagitty</span>(dag_ch)</span>
+<span id="cb7-184"><a href="#cb7-184" aria-hidden="true" tabindex="-1"></a>dag_ch_df   <span class="ot">&lt;-</span> dag_ch_tidy<span class="sc">$</span>data</span>
+<span id="cb7-185"><a href="#cb7-185" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-186"><a href="#cb7-186" aria-hidden="true" tabindex="-1"></a><span class="co"># Node roles for fill colour</span></span>
+<span id="cb7-187"><a href="#cb7-187" aria-hidden="true" tabindex="-1"></a>node_roles_ch <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="at">W =</span> <span class="st">"baseline"</span>, <span class="at">A1 =</span> <span class="st">"treatment"</span>, <span class="at">L2 =</span> <span class="st">"confounder"</span>,</span>
+<span id="cb7-188"><a href="#cb7-188" aria-hidden="true" tabindex="-1"></a>                   <span class="at">A2 =</span> <span class="st">"treatment"</span>, <span class="at">Y =</span> <span class="st">"outcome"</span>)</span>
+<span id="cb7-189"><a href="#cb7-189" aria-hidden="true" tabindex="-1"></a>dag_ch_df<span class="sc">$</span>role <span class="ot">&lt;-</span> node_roles_ch[dag_ch_df<span class="sc">$</span>name]</span>
+<span id="cb7-190"><a href="#cb7-190" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-191"><a href="#cb7-191" aria-hidden="true" tabindex="-1"></a>role_fills_ch <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"baseline"</span>   <span class="ot">=</span> <span class="st">"#F0F0F0"</span>,</span>
+<span id="cb7-192"><a href="#cb7-192" aria-hidden="true" tabindex="-1"></a>                   <span class="st">"confounder"</span> <span class="ot">=</span> <span class="st">"#FEE0D2"</span>,</span>
+<span id="cb7-193"><a href="#cb7-193" aria-hidden="true" tabindex="-1"></a>                   <span class="st">"treatment"</span>  <span class="ot">=</span> <span class="st">"#DEEBF7"</span>,</span>
+<span id="cb7-194"><a href="#cb7-194" aria-hidden="true" tabindex="-1"></a>                   <span class="st">"outcome"</span>    <span class="ot">=</span> <span class="st">"#E5F5E0"</span>)</span>
+<span id="cb7-195"><a href="#cb7-195" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-196"><a href="#cb7-196" aria-hidden="true" tabindex="-1"></a><span class="co"># Helper: draw the DAG with optional edge highlighting</span></span>
+<span id="cb7-197"><a href="#cb7-197" aria-hidden="true" tabindex="-1"></a>draw_dag_step <span class="ot">&lt;-</span> <span class="cf">function</span>(<span class="at">highlight_pairs =</span> <span class="fu">list</span>(),</span>
+<span id="cb7-198"><a href="#cb7-198" aria-hidden="true" tabindex="-1"></a>                          <span class="at">highlight_colour =</span> tab10[[<span class="st">"red"</span>]],</span>
+<span id="cb7-199"><a href="#cb7-199" aria-hidden="true" tabindex="-1"></a>                          <span class="at">df =</span> dag_ch_df) {</span>
+<span id="cb7-200"><a href="#cb7-200" aria-hidden="true" tabindex="-1"></a>  edges_all <span class="ot">&lt;-</span> df[<span class="sc">!</span><span class="fu">is.na</span>(df<span class="sc">$</span>to), ]</span>
+<span id="cb7-201"><a href="#cb7-201" aria-hidden="true" tabindex="-1"></a>  edges_all<span class="sc">$</span>highlighted <span class="ot">&lt;-</span> <span class="cn">FALSE</span></span>
+<span id="cb7-202"><a href="#cb7-202" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (hp <span class="cf">in</span> highlight_pairs) {</span>
+<span id="cb7-203"><a href="#cb7-203" aria-hidden="true" tabindex="-1"></a>    idx <span class="ot">&lt;-</span> edges_all<span class="sc">$</span>name <span class="sc">==</span> hp[<span class="dv">1</span>] <span class="sc">&amp;</span> edges_all<span class="sc">$</span>to <span class="sc">==</span> hp[<span class="dv">2</span>]</span>
+<span id="cb7-204"><a href="#cb7-204" aria-hidden="true" tabindex="-1"></a>    edges_all<span class="sc">$</span>highlighted[idx] <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
+<span id="cb7-205"><a href="#cb7-205" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb7-206"><a href="#cb7-206" aria-hidden="true" tabindex="-1"></a>  has_hl <span class="ot">&lt;-</span> <span class="fu">length</span>(highlight_pairs) <span class="sc">&gt;</span> <span class="dv">0</span></span>
+<span id="cb7-207"><a href="#cb7-207" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-208"><a href="#cb7-208" aria-hidden="true" tabindex="-1"></a>  xrng <span class="ot">&lt;-</span> <span class="fu">range</span>(df<span class="sc">$</span>x, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb7-209"><a href="#cb7-209" aria-hidden="true" tabindex="-1"></a>  yrng <span class="ot">&lt;-</span> <span class="fu">range</span>(df<span class="sc">$</span>y, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb7-210"><a href="#cb7-210" aria-hidden="true" tabindex="-1"></a>  pad  <span class="ot">&lt;-</span> <span class="fl">0.6</span></span>
+<span id="cb7-211"><a href="#cb7-211" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-212"><a href="#cb7-212" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(df, <span class="fu">aes</span>(<span class="at">x =</span> x, <span class="at">y =</span> y)) <span class="sc">+</span></span>
+<span id="cb7-213"><a href="#cb7-213" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_all,</span>
+<span id="cb7-214"><a href="#cb7-214" aria-hidden="true" tabindex="-1"></a>                 <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
+<span id="cb7-215"><a href="#cb7-215" aria-hidden="true" tabindex="-1"></a>                 <span class="at">colour =</span> <span class="cf">if</span> (has_hl) <span class="st">"grey70"</span> <span class="cf">else</span> <span class="st">"grey30"</span>,</span>
+<span id="cb7-216"><a href="#cb7-216" aria-hidden="true" tabindex="-1"></a>                 <span class="at">linewidth =</span> <span class="cf">if</span> (has_hl) <span class="fl">0.4</span> <span class="cf">else</span> <span class="fl">0.6</span>,</span>
+<span id="cb7-217"><a href="#cb7-217" aria-hidden="true" tabindex="-1"></a>                 <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.08</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
+<span id="cb7-218"><a href="#cb7-218" aria-hidden="true" tabindex="-1"></a>    {<span class="cf">if</span> (has_hl)</span>
+<span id="cb7-219"><a href="#cb7-219" aria-hidden="true" tabindex="-1"></a>      <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_all[edges_all<span class="sc">$</span>highlighted, ],</span>
+<span id="cb7-220"><a href="#cb7-220" aria-hidden="true" tabindex="-1"></a>                   <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
+<span id="cb7-221"><a href="#cb7-221" aria-hidden="true" tabindex="-1"></a>                   <span class="at">colour =</span> highlight_colour, <span class="at">linewidth =</span> <span class="fl">1.0</span>,</span>
+<span id="cb7-222"><a href="#cb7-222" aria-hidden="true" tabindex="-1"></a>                   <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.12</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>))</span>
+<span id="cb7-223"><a href="#cb7-223" aria-hidden="true" tabindex="-1"></a>    } <span class="sc">+</span></span>
+<span id="cb7-224"><a href="#cb7-224" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_point</span>(<span class="fu">aes</span>(<span class="at">fill =</span> role), <span class="at">size =</span> <span class="dv">16</span>, <span class="at">shape =</span> <span class="dv">21</span>,</span>
+<span id="cb7-225"><a href="#cb7-225" aria-hidden="true" tabindex="-1"></a>               <span class="at">colour =</span> <span class="st">"grey30"</span>, <span class="at">stroke =</span> <span class="fl">0.6</span>) <span class="sc">+</span></span>
+<span id="cb7-226"><a href="#cb7-226" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> name), <span class="at">size =</span> <span class="fl">3.5</span>, <span class="at">fontface =</span> <span class="st">"bold"</span>) <span class="sc">+</span></span>
+<span id="cb7-227"><a href="#cb7-227" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_fill_manual</span>(<span class="at">values =</span> role_fills_ch, <span class="at">guide =</span> <span class="st">"none"</span>) <span class="sc">+</span></span>
+<span id="cb7-228"><a href="#cb7-228" aria-hidden="true" tabindex="-1"></a>    <span class="fu">coord_cartesian</span>(<span class="at">xlim =</span> <span class="fu">c</span>(xrng[<span class="dv">1</span>] <span class="sc">-</span> pad, xrng[<span class="dv">2</span>] <span class="sc">+</span> pad),</span>
+<span id="cb7-229"><a href="#cb7-229" aria-hidden="true" tabindex="-1"></a>                    <span class="at">ylim =</span> <span class="fu">c</span>(yrng[<span class="dv">1</span>] <span class="sc">-</span> pad, yrng[<span class="dv">2</span>] <span class="sc">+</span> pad),</span>
+<span id="cb7-230"><a href="#cb7-230" aria-hidden="true" tabindex="-1"></a>                    <span class="at">clip =</span> <span class="st">"off"</span>) <span class="sc">+</span></span>
+<span id="cb7-231"><a href="#cb7-231" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_dag</span>(<span class="at">base_size =</span> <span class="dv">14</span>)</span>
+<span id="cb7-232"><a href="#cb7-232" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb7-233"><a href="#cb7-233" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
 <span id="cb7-234"><a href="#cb7-234" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-237"><a href="#cb7-237" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb7-238"><a href="#cb7-238" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-dag-step1</span></span>
-<span id="cb7-239"><a href="#cb7-239" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Step 1: Full causal structure. All paths shown, no highlighting."</span></span>
-<span id="cb7-240"><a href="#cb7-240" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-width: 8</span></span>
-<span id="cb7-241"><a href="#cb7-241" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-height: 3.5</span></span>
-<span id="cb7-242"><a href="#cb7-242" aria-hidden="true" tabindex="-1"></a><span class="fu">draw_dag_step</span>(<span class="at">highlight_pairs =</span> <span class="fu">list</span>())</span>
-<span id="cb7-243"><a href="#cb7-243" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb7-244"><a href="#cb7-244" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-245"><a href="#cb7-245" aria-hidden="true" tabindex="-1"></a><span class="fu">### Step 2: Why adjusting for $L_2$ fails</span></span>
+<span id="cb7-235"><a href="#cb7-235" aria-hidden="true" tabindex="-1"></a><span class="fu">### Step 1: The full causal structure</span></span>
+<span id="cb7-236"><a href="#cb7-236" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-239"><a href="#cb7-239" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb7-240"><a href="#cb7-240" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-dag-step1</span></span>
+<span id="cb7-241"><a href="#cb7-241" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Step 1: Full causal structure. All paths shown, no highlighting."</span></span>
+<span id="cb7-242"><a href="#cb7-242" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-width: 8</span></span>
+<span id="cb7-243"><a href="#cb7-243" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-height: 3.5</span></span>
+<span id="cb7-244"><a href="#cb7-244" aria-hidden="true" tabindex="-1"></a><span class="fu">draw_dag_step</span>(<span class="at">highlight_pairs =</span> <span class="fu">list</span>())</span>
+<span id="cb7-245"><a href="#cb7-245" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
 <span id="cb7-246"><a href="#cb7-246" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-247"><a href="#cb7-247" aria-hidden="true" tabindex="-1"></a>Conditioning on $L_2$ blocks the confounding path $L_2 \to A_2$ and $L_2 \to Y$, but also blocks the causal mediated path $A_1 \to L_2 \to Y$. The edge $L_2 \to Y$ is on *both* paths---this is why no regression specification can solve both problems at once.</span>
+<span id="cb7-247"><a href="#cb7-247" aria-hidden="true" tabindex="-1"></a><span class="fu">### Step 2: Why adjusting for $L_2$ fails</span></span>
 <span id="cb7-248"><a href="#cb7-248" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-251"><a href="#cb7-251" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb7-252"><a href="#cb7-252" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-dag-step2</span></span>
-<span id="cb7-253"><a href="#cb7-253" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Step 2: Why adjusting for L2 fails. Red = confounding paths we want to block. Blue = causal mediated path also blocked by conditioning on L2. Purple = L2 -&gt; Y is on BOTH paths. The box around L2 represents conditioning."</span></span>
-<span id="cb7-254"><a href="#cb7-254" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-width: 8</span></span>
-<span id="cb7-255"><a href="#cb7-255" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-height: 4.5</span></span>
-<span id="cb7-256"><a href="#cb7-256" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-257"><a href="#cb7-257" aria-hidden="true" tabindex="-1"></a>edges_step4 <span class="ot">&lt;-</span> dag_ch_df[<span class="sc">!</span><span class="fu">is.na</span>(dag_ch_df<span class="sc">$</span>to), ]</span>
-<span id="cb7-258"><a href="#cb7-258" aria-hidden="true" tabindex="-1"></a>edges_step4<span class="sc">$</span>step4_type <span class="ot">&lt;-</span> <span class="st">"dim"</span></span>
-<span id="cb7-259"><a href="#cb7-259" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-260"><a href="#cb7-260" aria-hidden="true" tabindex="-1"></a><span class="co"># Confounding: L2 -&gt; A2</span></span>
-<span id="cb7-261"><a href="#cb7-261" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (hp <span class="cf">in</span> <span class="fu">list</span>(<span class="fu">c</span>(<span class="st">"L2"</span>, <span class="st">"A2"</span>))) {</span>
-<span id="cb7-262"><a href="#cb7-262" aria-hidden="true" tabindex="-1"></a>  idx <span class="ot">&lt;-</span> edges_step4<span class="sc">$</span>name <span class="sc">==</span> hp[<span class="dv">1</span>] <span class="sc">&amp;</span> edges_step4<span class="sc">$</span>to <span class="sc">==</span> hp[<span class="dv">2</span>]</span>
-<span id="cb7-263"><a href="#cb7-263" aria-hidden="true" tabindex="-1"></a>  edges_step4<span class="sc">$</span>step4_type[idx] <span class="ot">&lt;-</span> <span class="st">"confounding"</span></span>
-<span id="cb7-264"><a href="#cb7-264" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb7-265"><a href="#cb7-265" aria-hidden="true" tabindex="-1"></a><span class="co"># Causal mediated: A1 -&gt; L2</span></span>
-<span id="cb7-266"><a href="#cb7-266" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (hp <span class="cf">in</span> <span class="fu">list</span>(<span class="fu">c</span>(<span class="st">"A1"</span>, <span class="st">"L2"</span>))) {</span>
-<span id="cb7-267"><a href="#cb7-267" aria-hidden="true" tabindex="-1"></a>  idx <span class="ot">&lt;-</span> edges_step4<span class="sc">$</span>name <span class="sc">==</span> hp[<span class="dv">1</span>] <span class="sc">&amp;</span> edges_step4<span class="sc">$</span>to <span class="sc">==</span> hp[<span class="dv">2</span>]</span>
-<span id="cb7-268"><a href="#cb7-268" aria-hidden="true" tabindex="-1"></a>  edges_step4<span class="sc">$</span>step4_type[idx] <span class="ot">&lt;-</span> <span class="st">"causal_mediated"</span></span>
-<span id="cb7-269"><a href="#cb7-269" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb7-270"><a href="#cb7-270" aria-hidden="true" tabindex="-1"></a><span class="co"># L2 -&gt; Y is on BOTH paths</span></span>
-<span id="cb7-271"><a href="#cb7-271" aria-hidden="true" tabindex="-1"></a>idx_both <span class="ot">&lt;-</span> edges_step4<span class="sc">$</span>name <span class="sc">==</span> <span class="st">"L2"</span> <span class="sc">&amp;</span> edges_step4<span class="sc">$</span>to <span class="sc">==</span> <span class="st">"Y"</span></span>
-<span id="cb7-272"><a href="#cb7-272" aria-hidden="true" tabindex="-1"></a>edges_step4<span class="sc">$</span>step4_type[idx_both] <span class="ot">&lt;-</span> <span class="st">"both"</span></span>
-<span id="cb7-273"><a href="#cb7-273" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-274"><a href="#cb7-274" aria-hidden="true" tabindex="-1"></a>xrng <span class="ot">&lt;-</span> <span class="fu">range</span>(dag_ch_df<span class="sc">$</span>x, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb7-275"><a href="#cb7-275" aria-hidden="true" tabindex="-1"></a>yrng <span class="ot">&lt;-</span> <span class="fu">range</span>(dag_ch_df<span class="sc">$</span>y, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb7-276"><a href="#cb7-276" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-277"><a href="#cb7-277" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(dag_ch_df, <span class="fu">aes</span>(<span class="at">x =</span> x, <span class="at">y =</span> y)) <span class="sc">+</span></span>
-<span id="cb7-278"><a href="#cb7-278" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Layer 1: All edges in grey</span></span>
-<span id="cb7-279"><a href="#cb7-279" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_step4,</span>
-<span id="cb7-280"><a href="#cb7-280" aria-hidden="true" tabindex="-1"></a>               <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
-<span id="cb7-281"><a href="#cb7-281" aria-hidden="true" tabindex="-1"></a>               <span class="at">colour =</span> <span class="st">"grey70"</span>, <span class="at">linewidth =</span> <span class="fl">0.4</span>,</span>
-<span id="cb7-282"><a href="#cb7-282" aria-hidden="true" tabindex="-1"></a>               <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.08</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
-<span id="cb7-283"><a href="#cb7-283" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Layer 2: Confounding paths (red)</span></span>
-<span id="cb7-284"><a href="#cb7-284" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_step4[edges_step4<span class="sc">$</span>step4_type <span class="sc">==</span> <span class="st">"confounding"</span>, ],</span>
-<span id="cb7-285"><a href="#cb7-285" aria-hidden="true" tabindex="-1"></a>               <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
-<span id="cb7-286"><a href="#cb7-286" aria-hidden="true" tabindex="-1"></a>               <span class="at">colour =</span> tab10[[<span class="st">"red"</span>]], <span class="at">linewidth =</span> <span class="fl">1.0</span>,</span>
-<span id="cb7-287"><a href="#cb7-287" aria-hidden="true" tabindex="-1"></a>               <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.12</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
-<span id="cb7-288"><a href="#cb7-288" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Layer 3: Causal mediated paths (blue)</span></span>
-<span id="cb7-289"><a href="#cb7-289" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_step4[edges_step4<span class="sc">$</span>step4_type <span class="sc">==</span> <span class="st">"causal_mediated"</span>, ],</span>
-<span id="cb7-290"><a href="#cb7-290" aria-hidden="true" tabindex="-1"></a>               <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
-<span id="cb7-291"><a href="#cb7-291" aria-hidden="true" tabindex="-1"></a>               <span class="at">colour =</span> tab10[[<span class="st">"blue"</span>]], <span class="at">linewidth =</span> <span class="fl">1.0</span>,</span>
-<span id="cb7-292"><a href="#cb7-292" aria-hidden="true" tabindex="-1"></a>               <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.12</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
-<span id="cb7-293"><a href="#cb7-293" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Layer 4: Both paths (purple -- L2 -&gt; Y)</span></span>
-<span id="cb7-294"><a href="#cb7-294" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_step4[edges_step4<span class="sc">$</span>step4_type <span class="sc">==</span> <span class="st">"both"</span>, ],</span>
-<span id="cb7-295"><a href="#cb7-295" aria-hidden="true" tabindex="-1"></a>               <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
-<span id="cb7-296"><a href="#cb7-296" aria-hidden="true" tabindex="-1"></a>               <span class="at">colour =</span> tab10[[<span class="st">"purple"</span>]], <span class="at">linewidth =</span> <span class="fl">1.1</span>,</span>
-<span id="cb7-297"><a href="#cb7-297" aria-hidden="true" tabindex="-1"></a>               <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.12</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
-<span id="cb7-298"><a href="#cb7-298" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Nodes</span></span>
-<span id="cb7-299"><a href="#cb7-299" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(<span class="at">fill =</span> role), <span class="at">size =</span> <span class="dv">16</span>, <span class="at">shape =</span> <span class="dv">21</span>,</span>
-<span id="cb7-300"><a href="#cb7-300" aria-hidden="true" tabindex="-1"></a>             <span class="at">colour =</span> <span class="st">"grey30"</span>, <span class="at">stroke =</span> <span class="fl">0.6</span>) <span class="sc">+</span></span>
-<span id="cb7-301"><a href="#cb7-301" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> name), <span class="at">size =</span> <span class="fl">3.5</span>, <span class="at">fontface =</span> <span class="st">"bold"</span>) <span class="sc">+</span></span>
-<span id="cb7-302"><a href="#cb7-302" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_fill_manual</span>(<span class="at">values =</span> role_fills_ch, <span class="at">guide =</span> <span class="st">"none"</span>) <span class="sc">+</span></span>
-<span id="cb7-303"><a href="#cb7-303" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Conditioning box around L2</span></span>
-<span id="cb7-304"><a href="#cb7-304" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"rect"</span>,</span>
-<span id="cb7-305"><a href="#cb7-305" aria-hidden="true" tabindex="-1"></a>           <span class="at">xmin =</span> dag_ch_df<span class="sc">$</span>x[dag_ch_df<span class="sc">$</span>name <span class="sc">==</span> <span class="st">"L2"</span>] <span class="sc">-</span> <span class="fl">0.45</span>,</span>
-<span id="cb7-306"><a href="#cb7-306" aria-hidden="true" tabindex="-1"></a>           <span class="at">xmax =</span> dag_ch_df<span class="sc">$</span>x[dag_ch_df<span class="sc">$</span>name <span class="sc">==</span> <span class="st">"L2"</span>] <span class="sc">+</span> <span class="fl">0.45</span>,</span>
-<span id="cb7-307"><a href="#cb7-307" aria-hidden="true" tabindex="-1"></a>           <span class="at">ymin =</span> dag_ch_df<span class="sc">$</span>y[dag_ch_df<span class="sc">$</span>name <span class="sc">==</span> <span class="st">"L2"</span>] <span class="sc">-</span> <span class="fl">0.35</span>,</span>
-<span id="cb7-308"><a href="#cb7-308" aria-hidden="true" tabindex="-1"></a>           <span class="at">ymax =</span> dag_ch_df<span class="sc">$</span>y[dag_ch_df<span class="sc">$</span>name <span class="sc">==</span> <span class="st">"L2"</span>] <span class="sc">+</span> <span class="fl">0.35</span>,</span>
-<span id="cb7-309"><a href="#cb7-309" aria-hidden="true" tabindex="-1"></a>           <span class="at">fill =</span> <span class="cn">NA</span>, <span class="at">colour =</span> <span class="st">"black"</span>, <span class="at">linewidth =</span> <span class="fl">1.2</span>, <span class="at">linetype =</span> <span class="st">"solid"</span>) <span class="sc">+</span></span>
-<span id="cb7-310"><a href="#cb7-310" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Legend annotations</span></span>
-<span id="cb7-311"><a href="#cb7-311" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"segment"</span>, <span class="at">x =</span> <span class="fl">0.3</span>, <span class="at">xend =</span> <span class="fl">0.9</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">0.9</span>, <span class="at">yend =</span> <span class="sc">-</span><span class="fl">0.9</span>,</span>
-<span id="cb7-312"><a href="#cb7-312" aria-hidden="true" tabindex="-1"></a>           <span class="at">colour =</span> tab10[[<span class="st">"red"</span>]], <span class="at">linewidth =</span> <span class="fl">0.8</span>,</span>
-<span id="cb7-313"><a href="#cb7-313" aria-hidden="true" tabindex="-1"></a>           <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.08</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
-<span id="cb7-314"><a href="#cb7-314" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"text"</span>, <span class="at">x =</span> <span class="fl">1.0</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">0.9</span>,</span>
-<span id="cb7-315"><a href="#cb7-315" aria-hidden="true" tabindex="-1"></a>           <span class="at">label =</span> <span class="st">"Confounding path (want to block)"</span>, <span class="at">hjust =</span> <span class="dv">0</span>, <span class="at">size =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
-<span id="cb7-316"><a href="#cb7-316" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"segment"</span>, <span class="at">x =</span> <span class="fl">0.3</span>, <span class="at">xend =</span> <span class="fl">0.9</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">1.15</span>, <span class="at">yend =</span> <span class="sc">-</span><span class="fl">1.15</span>,</span>
-<span id="cb7-317"><a href="#cb7-317" aria-hidden="true" tabindex="-1"></a>           <span class="at">colour =</span> tab10[[<span class="st">"blue"</span>]], <span class="at">linewidth =</span> <span class="fl">0.8</span>,</span>
-<span id="cb7-318"><a href="#cb7-318" aria-hidden="true" tabindex="-1"></a>           <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.08</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
-<span id="cb7-319"><a href="#cb7-319" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"text"</span>, <span class="at">x =</span> <span class="fl">1.0</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">1.15</span>,</span>
-<span id="cb7-320"><a href="#cb7-320" aria-hidden="true" tabindex="-1"></a>           <span class="at">label =</span> <span class="st">"Causal path through L2 (also blocked!)"</span>, <span class="at">hjust =</span> <span class="dv">0</span>, <span class="at">size =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
-<span id="cb7-321"><a href="#cb7-321" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"segment"</span>, <span class="at">x =</span> <span class="fl">0.3</span>, <span class="at">xend =</span> <span class="fl">0.9</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">1.4</span>, <span class="at">yend =</span> <span class="sc">-</span><span class="fl">1.4</span>,</span>
-<span id="cb7-322"><a href="#cb7-322" aria-hidden="true" tabindex="-1"></a>           <span class="at">colour =</span> tab10[[<span class="st">"purple"</span>]], <span class="at">linewidth =</span> <span class="fl">0.8</span>,</span>
-<span id="cb7-323"><a href="#cb7-323" aria-hidden="true" tabindex="-1"></a>           <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.08</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
-<span id="cb7-324"><a href="#cb7-324" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"text"</span>, <span class="at">x =</span> <span class="fl">1.0</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">1.4</span>,</span>
-<span id="cb7-325"><a href="#cb7-325" aria-hidden="true" tabindex="-1"></a>           <span class="at">label =</span> <span class="st">"L2 -&gt; Y: on BOTH paths (the dilemma)"</span>, <span class="at">hjust =</span> <span class="dv">0</span>, <span class="at">size =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
-<span id="cb7-326"><a href="#cb7-326" aria-hidden="true" tabindex="-1"></a>  <span class="fu">coord_cartesian</span>(<span class="at">xlim =</span> <span class="fu">c</span>(xrng[<span class="dv">1</span>] <span class="sc">-</span> <span class="fl">0.6</span>, xrng[<span class="dv">2</span>] <span class="sc">+</span> <span class="fl">0.6</span>),</span>
-<span id="cb7-327"><a href="#cb7-327" aria-hidden="true" tabindex="-1"></a>                  <span class="at">ylim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="fl">1.7</span>, yrng[<span class="dv">2</span>] <span class="sc">+</span> <span class="fl">0.6</span>),</span>
-<span id="cb7-328"><a href="#cb7-328" aria-hidden="true" tabindex="-1"></a>                  <span class="at">clip =</span> <span class="st">"off"</span>) <span class="sc">+</span></span>
-<span id="cb7-329"><a href="#cb7-329" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_dag</span>(<span class="at">base_size =</span> <span class="dv">14</span>)</span>
-<span id="cb7-330"><a href="#cb7-330" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb7-331"><a href="#cb7-331" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-332"><a href="#cb7-332" aria-hidden="true" tabindex="-1"></a><span class="fu">### Step 3: The feedback loop</span></span>
+<span id="cb7-249"><a href="#cb7-249" aria-hidden="true" tabindex="-1"></a>Conditioning on $L_2$ (shown by the box around the node) blocks the confounding path $L_2 \to A_2$ and $L_2 \to Y$, which is good. But it *also* blocks the causal mediated path $A_1 \to L_2 \to Y$, which we wanted to keep open. The edge $L_2 \to Y$ is on *both* paths: it is simultaneously part of the confounding problem and part of the causal effect we are trying to estimate. This is why no regression specification can solve both problems at once.</span>
+<span id="cb7-250"><a href="#cb7-250" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-253"><a href="#cb7-253" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb7-254"><a href="#cb7-254" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-dag-step2</span></span>
+<span id="cb7-255"><a href="#cb7-255" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Step 2: Why adjusting for L2 fails. Red = confounding paths we want to block. Blue = causal mediated path also blocked by conditioning on L2. Purple = L2 -&gt; Y is on BOTH paths. The box around L2 represents conditioning."</span></span>
+<span id="cb7-256"><a href="#cb7-256" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-width: 8</span></span>
+<span id="cb7-257"><a href="#cb7-257" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-height: 4.5</span></span>
+<span id="cb7-258"><a href="#cb7-258" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-259"><a href="#cb7-259" aria-hidden="true" tabindex="-1"></a>edges_step4 <span class="ot">&lt;-</span> dag_ch_df[<span class="sc">!</span><span class="fu">is.na</span>(dag_ch_df<span class="sc">$</span>to), ]</span>
+<span id="cb7-260"><a href="#cb7-260" aria-hidden="true" tabindex="-1"></a>edges_step4<span class="sc">$</span>step4_type <span class="ot">&lt;-</span> <span class="st">"dim"</span></span>
+<span id="cb7-261"><a href="#cb7-261" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-262"><a href="#cb7-262" aria-hidden="true" tabindex="-1"></a><span class="co"># Confounding: L2 -&gt; A2</span></span>
+<span id="cb7-263"><a href="#cb7-263" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (hp <span class="cf">in</span> <span class="fu">list</span>(<span class="fu">c</span>(<span class="st">"L2"</span>, <span class="st">"A2"</span>))) {</span>
+<span id="cb7-264"><a href="#cb7-264" aria-hidden="true" tabindex="-1"></a>  idx <span class="ot">&lt;-</span> edges_step4<span class="sc">$</span>name <span class="sc">==</span> hp[<span class="dv">1</span>] <span class="sc">&amp;</span> edges_step4<span class="sc">$</span>to <span class="sc">==</span> hp[<span class="dv">2</span>]</span>
+<span id="cb7-265"><a href="#cb7-265" aria-hidden="true" tabindex="-1"></a>  edges_step4<span class="sc">$</span>step4_type[idx] <span class="ot">&lt;-</span> <span class="st">"confounding"</span></span>
+<span id="cb7-266"><a href="#cb7-266" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb7-267"><a href="#cb7-267" aria-hidden="true" tabindex="-1"></a><span class="co"># Causal mediated: A1 -&gt; L2</span></span>
+<span id="cb7-268"><a href="#cb7-268" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (hp <span class="cf">in</span> <span class="fu">list</span>(<span class="fu">c</span>(<span class="st">"A1"</span>, <span class="st">"L2"</span>))) {</span>
+<span id="cb7-269"><a href="#cb7-269" aria-hidden="true" tabindex="-1"></a>  idx <span class="ot">&lt;-</span> edges_step4<span class="sc">$</span>name <span class="sc">==</span> hp[<span class="dv">1</span>] <span class="sc">&amp;</span> edges_step4<span class="sc">$</span>to <span class="sc">==</span> hp[<span class="dv">2</span>]</span>
+<span id="cb7-270"><a href="#cb7-270" aria-hidden="true" tabindex="-1"></a>  edges_step4<span class="sc">$</span>step4_type[idx] <span class="ot">&lt;-</span> <span class="st">"causal_mediated"</span></span>
+<span id="cb7-271"><a href="#cb7-271" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb7-272"><a href="#cb7-272" aria-hidden="true" tabindex="-1"></a><span class="co"># L2 -&gt; Y is on BOTH paths</span></span>
+<span id="cb7-273"><a href="#cb7-273" aria-hidden="true" tabindex="-1"></a>idx_both <span class="ot">&lt;-</span> edges_step4<span class="sc">$</span>name <span class="sc">==</span> <span class="st">"L2"</span> <span class="sc">&amp;</span> edges_step4<span class="sc">$</span>to <span class="sc">==</span> <span class="st">"Y"</span></span>
+<span id="cb7-274"><a href="#cb7-274" aria-hidden="true" tabindex="-1"></a>edges_step4<span class="sc">$</span>step4_type[idx_both] <span class="ot">&lt;-</span> <span class="st">"both"</span></span>
+<span id="cb7-275"><a href="#cb7-275" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-276"><a href="#cb7-276" aria-hidden="true" tabindex="-1"></a>xrng <span class="ot">&lt;-</span> <span class="fu">range</span>(dag_ch_df<span class="sc">$</span>x, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb7-277"><a href="#cb7-277" aria-hidden="true" tabindex="-1"></a>yrng <span class="ot">&lt;-</span> <span class="fu">range</span>(dag_ch_df<span class="sc">$</span>y, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb7-278"><a href="#cb7-278" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-279"><a href="#cb7-279" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(dag_ch_df, <span class="fu">aes</span>(<span class="at">x =</span> x, <span class="at">y =</span> y)) <span class="sc">+</span></span>
+<span id="cb7-280"><a href="#cb7-280" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Layer 1: All edges in grey</span></span>
+<span id="cb7-281"><a href="#cb7-281" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_step4,</span>
+<span id="cb7-282"><a href="#cb7-282" aria-hidden="true" tabindex="-1"></a>               <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
+<span id="cb7-283"><a href="#cb7-283" aria-hidden="true" tabindex="-1"></a>               <span class="at">colour =</span> <span class="st">"grey70"</span>, <span class="at">linewidth =</span> <span class="fl">0.4</span>,</span>
+<span id="cb7-284"><a href="#cb7-284" aria-hidden="true" tabindex="-1"></a>               <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.08</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
+<span id="cb7-285"><a href="#cb7-285" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Layer 2: Confounding paths (red)</span></span>
+<span id="cb7-286"><a href="#cb7-286" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_step4[edges_step4<span class="sc">$</span>step4_type <span class="sc">==</span> <span class="st">"confounding"</span>, ],</span>
+<span id="cb7-287"><a href="#cb7-287" aria-hidden="true" tabindex="-1"></a>               <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
+<span id="cb7-288"><a href="#cb7-288" aria-hidden="true" tabindex="-1"></a>               <span class="at">colour =</span> tab10[[<span class="st">"red"</span>]], <span class="at">linewidth =</span> <span class="fl">1.0</span>,</span>
+<span id="cb7-289"><a href="#cb7-289" aria-hidden="true" tabindex="-1"></a>               <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.12</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
+<span id="cb7-290"><a href="#cb7-290" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Layer 3: Causal mediated paths (blue)</span></span>
+<span id="cb7-291"><a href="#cb7-291" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_step4[edges_step4<span class="sc">$</span>step4_type <span class="sc">==</span> <span class="st">"causal_mediated"</span>, ],</span>
+<span id="cb7-292"><a href="#cb7-292" aria-hidden="true" tabindex="-1"></a>               <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
+<span id="cb7-293"><a href="#cb7-293" aria-hidden="true" tabindex="-1"></a>               <span class="at">colour =</span> tab10[[<span class="st">"blue"</span>]], <span class="at">linewidth =</span> <span class="fl">1.0</span>,</span>
+<span id="cb7-294"><a href="#cb7-294" aria-hidden="true" tabindex="-1"></a>               <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.12</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
+<span id="cb7-295"><a href="#cb7-295" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Layer 4: Both paths (purple -- L2 -&gt; Y)</span></span>
+<span id="cb7-296"><a href="#cb7-296" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_segment</span>(<span class="at">data =</span> edges_step4[edges_step4<span class="sc">$</span>step4_type <span class="sc">==</span> <span class="st">"both"</span>, ],</span>
+<span id="cb7-297"><a href="#cb7-297" aria-hidden="true" tabindex="-1"></a>               <span class="fu">aes</span>(<span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
+<span id="cb7-298"><a href="#cb7-298" aria-hidden="true" tabindex="-1"></a>               <span class="at">colour =</span> tab10[[<span class="st">"purple"</span>]], <span class="at">linewidth =</span> <span class="fl">1.1</span>,</span>
+<span id="cb7-299"><a href="#cb7-299" aria-hidden="true" tabindex="-1"></a>               <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.12</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
+<span id="cb7-300"><a href="#cb7-300" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Nodes</span></span>
+<span id="cb7-301"><a href="#cb7-301" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(<span class="at">fill =</span> role), <span class="at">size =</span> <span class="dv">16</span>, <span class="at">shape =</span> <span class="dv">21</span>,</span>
+<span id="cb7-302"><a href="#cb7-302" aria-hidden="true" tabindex="-1"></a>             <span class="at">colour =</span> <span class="st">"grey30"</span>, <span class="at">stroke =</span> <span class="fl">0.6</span>) <span class="sc">+</span></span>
+<span id="cb7-303"><a href="#cb7-303" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> name), <span class="at">size =</span> <span class="fl">3.5</span>, <span class="at">fontface =</span> <span class="st">"bold"</span>) <span class="sc">+</span></span>
+<span id="cb7-304"><a href="#cb7-304" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_fill_manual</span>(<span class="at">values =</span> role_fills_ch, <span class="at">guide =</span> <span class="st">"none"</span>) <span class="sc">+</span></span>
+<span id="cb7-305"><a href="#cb7-305" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Conditioning box around L2</span></span>
+<span id="cb7-306"><a href="#cb7-306" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"rect"</span>,</span>
+<span id="cb7-307"><a href="#cb7-307" aria-hidden="true" tabindex="-1"></a>           <span class="at">xmin =</span> dag_ch_df<span class="sc">$</span>x[dag_ch_df<span class="sc">$</span>name <span class="sc">==</span> <span class="st">"L2"</span>] <span class="sc">-</span> <span class="fl">0.45</span>,</span>
+<span id="cb7-308"><a href="#cb7-308" aria-hidden="true" tabindex="-1"></a>           <span class="at">xmax =</span> dag_ch_df<span class="sc">$</span>x[dag_ch_df<span class="sc">$</span>name <span class="sc">==</span> <span class="st">"L2"</span>] <span class="sc">+</span> <span class="fl">0.45</span>,</span>
+<span id="cb7-309"><a href="#cb7-309" aria-hidden="true" tabindex="-1"></a>           <span class="at">ymin =</span> dag_ch_df<span class="sc">$</span>y[dag_ch_df<span class="sc">$</span>name <span class="sc">==</span> <span class="st">"L2"</span>] <span class="sc">-</span> <span class="fl">0.35</span>,</span>
+<span id="cb7-310"><a href="#cb7-310" aria-hidden="true" tabindex="-1"></a>           <span class="at">ymax =</span> dag_ch_df<span class="sc">$</span>y[dag_ch_df<span class="sc">$</span>name <span class="sc">==</span> <span class="st">"L2"</span>] <span class="sc">+</span> <span class="fl">0.35</span>,</span>
+<span id="cb7-311"><a href="#cb7-311" aria-hidden="true" tabindex="-1"></a>           <span class="at">fill =</span> <span class="cn">NA</span>, <span class="at">colour =</span> <span class="st">"black"</span>, <span class="at">linewidth =</span> <span class="fl">1.2</span>, <span class="at">linetype =</span> <span class="st">"solid"</span>) <span class="sc">+</span></span>
+<span id="cb7-312"><a href="#cb7-312" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Legend annotations</span></span>
+<span id="cb7-313"><a href="#cb7-313" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"segment"</span>, <span class="at">x =</span> <span class="fl">0.3</span>, <span class="at">xend =</span> <span class="fl">0.9</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">0.9</span>, <span class="at">yend =</span> <span class="sc">-</span><span class="fl">0.9</span>,</span>
+<span id="cb7-314"><a href="#cb7-314" aria-hidden="true" tabindex="-1"></a>           <span class="at">colour =</span> tab10[[<span class="st">"red"</span>]], <span class="at">linewidth =</span> <span class="fl">0.8</span>,</span>
+<span id="cb7-315"><a href="#cb7-315" aria-hidden="true" tabindex="-1"></a>           <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.08</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
+<span id="cb7-316"><a href="#cb7-316" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"text"</span>, <span class="at">x =</span> <span class="fl">1.0</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">0.9</span>,</span>
+<span id="cb7-317"><a href="#cb7-317" aria-hidden="true" tabindex="-1"></a>           <span class="at">label =</span> <span class="st">"Confounding path (want to block)"</span>, <span class="at">hjust =</span> <span class="dv">0</span>, <span class="at">size =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
+<span id="cb7-318"><a href="#cb7-318" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"segment"</span>, <span class="at">x =</span> <span class="fl">0.3</span>, <span class="at">xend =</span> <span class="fl">0.9</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">1.15</span>, <span class="at">yend =</span> <span class="sc">-</span><span class="fl">1.15</span>,</span>
+<span id="cb7-319"><a href="#cb7-319" aria-hidden="true" tabindex="-1"></a>           <span class="at">colour =</span> tab10[[<span class="st">"blue"</span>]], <span class="at">linewidth =</span> <span class="fl">0.8</span>,</span>
+<span id="cb7-320"><a href="#cb7-320" aria-hidden="true" tabindex="-1"></a>           <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.08</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
+<span id="cb7-321"><a href="#cb7-321" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"text"</span>, <span class="at">x =</span> <span class="fl">1.0</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">1.15</span>,</span>
+<span id="cb7-322"><a href="#cb7-322" aria-hidden="true" tabindex="-1"></a>           <span class="at">label =</span> <span class="st">"Causal path through L2 (also blocked!)"</span>, <span class="at">hjust =</span> <span class="dv">0</span>, <span class="at">size =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
+<span id="cb7-323"><a href="#cb7-323" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"segment"</span>, <span class="at">x =</span> <span class="fl">0.3</span>, <span class="at">xend =</span> <span class="fl">0.9</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">1.4</span>, <span class="at">yend =</span> <span class="sc">-</span><span class="fl">1.4</span>,</span>
+<span id="cb7-324"><a href="#cb7-324" aria-hidden="true" tabindex="-1"></a>           <span class="at">colour =</span> tab10[[<span class="st">"purple"</span>]], <span class="at">linewidth =</span> <span class="fl">0.8</span>,</span>
+<span id="cb7-325"><a href="#cb7-325" aria-hidden="true" tabindex="-1"></a>           <span class="at">arrow =</span> <span class="fu">arrow</span>(<span class="at">length =</span> <span class="fu">unit</span>(<span class="fl">0.08</span>, <span class="st">"inches"</span>), <span class="at">type =</span> <span class="st">"closed"</span>)) <span class="sc">+</span></span>
+<span id="cb7-326"><a href="#cb7-326" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"text"</span>, <span class="at">x =</span> <span class="fl">1.0</span>, <span class="at">y =</span> <span class="sc">-</span><span class="fl">1.4</span>,</span>
+<span id="cb7-327"><a href="#cb7-327" aria-hidden="true" tabindex="-1"></a>           <span class="at">label =</span> <span class="st">"L2 -&gt; Y: on BOTH paths (the dilemma)"</span>, <span class="at">hjust =</span> <span class="dv">0</span>, <span class="at">size =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
+<span id="cb7-328"><a href="#cb7-328" aria-hidden="true" tabindex="-1"></a>  <span class="fu">coord_cartesian</span>(<span class="at">xlim =</span> <span class="fu">c</span>(xrng[<span class="dv">1</span>] <span class="sc">-</span> <span class="fl">0.6</span>, xrng[<span class="dv">2</span>] <span class="sc">+</span> <span class="fl">0.6</span>),</span>
+<span id="cb7-329"><a href="#cb7-329" aria-hidden="true" tabindex="-1"></a>                  <span class="at">ylim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="fl">1.7</span>, yrng[<span class="dv">2</span>] <span class="sc">+</span> <span class="fl">0.6</span>),</span>
+<span id="cb7-330"><a href="#cb7-330" aria-hidden="true" tabindex="-1"></a>                  <span class="at">clip =</span> <span class="st">"off"</span>) <span class="sc">+</span></span>
+<span id="cb7-331"><a href="#cb7-331" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_dag</span>(<span class="at">base_size =</span> <span class="dv">14</span>)</span>
+<span id="cb7-332"><a href="#cb7-332" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
 <span id="cb7-333"><a href="#cb7-333" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-334"><a href="#cb7-334" aria-hidden="true" tabindex="-1"></a>The reason $L_2$ is both a confounder and a mediator is the **feedback loop**: $A_1 \to L_2 \to A_2$. Prior treatment affects the time-varying confounder, which in turn affects future treatment.</span>
+<span id="cb7-334"><a href="#cb7-334" aria-hidden="true" tabindex="-1"></a><span class="fu">### Step 3: The feedback loop</span></span>
 <span id="cb7-335"><a href="#cb7-335" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-338"><a href="#cb7-338" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb7-339"><a href="#cb7-339" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-dag-step3</span></span>
-<span id="cb7-340"><a href="#cb7-340" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Step 3: The feedback loop. A1 -&gt; L2 -&gt; A2 is the path that makes L2 simultaneously a confounder and a mediator."</span></span>
-<span id="cb7-341"><a href="#cb7-341" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-width: 8</span></span>
-<span id="cb7-342"><a href="#cb7-342" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-height: 3.5</span></span>
-<span id="cb7-343"><a href="#cb7-343" aria-hidden="true" tabindex="-1"></a><span class="fu">draw_dag_step</span>(</span>
-<span id="cb7-344"><a href="#cb7-344" aria-hidden="true" tabindex="-1"></a>  <span class="at">highlight_pairs =</span> <span class="fu">list</span>(</span>
-<span id="cb7-345"><a href="#cb7-345" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="st">"A1"</span>, <span class="st">"L2"</span>),   <span class="co"># treatment affects future confounder</span></span>
-<span id="cb7-346"><a href="#cb7-346" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="st">"L2"</span>, <span class="st">"A2"</span>),   <span class="co"># confounder affects future treatment</span></span>
-<span id="cb7-347"><a href="#cb7-347" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="st">"L2"</span>, <span class="st">"Y"</span>)     <span class="co"># confounder affects outcome</span></span>
-<span id="cb7-348"><a href="#cb7-348" aria-hidden="true" tabindex="-1"></a>  ),</span>
-<span id="cb7-349"><a href="#cb7-349" aria-hidden="true" tabindex="-1"></a>  <span class="at">highlight_colour =</span> tab10[[<span class="st">"orange"</span>]]</span>
-<span id="cb7-350"><a href="#cb7-350" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb7-351"><a href="#cb7-351" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb7-352"><a href="#cb7-352" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-353"><a href="#cb7-353" aria-hidden="true" tabindex="-1"></a>G-methods (G-computation, IPTW, L-TMLE) resolve this by **integrating over** the distribution of $L_2$ under the hypothetical intervention, rather than conditioning on it.</span>
+<span id="cb7-336"><a href="#cb7-336" aria-hidden="true" tabindex="-1"></a>The reason $L_2$ is both a confounder and a mediator is the **feedback loop**: $A_1 \to L_2 \to A_2$. Prior treatment affects the time-varying confounder, which in turn affects future treatment.</span>
+<span id="cb7-337"><a href="#cb7-337" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-340"><a href="#cb7-340" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb7-341"><a href="#cb7-341" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-dag-step3</span></span>
+<span id="cb7-342"><a href="#cb7-342" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Step 3: The feedback loop. A1 -&gt; L2 -&gt; A2 is the path that makes L2 simultaneously a confounder and a mediator."</span></span>
+<span id="cb7-343"><a href="#cb7-343" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-width: 8</span></span>
+<span id="cb7-344"><a href="#cb7-344" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-height: 3.5</span></span>
+<span id="cb7-345"><a href="#cb7-345" aria-hidden="true" tabindex="-1"></a><span class="fu">draw_dag_step</span>(</span>
+<span id="cb7-346"><a href="#cb7-346" aria-hidden="true" tabindex="-1"></a>  <span class="at">highlight_pairs =</span> <span class="fu">list</span>(</span>
+<span id="cb7-347"><a href="#cb7-347" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="st">"A1"</span>, <span class="st">"L2"</span>),   <span class="co"># treatment affects future confounder</span></span>
+<span id="cb7-348"><a href="#cb7-348" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="st">"L2"</span>, <span class="st">"A2"</span>),   <span class="co"># confounder affects future treatment</span></span>
+<span id="cb7-349"><a href="#cb7-349" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="st">"L2"</span>, <span class="st">"Y"</span>)     <span class="co"># confounder affects outcome</span></span>
+<span id="cb7-350"><a href="#cb7-350" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb7-351"><a href="#cb7-351" aria-hidden="true" tabindex="-1"></a>  <span class="at">highlight_colour =</span> tab10[[<span class="st">"orange"</span>]]</span>
+<span id="cb7-352"><a href="#cb7-352" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb7-353"><a href="#cb7-353" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
 <span id="cb7-354"><a href="#cb7-354" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-355"><a href="#cb7-355" aria-hidden="true" tabindex="-1"></a><span class="fu">## What about GEE, mixed models, or covariate-adjusted regression?</span></span>
+<span id="cb7-355"><a href="#cb7-355" aria-hidden="true" tabindex="-1"></a>G-methods (G-computation, IPTW, L-TMLE) resolve this by **integrating over** the distribution of $L_2$ under the hypothetical intervention, rather than conditioning on it.</span>
 <span id="cb7-356"><a href="#cb7-356" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-357"><a href="#cb7-357" aria-hidden="true" tabindex="-1"></a>GEE, mixed models, and covariate-adjusted regression all condition on time-varying covariates in the same way as standard regression. None of them solve the treatment--confounder feedback problem. GEE and mixed models handle within-subject correlation, but that is a different issue from the causal structure of feedback. A regression that omits time-varying covariates avoids the mediator-blocking problem but targets a different estimand (a regression oracle that does not integrate over the interventional distribution of $L_t$). When time-varying feedback is weak, this oracle can coincidentally agree with the causal truth, but the agreement breaks down under strong feedback. A useful diagnostic is to compare what each method converges to under infinite data; if the regression oracle differs from the G-computation oracle, the methods target fundamentally different quantities.</span>
+<span id="cb7-357"><a href="#cb7-357" aria-hidden="true" tabindex="-1"></a><span class="fu">## What about GEE, mixed models, or covariate-adjusted regression?</span></span>
 <span id="cb7-358"><a href="#cb7-358" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-359"><a href="#cb7-359" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-360"><a href="#cb7-360" aria-hidden="true" tabindex="-1"></a><span class="fu"># Counterfactual Notation for Longitudinal Interventions</span></span>
+<span id="cb7-359"><a href="#cb7-359" aria-hidden="true" tabindex="-1"></a>GEE, mixed models, and covariate-adjusted regression all condition on time-varying covariates in the same way as standard regression. None of them solve the treatment--confounder feedback problem. GEE and mixed models handle within-subject correlation, but that is a different issue from the causal structure of feedback. A regression that omits time-varying covariates avoids the mediator-blocking problem but targets a different estimand (a regression oracle that does not integrate over the interventional distribution of $L_t$). When time-varying feedback is weak, this oracle can coincidentally agree with the causal truth, but the agreement breaks down under strong feedback. A useful diagnostic is to compare what each method converges to under infinite data; if the regression oracle differs from the G-computation oracle, the methods target fundamentally different quantities.</span>
+<span id="cb7-360"><a href="#cb7-360" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb7-361"><a href="#cb7-361" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-362"><a href="#cb7-362" aria-hidden="true" tabindex="-1"></a>To formalize the causal question, we need notation for hypothetical treatment sequences.</span>
+<span id="cb7-362"><a href="#cb7-362" aria-hidden="true" tabindex="-1"></a><span class="fu"># Counterfactual Notation for Longitudinal Interventions</span></span>
 <span id="cb7-363"><a href="#cb7-363" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-364"><a href="#cb7-364" aria-hidden="true" tabindex="-1"></a>Let $\bar{A} = (A_1, A_2, \ldots, A_T)$ denote the observed treatment history across $T$ visits, and let $\bar{L} = (L_1, \ldots, L_T)$ denote the observed time-varying confounders. Let $\bar{a} = (a_1, \ldots, a_T)$ denote a specific hypothetical treatment sequence. The potential outcome $Y(\bar{a})$ is the outcome that would have been observed if the patient had followed treatment sequence $\bar{a}$, regardless of what actually happened.</span>
+<span id="cb7-364"><a href="#cb7-364" aria-hidden="true" tabindex="-1"></a>To formalize the causal question, we need notation for hypothetical treatment sequences.</span>
 <span id="cb7-365"><a href="#cb7-365" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-366"><a href="#cb7-366" aria-hidden="true" tabindex="-1"></a>A **static regime** assigns the same treatment at every visit (e.g., $\bar{a} = (1, 1, \ldots, 1)$ for "always high adherence"). A **dynamic regime** lets treatment depend on the evolving history: $a_t = d_t(\bar{L}_t, \bar{A}_{t-1}, W)$. A **stochastic regime** modifies the probability of treatment rather than assigning a fixed value. The canonical estimand:</span>
+<span id="cb7-366"><a href="#cb7-366" aria-hidden="true" tabindex="-1"></a>Let $\bar{A} = (A_1, A_2, \ldots, A_T)$ denote the observed treatment history across $T$ visits, and let $\bar{L} = (L_1, \ldots, L_T)$ denote the observed time-varying confounders. Let $\bar{a} = (a_1, \ldots, a_T)$ denote a specific hypothetical treatment sequence. The potential outcome $Y(\bar{a})$ is the outcome that would have been observed if the patient had followed treatment sequence $\bar{a}$, regardless of what actually happened.</span>
 <span id="cb7-367"><a href="#cb7-367" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-368"><a href="#cb7-368" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb7-369"><a href="#cb7-369" aria-hidden="true" tabindex="-1"></a>\psi = E\big<span class="co">[</span><span class="ot">Y(\bar{a} = \bar{1})\big</span><span class="co">]</span> - E\big<span class="co">[</span><span class="ot">Y^{\text{obs}}\big</span><span class="co">]</span></span>
-<span id="cb7-370"><a href="#cb7-370" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb7-368"><a href="#cb7-368" aria-hidden="true" tabindex="-1"></a>A **static regime** assigns the same treatment at every visit regardless of patient history. For instance, $\bar{a} = (1, 1, \ldots, 1)$ means "always maintain high adherence." A **dynamic regime** lets the treatment at each visit depend on the evolving covariate history: $a_t = d_t(\bar{L}_t, \bar{A}_{t-1}, W)$. A **stochastic regime** does not assign a specific treatment value but instead modifies the probability of treatment (for example, increasing the probability of high adherence by 20 percentage points at each visit).</span>
+<span id="cb7-369"><a href="#cb7-369" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-370"><a href="#cb7-370" aria-hidden="true" tabindex="-1"></a>The canonical estimand in the HIV example is the average counterfactual outcome under sustained high adherence versus the observed adherence pattern:</span>
 <span id="cb7-371"><a href="#cb7-371" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-372"><a href="#cb7-372" aria-hidden="true" tabindex="-1"></a>where $Y(\bar{1})$ is the virologic failure probability if everyone had maintained high adherence at every visit.</span>
-<span id="cb7-373"><a href="#cb7-373" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-374"><a href="#cb7-374" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-375"><a href="#cb7-375" aria-hidden="true" tabindex="-1"></a><span class="fu"># Identification Assumptions</span></span>
-<span id="cb7-376"><a href="#cb7-376" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-377"><a href="#cb7-377" aria-hidden="true" tabindex="-1"></a>To estimate $Y(\bar{a})$ from observed data, the standard identifiability assumptions must hold at every time point.</span>
+<span id="cb7-372"><a href="#cb7-372" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb7-373"><a href="#cb7-373" aria-hidden="true" tabindex="-1"></a>\psi = E\big<span class="co">[</span><span class="ot">Y(\bar{a} = \bar{1})\big</span><span class="co">]</span> - E\big<span class="co">[</span><span class="ot">Y^{\text{obs}}\big</span><span class="co">]</span></span>
+<span id="cb7-374"><a href="#cb7-374" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb7-375"><a href="#cb7-375" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-376"><a href="#cb7-376" aria-hidden="true" tabindex="-1"></a>where $Y(\bar{1})$ is the virologic failure probability if everyone had maintained high adherence at every visit.</span>
+<span id="cb7-377"><a href="#cb7-377" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb7-378"><a href="#cb7-378" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-379"><a href="#cb7-379" aria-hidden="true" tabindex="-1"></a>**Consistency.** If $\bar{A} = \bar{a}$, then $Y = Y(\bar{a})$. Treatment must be well-defined with no hidden versions.</span>
+<span id="cb7-379"><a href="#cb7-379" aria-hidden="true" tabindex="-1"></a><span class="fu"># Identification Assumptions</span></span>
 <span id="cb7-380"><a href="#cb7-380" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-381"><a href="#cb7-381" aria-hidden="true" tabindex="-1"></a>**Sequential exchangeability.** At each time $t$, treatment is unconfounded given the observed history:</span>
-<span id="cb7-382"><a href="#cb7-382" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb7-383"><a href="#cb7-383" aria-hidden="true" tabindex="-1"></a>Y(\bar{a}) \perp<span class="sc">\!\!\!</span>\perp A_t \mid \bar{L}_t, \bar{A}_{t-1}, W \quad \text{for all } t.</span>
-<span id="cb7-384"><a href="#cb7-384" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb7-385"><a href="#cb7-385" aria-hidden="true" tabindex="-1"></a>This requires measuring every confounder of treatment and outcome at every visit. Unmeasured confounders (substance use severity, housing instability) would violate this assumption.</span>
-<span id="cb7-386"><a href="#cb7-386" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-387"><a href="#cb7-387" aria-hidden="true" tabindex="-1"></a>**Sequential positivity.** Every treatment level must be possible at every visit for every observed covariate history:</span>
+<span id="cb7-381"><a href="#cb7-381" aria-hidden="true" tabindex="-1"></a>The potential outcome $Y(\bar{a})$ is a counterfactual quantity. To estimate it from observed data, we need assumptions that bridge the gap between what we observe and what would have happened under a hypothetical intervention. In the longitudinal setting, the standard point-treatment assumptions must hold at every time point.</span>
+<span id="cb7-382"><a href="#cb7-382" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-383"><a href="#cb7-383" aria-hidden="true" tabindex="-1"></a>**Consistency.** If a patient's observed treatment history matches the hypothetical sequence $\bar{a}$, then their observed outcome equals their potential outcome: $Y = Y(\bar{a})$ when $\bar{A} = \bar{a}$. This requires that the treatment is well-defined and that there are no hidden versions of treatment.</span>
+<span id="cb7-384"><a href="#cb7-384" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-385"><a href="#cb7-385" aria-hidden="true" tabindex="-1"></a>**Sequential exchangeability.** At each time $t$, treatment is unconfounded given the observed history:</span>
+<span id="cb7-386"><a href="#cb7-386" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb7-387"><a href="#cb7-387" aria-hidden="true" tabindex="-1"></a>Y(\bar{a}) \perp<span class="sc">\!\!\!</span>\perp A_t \mid \bar{L}_t, \bar{A}_{t-1}, W \quad \text{for all } t.</span>
 <span id="cb7-388"><a href="#cb7-388" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb7-389"><a href="#cb7-389" aria-hidden="true" tabindex="-1"></a>P(A_t = a \mid \bar{L}_t, \bar{A}_{t-1}, W) &gt; 0 \quad \text{for all } t, a.</span>
-<span id="cb7-390"><a href="#cb7-390" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb7-391"><a href="#cb7-391" aria-hidden="true" tabindex="-1"></a>If some patient subgroups essentially never achieve high adherence (for example, patients with severe side effects on a particular regimen), then the counterfactual $Y(\bar{1})$ is not well-defined for those subgroups without extrapolation.</span>
+<span id="cb7-389"><a href="#cb7-389" aria-hidden="true" tabindex="-1"></a>This says that, conditional on everything we have measured up to visit $t$, treatment assignment at visit $t$ is as good as random. In practice, this requires measuring every confounder that influences both the treatment decision and the outcome at every visit.</span>
+<span id="cb7-390"><a href="#cb7-390" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-391"><a href="#cb7-391" aria-hidden="true" tabindex="-1"></a>Unmeasured confounders (substance use severity, housing instability, clinic-specific prescribing culture) that affect both adherence and virologic failure would violate this assumption.</span>
 <span id="cb7-392"><a href="#cb7-392" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-393"><a href="#cb7-393" aria-hidden="true" tabindex="-1"></a>These assumptions are harder to satisfy in the longitudinal setting: sequential exchangeability must hold at every visit, and positivity must hold for every covariate history. This is a key reason why stochastic regimes (which relax positivity requirements) are often preferred over deterministic "always treat" regimes.</span>
-<span id="cb7-394"><a href="#cb7-394" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-395"><a href="#cb7-395" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-396"><a href="#cb7-396" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why G-Methods Are Needed</span></span>
-<span id="cb7-397"><a href="#cb7-397" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-398"><a href="#cb7-398" aria-hidden="true" tabindex="-1"></a>Under the assumptions above, the causal quantity $E<span class="co">[</span><span class="ot">Y(\bar{a})</span><span class="co">]</span>$ can be expressed as a function of the observed data distribution through the **G-computation formula** <span class="co">[</span><span class="ot">@hernan2025whatif</span><span class="co">]</span>:</span>
-<span id="cb7-399"><a href="#cb7-399" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-400"><a href="#cb7-400" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb7-401"><a href="#cb7-401" aria-hidden="true" tabindex="-1"></a>E<span class="co">[</span><span class="ot">Y(\bar{a})</span><span class="co">]</span> = \sum_{\bar{l}} E<span class="co">[</span><span class="ot">Y \mid \bar{A} = \bar{a}, \bar{L} = \bar{l}, W</span><span class="co">]</span> \;\prod_t P(L_t = l_t \mid \bar{A}_{t-1} = \bar{a}_{t-1}, \bar{L}_{t-1} = \bar{l}_{t-1}, W)</span>
-<span id="cb7-402"><a href="#cb7-402" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb7-393"><a href="#cb7-393" aria-hidden="true" tabindex="-1"></a>**Sequential positivity.** Every treatment level must be possible at every visit for every observed covariate history:</span>
+<span id="cb7-394"><a href="#cb7-394" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb7-395"><a href="#cb7-395" aria-hidden="true" tabindex="-1"></a>P(A_t = a \mid \bar{L}_t, \bar{A}_{t-1}, W) &gt; 0 \quad \text{for all } t, a.</span>
+<span id="cb7-396"><a href="#cb7-396" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb7-397"><a href="#cb7-397" aria-hidden="true" tabindex="-1"></a>If some patient subgroups essentially never achieve high adherence (for example, patients with severe side effects on a particular regimen), then the counterfactual $Y(\bar{1})$ is not well-defined for those subgroups without extrapolation.</span>
+<span id="cb7-398"><a href="#cb7-398" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-399"><a href="#cb7-399" aria-hidden="true" tabindex="-1"></a>These assumptions are harder to satisfy in the longitudinal setting: sequential exchangeability must hold at every visit, and positivity must hold for every covariate history. This is a key reason why stochastic regimes (which relax positivity requirements) are often preferred over deterministic "always treat" regimes.</span>
+<span id="cb7-400"><a href="#cb7-400" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-401"><a href="#cb7-401" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-402"><a href="#cb7-402" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why G-Methods Are Needed</span></span>
 <span id="cb7-403"><a href="#cb7-403" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-404"><a href="#cb7-404" aria-hidden="true" tabindex="-1"></a>The product term generates the interventional distribution of covariate trajectories (what CD4 counts would look like under regime $\bar{a}$), and the outer expectation gives the outcome under those trajectories. Standard regression conditions on time-varying covariates rather than integrating over their interventional distribution. The class of methods that can compute this quantity---G-computation, IPTW, and TMLE---are collectively called **g-methods**.</span>
+<span id="cb7-404"><a href="#cb7-404" aria-hidden="true" tabindex="-1"></a>Under the assumptions above, the causal quantity $E<span class="co">[</span><span class="ot">Y(\bar{a})</span><span class="co">]</span>$ can be expressed as a function of the observed data distribution through the **G-computation formula** <span class="co">[</span><span class="ot">@hernan2025whatif</span><span class="co">]</span>:</span>
 <span id="cb7-405"><a href="#cb7-405" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-406"><a href="#cb7-406" aria-hidden="true" tabindex="-1"></a>The three main g-methods, each introduced for the point-treatment case in <span class="co">[</span><span class="ot">Chapters 2.1--2.3</span><span class="co">](02-01-gcomputation.qmd)</span>, each have strengths and limitations in the longitudinal setting:</span>
-<span id="cb7-407"><a href="#cb7-407" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-408"><a href="#cb7-408" aria-hidden="true" tabindex="-1"></a>| Method | Core idea | Main limitation |</span>
-<span id="cb7-409"><a href="#cb7-409" aria-hidden="true" tabindex="-1"></a>|--------|-----------|----------------|</span>
-<span id="cb7-410"><a href="#cb7-410" aria-hidden="true" tabindex="-1"></a>| G-computation | Sequential outcome regressions, working backwards | Relies on correct outcome model specification |</span>
-<span id="cb7-411"><a href="#cb7-411" aria-hidden="true" tabindex="-1"></a>| IPTW (marginal structural models) | Reweight by inverse of cumulative treatment probability | Cumulative weights become extreme with many time points |</span>
-<span id="cb7-412"><a href="#cb7-412" aria-hidden="true" tabindex="-1"></a>| Longitudinal TMLE | Sequential regressions plus targeting steps | More complex to implement, but doubly robust |</span>
+<span id="cb7-406"><a href="#cb7-406" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb7-407"><a href="#cb7-407" aria-hidden="true" tabindex="-1"></a>E<span class="co">[</span><span class="ot">Y(\bar{a})</span><span class="co">]</span> = \sum_{\bar{l}} E<span class="co">[</span><span class="ot">Y \mid \bar{A} = \bar{a}, \bar{L} = \bar{l}, W</span><span class="co">]</span> \;\prod_t P(L_t = l_t \mid \bar{A}_{t-1} = \bar{a}_{t-1}, \bar{L}_{t-1} = \bar{l}_{t-1}, W)</span>
+<span id="cb7-408"><a href="#cb7-408" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb7-409"><a href="#cb7-409" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-410"><a href="#cb7-410" aria-hidden="true" tabindex="-1"></a>The product term generates the interventional distribution of covariate trajectories (what CD4 counts would look like under regime $\bar{a}$), and the outer expectation gives the outcome under those trajectories. Standard regression conditions on time-varying covariates rather than integrating over their interventional distribution. The class of methods that can compute this quantity---G-computation, IPTW, and TMLE---are collectively called **g-methods**.</span>
+<span id="cb7-411"><a href="#cb7-411" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-412"><a href="#cb7-412" aria-hidden="true" tabindex="-1"></a>The three main g-methods, each introduced for the point-treatment case in <span class="co">[</span><span class="ot">Chapters 2.1--2.3</span><span class="co">](02-01-gcomputation.qmd)</span>, each have strengths and limitations in the longitudinal setting:</span>
 <span id="cb7-413"><a href="#cb7-413" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-414"><a href="#cb7-414" aria-hidden="true" tabindex="-1"></a>IPTW was historically the first approach applied to HIV data but becomes unstable as visits grow, because the weights are products of time-specific inverse probabilities that can become enormous. Longitudinal TMLE and LMTP address this instability through substitution estimators with targeting steps.</span>
-<span id="cb7-415"><a href="#cb7-415" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-416"><a href="#cb7-416" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-417"><a href="#cb7-417" aria-hidden="true" tabindex="-1"></a><span class="fu"># Preview of L-TMLE and LMTP</span></span>
-<span id="cb7-418"><a href="#cb7-418" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-419"><a href="#cb7-419" aria-hidden="true" tabindex="-1"></a><span class="fu">## L-TMLE for standard longitudinal interventions</span></span>
-<span id="cb7-420"><a href="#cb7-420" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-421"><a href="#cb7-421" aria-hidden="true" tabindex="-1"></a>Chapter 3.9 introduces **longitudinal TMLE (L-TMLE)**, which iterates the TMLE "model, then target" cycle backwards through time. At each step it conditions on $L_t$ to deconfound future treatment, then integrates it out in the backwards regression to preserve the mediated effect of past treatment. The <span class="in">`ltmle`</span> R package implements this procedure.</span>
+<span id="cb7-414"><a href="#cb7-414" aria-hidden="true" tabindex="-1"></a>| Method | Core idea | Main limitation |</span>
+<span id="cb7-415"><a href="#cb7-415" aria-hidden="true" tabindex="-1"></a>|--------|-----------|----------------|</span>
+<span id="cb7-416"><a href="#cb7-416" aria-hidden="true" tabindex="-1"></a>| G-computation | Sequential outcome regressions, working backwards | Relies on correct outcome model specification |</span>
+<span id="cb7-417"><a href="#cb7-417" aria-hidden="true" tabindex="-1"></a>| IPTW (marginal structural models) | Reweight by inverse of cumulative treatment probability | Cumulative weights become extreme with many time points |</span>
+<span id="cb7-418"><a href="#cb7-418" aria-hidden="true" tabindex="-1"></a>| Longitudinal TMLE | Sequential regressions plus targeting steps | More complex to implement, but doubly robust |</span>
+<span id="cb7-419"><a href="#cb7-419" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-420"><a href="#cb7-420" aria-hidden="true" tabindex="-1"></a>IPTW was historically the first approach applied to HIV data but becomes unstable as visits grow, because the weights are products of time-specific inverse probabilities that can become enormous. Longitudinal TMLE and LMTP address this instability through substitution estimators with targeting steps.</span>
+<span id="cb7-421"><a href="#cb7-421" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb7-422"><a href="#cb7-422" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-423"><a href="#cb7-423" aria-hidden="true" tabindex="-1"></a><span class="fu">## LMTP for realistic adherence interventions</span></span>
+<span id="cb7-423"><a href="#cb7-423" aria-hidden="true" tabindex="-1"></a><span class="fu"># Preview of L-TMLE and LMTP</span></span>
 <span id="cb7-424"><a href="#cb7-424" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-425"><a href="#cb7-425" aria-hidden="true" tabindex="-1"></a>Chapter 3.3 presents the **LMTP framework** (longitudinal modified treatment policies), which defines interventions where the hypothetical treatment depends on the patient's natural treatment value---including stochastic shifts that avoid positivity problems inherent in deterministic regimes. The <span class="in">`lmtp`</span> R package implements this framework.</span>
+<span id="cb7-425"><a href="#cb7-425" aria-hidden="true" tabindex="-1"></a>The next two chapters develop two estimation approaches in detail, each suited to a different type of causal question.</span>
 <span id="cb7-426"><a href="#cb7-426" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-427"><a href="#cb7-427" aria-hidden="true" tabindex="-1"></a>Both approaches build on the identification assumptions in this chapter. L-TMLE handles standard static or dynamic regimes; LMTP accommodates more flexible modified treatment policies.</span>
+<span id="cb7-427"><a href="#cb7-427" aria-hidden="true" tabindex="-1"></a><span class="fu">## L-TMLE for standard longitudinal interventions</span></span>
 <span id="cb7-428"><a href="#cb7-428" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-429"><a href="#cb7-429" aria-hidden="true" tabindex="-1"></a><span class="fu">## The forgiveness curve</span></span>
+<span id="cb7-429"><a href="#cb7-429" aria-hidden="true" tabindex="-1"></a>Chapter 3.9 introduces **longitudinal TMLE (L-TMLE)**, which iterates the TMLE "model, then target" cycle backwards through time. At each step it conditions on $L_t$ to deconfound future treatment, then integrates it out in the backwards regression to preserve the mediated effect of past treatment. The <span class="in">`ltmle`</span> R package implements this procedure.</span>
 <span id="cb7-430"><a href="#cb7-430" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-431"><a href="#cb7-431" aria-hidden="true" tabindex="-1"></a>A unifying concept is the **forgiveness curve**: the mapping from a sustained adherence level to the counterfactual failure risk $E<span class="co">[</span><span class="ot">Y(\bar{a})</span><span class="co">]</span>$. A drug with a flatter curve is more forgiving of sub-optimal adherence. Static regimes (L-TMLE), LMTP distribution shifts, and quantile-matching interventions all evaluate points on the same underlying counterfactual risk surface, using the same identification assumptions and g-method machinery.</span>
+<span id="cb7-431"><a href="#cb7-431" aria-hidden="true" tabindex="-1"></a><span class="fu">## LMTP for realistic adherence interventions</span></span>
 <span id="cb7-432"><a href="#cb7-432" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-433"><a href="#cb7-433" aria-hidden="true" tabindex="-1"></a><span class="fu">## What comes next</span></span>
+<span id="cb7-433"><a href="#cb7-433" aria-hidden="true" tabindex="-1"></a>Chapter 3.3 presents the **LMTP framework** (longitudinal modified treatment policies), which defines interventions where the hypothetical treatment depends on the patient's natural treatment value---including stochastic shifts that avoid positivity problems inherent in deterministic regimes. The <span class="in">`lmtp`</span> R package implements this framework.</span>
 <span id="cb7-434"><a href="#cb7-434" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-435"><a href="#cb7-435" aria-hidden="true" tabindex="-1"></a>The next chapter walks through L-TMLE step by step using a two-time-point HIV cohort example with the <span class="in">`ltmle`</span> package.</span>
+<span id="cb7-435"><a href="#cb7-435" aria-hidden="true" tabindex="-1"></a>Both approaches build on the identification assumptions in this chapter. L-TMLE handles standard static or dynamic regimes; LMTP accommodates more flexible modified treatment policies.</span>
 <span id="cb7-436"><a href="#cb7-436" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-437"><a href="#cb7-437" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb7-437"><a href="#cb7-437" aria-hidden="true" tabindex="-1"></a><span class="fu">## The forgiveness curve</span></span>
 <span id="cb7-438"><a href="#cb7-438" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-439"><a href="#cb7-439" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
+<span id="cb7-439"><a href="#cb7-439" aria-hidden="true" tabindex="-1"></a>A unifying concept is the **forgiveness curve**: the mapping from a sustained adherence level to the counterfactual failure risk $E<span class="co">[</span><span class="ot">Y(\bar{a})</span><span class="co">]</span>$. A drug with a flatter curve is more forgiving of sub-optimal adherence. Static regimes (L-TMLE), LMTP distribution shifts, and quantile-matching interventions all evaluate points on the same underlying counterfactual risk surface, using the same identification assumptions and g-method machinery.</span>
 <span id="cb7-440"><a href="#cb7-440" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-441"><a href="#cb7-441" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb7-442"><a href="#cb7-442" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. Why can't you simply add time-varying confounders as covariates in a Cox regression when those confounders are affected by prior treatment?&lt;/strong&gt;&lt;/summary&gt;</span>
-<span id="cb7-443"><a href="#cb7-443" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-444"><a href="#cb7-444" aria-hidden="true" tabindex="-1"></a>Because time-varying confounders that are affected by prior treatment sit on the causal pathway between earlier treatment and the outcome. Adjusting for them in a standard regression **blocks part of the treatment effect** (overadjustment bias), while omitting them leaves **uncontrolled confounding**. This is the fundamental "treatment-confounder feedback" problem that G-methods resolve by integrating over the interventional distribution of the time-varying confounder rather than conditioning on it.</span>
-<span id="cb7-445"><a href="#cb7-445" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-446"><a href="#cb7-446" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
-<span id="cb7-447"><a href="#cb7-447" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-448"><a href="#cb7-448" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb7-449"><a href="#cb7-449" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q2. What does "sequential exchangeability" require that ordinary exchangeability does not?&lt;/strong&gt;&lt;/summary&gt;</span>
-<span id="cb7-450"><a href="#cb7-450" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-451"><a href="#cb7-451" aria-hidden="true" tabindex="-1"></a>Ordinary (point-treatment) exchangeability requires that treatment is unconfounded conditional on baseline covariates measured at a single time point. **Sequential exchangeability** requires this to hold **at every time point**, conditional on the entire covariate and treatment history up to that point. In practice, this means you must measure every confounder that influences both treatment decisions and the outcome *at every visit*, a much harder bar to clear, especially when physician judgment, symptom severity, or patient preferences evolve over time and may not be captured in the data.</span>
-<span id="cb7-452"><a href="#cb7-452" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-453"><a href="#cb7-453" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
-<span id="cb7-454"><a href="#cb7-454" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-441"><a href="#cb7-441" aria-hidden="true" tabindex="-1"></a><span class="fu">## What comes next</span></span>
+<span id="cb7-442"><a href="#cb7-442" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-443"><a href="#cb7-443" aria-hidden="true" tabindex="-1"></a>The next chapter walks through L-TMLE step by step using a two-time-point HIV cohort example with the <span class="in">`ltmle`</span> package.</span>
+<span id="cb7-444"><a href="#cb7-444" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-445"><a href="#cb7-445" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb7-446"><a href="#cb7-446" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-447"><a href="#cb7-447" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
+<span id="cb7-448"><a href="#cb7-448" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-449"><a href="#cb7-449" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb7-450"><a href="#cb7-450" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. Why can't you simply add time-varying confounders as covariates in a Cox regression when those confounders are affected by prior treatment?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb7-451"><a href="#cb7-451" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-452"><a href="#cb7-452" aria-hidden="true" tabindex="-1"></a>Because time-varying confounders that are affected by prior treatment sit on the causal pathway between earlier treatment and the outcome. Adjusting for them in a standard regression **blocks part of the treatment effect** (overadjustment bias), while omitting them leaves **uncontrolled confounding**. This is the fundamental "treatment-confounder feedback" problem that G-methods resolve by integrating over the interventional distribution of the time-varying confounder rather than conditioning on it.</span>
+<span id="cb7-453"><a href="#cb7-453" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-454"><a href="#cb7-454" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
 <span id="cb7-455"><a href="#cb7-455" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-456"><a href="#cb7-456" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb7-457"><a href="#cb7-457" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-458"><a href="#cb7-458" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and further reading</span></span>
-<span id="cb7-459"><a href="#cb7-459" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb7-460"><a href="#cb7-460" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Robins JM, Hernan MA, Brumback B (2000). Marginal structural models and causal inference in epidemiology. *Epidemiology* 11(5):550--560.</span>
-<span id="cb7-461"><a href="#cb7-461" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Petersen ML, Schwab J, Gruber S, Blaser N, Schomaker M, van der Laan MJ (2014). Targeted maximum likelihood estimation for dynamic and static longitudinal marginal structural working models. *J Causal Inference* 2(2):147--185.</span>
-<span id="cb7-462"><a href="#cb7-462" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Hernan MA, Robins JM (2020). *Causal Inference: What If*. Chapman &amp; Hall/CRC.</span>
-<span id="cb7-463"><a href="#cb7-463" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Diaz I, Williams N, Hoffman KL, et al. (2023). lmtp: An R package for estimating the causal effects of modified treatment policies. *Observational Studies* 9:103--122.</span>
-<span id="cb7-464"><a href="#cb7-464" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Lendle SD, Schwab J, Petersen ML, van der Laan MJ (2017). ltmle: An R package implementing targeted minimum loss-based estimation for longitudinal data. *J Stat Softw* 81(1):1--21.</span>
+<span id="cb7-456"><a href="#cb7-456" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb7-457"><a href="#cb7-457" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q2. What does "sequential exchangeability" require that ordinary exchangeability does not?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb7-458"><a href="#cb7-458" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-459"><a href="#cb7-459" aria-hidden="true" tabindex="-1"></a>Ordinary (point-treatment) exchangeability requires that treatment is unconfounded conditional on baseline covariates measured at a single time point. **Sequential exchangeability** requires this to hold **at every time point**, conditional on the entire covariate and treatment history up to that point. In practice, this means you must measure every confounder that influences both treatment decisions and the outcome *at every visit*, a much harder bar to clear, especially when physician judgment, symptom severity, or patient preferences evolve over time and may not be captured in the data.</span>
+<span id="cb7-460"><a href="#cb7-460" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-461"><a href="#cb7-461" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
+<span id="cb7-462"><a href="#cb7-462" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-463"><a href="#cb7-463" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-464"><a href="#cb7-464" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb7-465"><a href="#cb7-465" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-466"><a href="#cb7-466" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and further reading</span></span>
+<span id="cb7-467"><a href="#cb7-467" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-468"><a href="#cb7-468" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Robins JM, Hernan MA, Brumback B (2000). Marginal structural models and causal inference in epidemiology. *Epidemiology* 11(5):550--560.</span>
+<span id="cb7-469"><a href="#cb7-469" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Petersen ML, Schwab J, Gruber S, Blaser N, Schomaker M, van der Laan MJ (2014). Targeted maximum likelihood estimation for dynamic and static longitudinal marginal structural working models. *J Causal Inference* 2(2):147--185.</span>
+<span id="cb7-470"><a href="#cb7-470" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Hernan MA, Robins JM (2020). *Causal Inference: What If*. Chapman &amp; Hall/CRC.</span>
+<span id="cb7-471"><a href="#cb7-471" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Diaz I, Williams N, Hoffman KL, et al. (2023). lmtp: An R package for estimating the causal effects of modified treatment policies. *Observational Studies* 9:103--122.</span>
+<span id="cb7-472"><a href="#cb7-472" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Lendle SD, Schwab J, Petersen ML, van der Laan MJ (2017). ltmle: An R package implementing targeted minimum loss-based estimation for longitudinal data. *J Stat Softw* 81(1):1--21.</span>
 </code><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></pre></div>
 </div></div></div></div></div>
 </div> <!-- /content -->
