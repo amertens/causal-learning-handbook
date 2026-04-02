@@ -68,7 +68,8 @@ Each formula has the same structure: start with the outcome model prediction $m(
 
 # Simulated Osteoporosis Dataset
 
-```{webr-r}
+```{r}
+#| interactive: true
 library(tidyverse)
 
 set.seed(2026)
@@ -90,7 +91,8 @@ dat <- tibble(age, cvd, A, Y)
 
 # Fit Outcome and Propensity Score Models
 
-```{webr-r}
+```{r}
+#| interactive: true
 Qmod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
 gmod <- glm(A ~ age + cvd, family = binomial, data = dat)
 
@@ -106,7 +108,8 @@ dat <- dat %>%
 
 # Compute AIPW Estimator
 
-```{webr-r}
+```{r}
+#| interactive: true
 with(dat, {
   mu1 <- mean( Q1 + A * (Y - Q1) / ps )
   mu0 <- mean( Q0 + (1 - A) * (Y - Q0) / (1 - ps) )
@@ -137,7 +140,8 @@ TMLE [@vanderLaan2006tmle] offers several advantages over AIPW: predicted probab
 
 **Step 1: Fit the initial outcome model (Q).** Fit a model for $E[Y \mid A, W]$ and generate initial predictions under both treatment values for each individual: $Q_n^0(1, W_i)$ (predicted outcome if treated) and $Q_n^0(0, W_i)$ (predicted outcome if untreated). These predictions are "initial" because they have not yet been targeted toward the causal parameter of interest.
 
-```{webr-r}
+```{r}
+#| interactive: true
 logit <- function(p) log(p/(1-p))
 expit <- function(x) 1/(1+exp(-x))
 
@@ -147,7 +151,8 @@ Qinit <- predict(Qmod, type="response")
 
 **Step 2: Estimate the propensity score.** The propensity score $g(W) = P(A = 1 \mid W)$ is needed to construct the clever covariate in the next step. We already fit this model in Section 4.
 
-```{webr-r}
+```{r}
+#| interactive: true
 # Step 2: Propensity scores (already estimated)
 ps <- dat$ps
 ```
@@ -169,7 +174,8 @@ For computing the counterfactual means, we also need the treatment-specific comp
 The clever covariate directs the fluctuation to reduce bias for the specific causal estimand we care about, the ATE.
 :::
 
-```{webr-r}
+```{r}
+#| interactive: true
 # Step 3: Clever covariate at observed treatment
 H <- with(dat, A/ps - (1-A)/(1-ps))  # <1>
 ```
@@ -191,7 +197,8 @@ This step ensures the final estimates solve the efficient influence curve equati
 The targeting step is not trying to improve prediction in general. It is adjusting the initial outcome predictions specifically to reduce bias for the ATE. A well-calibrated prediction model might predict individual outcomes accurately but still produce a biased ATE when predictions are averaged. The fluctuation step corrects for exactly this discrepancy by incorporating information from the propensity score.
 :::
 
-```{webr-r}
+```{r}
+#| interactive: true
 # Step 4: Fluctuation model
 epsilon <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H,  # <1>
                family = binomial)$coef                   # <2>
@@ -203,7 +210,8 @@ epsilon <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H,  # <1>
 
 # Counterfactual Predictions for TMLE
 
-```{webr-r}
+```{r}
+#| interactive: true
 # Get initial (pre-fluctuation) predictions under each treatment
 Q1_init <- predict(Qmod, newdata = mutate(dat, A=1), type="response")
 Q0_init <- predict(Qmod, newdata = mutate(dat, A=0), type="response")
@@ -250,7 +258,8 @@ where $\hat{\psi}$ is the TMLE ATE estimate. The variance of the ATE is estimate
 The EIC-based variance estimator and resulting Wald-type confidence intervals are asymptotically valid when (i) at least one nuisance model is consistently estimated, (ii) positivity holds, and (iii) certain regularity/rate conditions are met. When **data-adaptive or machine learning** methods are used for nuisance estimation, these conditions require **cross-fitting** (sample-splitting) or **CV-TMLE** to avoid empirical process conditions (Donsker class membership) that flexible learners typically violate. In the `tmle3` and `drtmle` R packages, cross-fitting is available; the classic `tmle` package does not cross-fit by default but remains valid when the Super Learner library is not too aggressive (e.g., excludes highly adaptive learners like HAL without cross-fitting). See @zheng2011crossvalidated for the theoretical foundations.
 :::
 
-```{webr-r}
+```{r}
+#| interactive: true
 # Observed outcomes
 Y_obs <- dat$Y
 
@@ -316,7 +325,8 @@ If the confidence interval excludes zero, we have evidence that the treatment ha
 - Doubly robust estimators are widely used for point-treatment causal inference in epidemiology and are recommended by several methodological guidelines
 :::
 
-```{webr-r}
+```{r}
+#| interactive: true
 sessionInfo()
 ```
 

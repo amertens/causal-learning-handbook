@@ -24,7 +24,8 @@ G-computation reconstructs what would have happened if *everyone* received treat
 
 We use the shared HIV antiretroviral therapy cohort introduced in the case study. This dataset follows HIV-positive patients from seroconversion, tracking HAART initiation and mortality. Here we collapse the longitudinal data to a point-treatment snapshot: A = `ever_haart` (1 = initiated HAART at any point, 0 = never initiated), Y = `died` (1 = died, 0 = alive at end of follow-up), with confounders age, sex, and baseline CD4 count (square-root transformed).
 
-```{webr-r}
+```{r}
+#| interactive: true
 library(tidyverse)
 
 download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")
@@ -42,7 +43,8 @@ Treatment is strongly confounded by baseline CD4 count and age, making this a go
 
 We fit a logistic regression model predicting the outcome from treatment and confounders:
 
-```{webr-r}
+```{r}
+#| interactive: true
 mod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
            family = binomial, data = dat)
 broom::tidy(mod, conf.int = TRUE) |> knitr::kable(digits = 3, caption = "Outcome model coefficients")
@@ -54,7 +56,8 @@ broom::tidy(mod, conf.int = TRUE) |> knitr::kable(digits = 3, caption = "Outcome
 
 We ask two "what if" questions for *every single person* in the dataset, regardless of what treatment they actually received: what if this person had been treated ($A=1$)? What if untreated ($A=0$)?
 
-```{webr-r}
+```{r}
+#| interactive: true
 # create counterfactual datasets
 dat1 <- dat %>% mutate(ever_haart = 1)
 dat0 <- dat %>% mutate(ever_haart = 0)
@@ -70,7 +73,8 @@ Here `p1[i]` and `p0[i]` are the predicted outcomes for person *i* under treatme
 
 Averaging the counterfactual predictions over the *entire population* converts model-based predictions into a **causal** estimate: a standardized (marginal) risk difference, the same quantity a well-randomized trial would yield.
 
-```{webr-r}
+```{r}
+#| interactive: true
 risk1 <- mean(p1)
 risk0 <- mean(p0)
 ate  <- risk1 - risk0
@@ -84,7 +88,8 @@ Interpret the result as: “If the entire population had initiated HAART rather 
 
 One of the strengths of g-computation is that once you have the counterfactual predictions `p1` and `p0`, you can compute *any* contrast, not just the risk difference. This flexibility is difficult to achieve with a single regression coefficient.
 
-```{webr-r}
+```{r}
+#| interactive: true
 # Relative risk (risk ratio)
 rr <- risk1 / risk0
 
@@ -146,7 +151,8 @@ G-computation rests entirely on the outcome model $E[Y \mid A, W]$. If that mode
 
 If some strata almost never receive a treatment, g-computation *extrapolates* into regions with little observed data. R will return a number, but it may be meaningless. Check propensity scores for values near 0 or 1:
 
-```{webr-r}
+```{r}
+#| interactive: true
 ps <- predict(glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
                    family = binomial, data = dat), type = "response")
 summary(ps)
@@ -163,7 +169,8 @@ G-computation handles near-positivity violations differently from IPTW. Where IP
 
 **Practical note.** The biggest limitation of g-computation with logistic regression is that you must get the functional form right. A powerful alternative is to replace the parametric model with a data-adaptive learner (random forests, gradient boosting, GAMs, or a SuperLearner ensemble), reducing reliance on parametric assumptions. In later chapters we systematically integrate SuperLearner with **TMLE**.
 
-```{webr-r, eval=F}
+```{r, eval=F}
+#| interactive: true
 library(SuperLearner)
 
 sl_mod <- SuperLearner(
@@ -189,7 +196,8 @@ The simple plug-in g-computation implementation shown here produces a point esti
 
 In practice, the most common approach for inference with plug-in g-computation is the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.
 
-```{webr-r, eval=FALSE}
+```{r, eval=FALSE}
+#| interactive: true
 # Bootstrap confidence interval for g-computation
 set.seed(42)
 n_boot <- 500
