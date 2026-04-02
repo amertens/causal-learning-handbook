@@ -13,9 +13,7 @@ In previous chapters, you learned:
 - **G-computation** depends on correctly modeling the *outcome*
 - **IPTW** depends on correctly modeling the *treatment mechanism*
 
-But what if you could use **both models**, and as long as **either one is correct**, your estimator is still consistent?
-
-This is exactly what **doubly robust estimators** provide.
+G-computation depends entirely on the outcome model; IPTW depends entirely on the treatment model. AIPW and TMLE combine both, providing consistency if **either** model is correctly specified.
 
 ---
 
@@ -24,7 +22,7 @@ This is exactly what **doubly robust estimators** provide.
 :::{.callout-tip}
 ## Key Idea: Why Doubly Robust Estimators?
 
-A doubly robust estimator provides consistency if **either** the treatment model or the outcome model is correctly specified [@vanderLaan2011targeted]. By combining both sources of information, doubly robust estimators provide **two chances to get it right** and often outperform g-computation or IPTW used alone. The goal remains the same as in previous chapters: estimate $E[Y(1)] - E[Y(0)]$, the population-level risk difference.
+A doubly robust estimator provides consistency if **either** the treatment model or the outcome model is correctly specified [@vanderLaan2011targeted]. By combining both sources of information, doubly robust estimators provide two chances to get it right and often outperform g-computation or IPTW used alone. The goal remains the same as in previous chapters: estimate $E[Y(1)] - E[Y(0)]$, the population-level risk difference.
 :::
 
 ---
@@ -189,6 +187,8 @@ $$
 The estimated $\hat{\epsilon}$ is then used to **update** (fluctuate) the initial predictions. Crucially, we must apply this fluctuation to the counterfactual predictions $Q_n^0(1, W)$ and $Q_n^0(0, W)$ using their respective clever covariates $H_1$ and $H_0$.
 
 This step ensures the final estimates solve the efficient influence curve equation, which is what gives TMLE its optimal statistical properties.
+
+The targeting step is not trying to improve prediction in general. It is adjusting the initial outcome predictions specifically to reduce bias for the ATE. A well-calibrated prediction model might predict individual outcomes accurately but still produce a biased ATE when predictions are averaged. The fluctuation step corrects for exactly this discrepancy by incorporating information from the propensity score.
 :::
 
 ```{webr-r}
@@ -223,6 +223,8 @@ tmle_ate
 1. Treatment-arm-specific clever covariates: $H_1(W) = 1/g(W)$ targets the treated potential outcome; $H_0(W) = -1/(1-g(W))$ targets the control potential outcome. These must be evaluated at the *counterfactual* treatment value, not the observed one.
 2. Apply the fluctuation on the logit scale, then `plogis()` maps back to probability; guaranteeing all targeted predictions stay in $[0,1]$, unlike AIPW which can violate these bounds
 3. The TMLE **substitution estimator**: simply take the sample mean of each arm's targeted predictions. No explicit weighting needed; the clever covariate already incorporated the propensity score.
+
+The initial outcome and propensity score models do not have to be simple GLMs. They can be estimated with Super Learner, an ensemble machine learning approach covered in the next chapter, which reduces sensitivity to model misspecification.
 
 ---
 
@@ -287,32 +289,6 @@ If the confidence interval excludes zero, we have evidence that the treatment ha
 
 ---
 
-# TMLE + SuperLearner (Recommended)
-
-```{webr-r, eval=FALSE}
-library(SuperLearner)
-
-SL_lib <- c("SL.glm", "SL.glmnet", "SL.ranger", "SL.mean")
-
-Q_SL <- SuperLearner(
-  Y = dat$Y,
-  X = dat %>% select(A, age, cvd),
-  family = binomial(),
-  SL.library = SL_lib
-)
-
-g_SL <- SuperLearner(
-  Y = dat$A,
-  X = dat %>% select(age, cvd),
-  family = binomial(),
-  SL.library = SL_lib
-)
-```
-
-You can plug these flexible nuisance models directly into TMLE. Super Learner builds an ensemble (weighted combination) of multiple algorithms, reducing the risk that any single model is badly misspecified. When combined with TMLE's fluctuation step, this provides a data-adaptive approach to causal inference that maintains valid inference under regularity conditions.
-
----
-
 # Comparison: AIPW vs TMLE
 
 ### AIPW vs TMLE: Head-to-Head
@@ -330,109 +306,6 @@ You can plug these flexible nuisance models directly into TMLE. Super Learner bu
 
 ---
 
-# Running Example: Antiretroviral Therapy Cohort
-
-See the [Running Case Study](00-case-study.qmd) for the full data description.
-
-In this section we apply TMLE to the HIV antiretroviral therapy cohort that serves as the running example throughout this handbook. The goal is to estimate the causal effect of ever initiating HAART (`ever_haart`) on mortality (`died`), adjusting for baseline covariates `age`, `sex`, and `cd4_sqrt_baseline`.
-
-TMLE is a natural fit for this dataset because the relationship between CD4 count, treatment initiation, and mortality is complex. Having two chances to get the model right (through the outcome regression and the propensity score) is especially valuable when confounding by indication is strong: patients with lower CD4 counts are more likely to initiate HAART and also more likely to die.
-
-This is a **point-treatment** analysis that collapses each patient's longitudinal record into a single baseline snapshot. The original panel data contain time-varying CD4 measurements and treatment switches, but here we simplify to a single treatment indicator (`ever_haart`) and a single outcome (`died`). Longitudinal TMLE, which accounts for time-varying treatment and confounding in the full panel data, is covered in Chapter 3.9.
-
-```{webr-r}
-download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")
-source("load-haart-cohort.R")
-
-glimpse(haart_baseline)
-```
-
-### Step 1: Fit the initial outcome model
-
-```{webr-r}
-Q_fit <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
-             family = binomial, data = haart_baseline)
-
-haart_baseline <- haart_baseline |>
-  mutate(
-    Q1 = predict(Q_fit,
-                 newdata = mutate(haart_baseline, ever_haart = 1),
-                 type = "response"),
-    Q0 = predict(Q_fit,
-                 newdata = mutate(haart_baseline, ever_haart = 0),
-                 type = "response")
-  )
-```
-
-### Step 2: Fit the propensity score model
-
-```{webr-r}
-g_fit <- glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
-             family = binomial, data = haart_baseline)
-
-haart_baseline <- haart_baseline |>
-  mutate(ps = predict(g_fit, type = "response"))
-
-# Check overlap
-summary(haart_baseline$ps)
-```
-
-### Step 3: Construct the clever covariate and fluctuate
-
-```{webr-r}
-logit <- function(p) log(p / (1 - p))
-
-Q_init <- predict(Q_fit, type = "response")
-H_clever <- with(haart_baseline, ever_haart / ps - (1 - ever_haart) / (1 - ps))  # <1>
-
-eps <- coef(glm(haart_baseline$died ~ -1 + offset(logit(Q_init)) + H_clever,  # <2>
-                family = binomial))                                              # <2>
-```
-1. Clever covariate for the HAART cohort: `ever_haart / ps` for treated and `-(1 - ever_haart) / (1 - ps)` for untreated; the binary indicator selects the correct arm for each observation
-2. Fluctuation model: the `-1` suppresses the intercept; `logit(Q_init)` is a fixed offset (not estimated); only `eps` (ε) is fit; a value near zero means Q was already close to correct
-
-### Step 4: Update predictions and compute the ATE
-
-```{webr-r}
-H1 <-  1 / haart_baseline$ps   # <1>
-H0 <- -1 / (1 - haart_baseline$ps)  # <1>
-
-Q1_star <- plogis(logit(haart_baseline$Q1) + eps * H1)  # <2>
-Q0_star <- plogis(logit(haart_baseline$Q0) + eps * H0)  # <2>
-
-ate <- mean(Q1_star) - mean(Q0_star)  # <3>
-
-# EIC-based standard error
-n_obs <- nrow(haart_baseline)
-Qstar_obs <- ifelse(haart_baseline$ever_haart == 1, Q1_star, Q0_star)  # <4>
-H_obs     <- ifelse(haart_baseline$ever_haart == 1, H1, H0)            # <4>
-EIC <- H_obs * (haart_baseline$died - Qstar_obs) +                     # <5>
-       Q1_star - Q0_star - ate                                          # <5>
-
-se  <- sqrt(var(EIC) / n_obs)  # <6>
-
-tibble(
-  ATE      = round(ate, 4),
-  SE       = round(se, 4),
-  CI_lower = round(ate - 1.96 * se, 4),
-  CI_upper = round(ate + 1.96 * se, 4)
-)
-```
-1. Arm-specific clever covariates for updating the counterfactual predictions: $H_1(W) = 1/g(W)$ for the HAART potential outcome, $H_0(W) = -1/(1-g(W))$ for the no-HAART potential outcome
-2. Apply the fluctuation ε on the logit scale to the counterfactual Q predictions; `plogis()` maps back to [0,1]; mortality probability must stay bounded
-3. TMLE substitution estimator: difference in mean targeted counterfactual mortality predictions across the two treatment arms
-4. At each patient's observed treatment value, select the corresponding targeted Q and clever covariate; these are the "observed" residual components of the EIC
-5. EIC for each patient: IPW-weighted residual $(H \cdot (Y - Q^*))$ plus centered substitution component $(Q_1^* - Q_0^* - \hat\psi)$; summing these two pieces is what makes TMLE doubly robust
-6. The EIC-based variance is the semiparametric efficiency bound; `sqrt(var(EIC) / n_obs)` gives the standard error directly from the influence function without bootstrapping
-
-:::{.callout-note}
-## Interpreting the HAART TMLE Result
-
-A positive ATE would suggest that HAART initiation increases the probability of death in this simple point-treatment model. However, this likely reflects **confounding by indication**: patients with more advanced disease (lower CD4 counts) are both more likely to initiate treatment and more likely to die. The baseline snapshot cannot fully capture the time-varying nature of CD4 decline, treatment initiation, and mortality. Chapter 3.9 addresses this with longitudinal TMLE and marginal structural models that properly handle time-varying confounding.
-:::
-
----
-
 # Summary
 
 :::{.callout-tip}
@@ -440,7 +313,7 @@ A positive ATE would suggest that HAART initiation increases the probability of 
 
 - Doubly robust estimators (AIPW, TMLE) combine outcome and treatment models and are consistent if **either** model is correct
 - TMLE is preferred: bounded predictions, plug-in estimation, natural ML integration, and EIC-based inference
-- Doubly robust estimators are the recommended default for point-treatment causal inference in modern epidemiology
+- Doubly robust estimators are widely used for point-treatment causal inference in epidemiology and are recommended by several methodological guidelines
 :::
 
 ```{webr-r}

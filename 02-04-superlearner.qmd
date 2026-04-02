@@ -8,9 +8,9 @@ format: html
 # Chapter 2.4: Super Learner: Ensemble Machine Learning for Causal Inference
 *Flexible prediction to strengthen causal effect estimation*
 
-In the previous chapters you learned to estimate causal effects using g-computation, IPTW, AIPW, and TMLE. Every one of these estimators depends on **nuisance functions** (the outcome regression $E[Y \mid A, W]$ or the treatment mechanism $P(A = 1 \mid W)$), and if those models are wrong, even the cleverest causal estimator can be biased.
+This chapter is about estimating nuisance functions, the outcome regression and propensity score, that every causal estimator from Part II depends on. The quality of these nuisance estimates directly affects the bias and variance of the downstream causal effect estimate.
 
-So far we have used simple logistic regressions for these nuisance functions. That is fine when the true relationships are approximately linear on the logit scale, but dangerous when they are not. In real data, relationships are often nonlinear, involve interactions, and depend on functional forms we cannot guess in advance. For example, clinicians may initiate treatment based on threshold rules (e.g., start HAART when CD4 drops below 350), creating sharp nonlinearities that a main-terms logistic regression cannot capture.
+In the previous chapters you learned to estimate causal effects using g-computation, IPTW, AIPW, and TMLE. So far we have used simple logistic regressions for the nuisance functions. That is fine when the true relationships are approximately linear on the logit scale, but dangerous when they are not. In real data, relationships are often nonlinear, involve interactions, and depend on functional forms we cannot guess in advance. For example, clinicians may initiate treatment based on threshold rules (e.g., start HAART when CD4 drops below 350), creating sharp nonlinearities that a main-terms logistic regression cannot capture.
 
 Rather than gambling on a single model, we can **stack** many candidate learners and let the data decide how to combine them. This is what **Super Learner** [@vanderLaan2007superlearner] does.
 
@@ -61,7 +61,7 @@ In practice, **no single algorithm dominates across all datasets and all problem
 Imagine an oracle who knows the true data-generating process and can tell you which algorithm will perform best. You would always pick the oracle's choice. The **discrete Super Learner** mimics this: it selects whichever candidate algorithm has the lowest cross-validated risk. The **continuous Super Learner** goes further; it finds the *optimal weighted combination* of all candidates, which can perform at least as well as the oracle selector asymptotically.
 :::
 
-This guarantee is formalized as an **oracle inequality** [@vanderLaan2007superlearner]: the Super Learner's risk converges to the risk of the best possible combination of candidates in the library, at a rate that depends on the number of candidates (not the sample size). In plain language, you pay almost no price for including many diverse learners in your library.
+This guarantee is formalized as an **oracle inequality** [@vanderLaan2007superlearner]: the Super Learner's excess risk relative to the best possible combination of candidates converges to zero as $n$ grows. The asymptotic rate depends on the number of candidates $K$ (specifically, the bound includes a $\log(K)$ factor), so the penalty for a larger library is logarithmic. In large samples, the penalty for including poorly performing learners is small, but in finite samples, very large libraries can reduce effective sample size for metalearner estimation.
 
 ---
 
@@ -144,7 +144,7 @@ dat %>%
   )
 ```
 
-The GLM captures the broad trend but misses the nonlinear and interaction terms. This is exactly the kind of misspecification that damages causal estimators.
+The GLM captures the broad trend but misses the nonlinear and interaction terms. This kind of misspecification can bias downstream causal estimates.
 
 ---
 
@@ -351,7 +351,7 @@ results
 :::{.callout-tip}
 ## The Super Learner Guarantee
 
-Notice that the Super Learner's cross-validated risk is at least as good as (and typically better than) the best individual learner. This is the oracle inequality at work. By optimally combining learners, Super Learner can exploit the strengths of each algorithm while hedging against any single algorithm's weaknesses. You pay essentially no penalty for including "bad" learners in the library; they simply receive near-zero weight.
+The Super Learner's cross-validated risk is at least as good as (and typically better than) the best individual learner. By optimally combining learners, Super Learner exploits the strengths of each algorithm while hedging against any single algorithm's weaknesses. Poorly performing learners receive near-zero weight.
 :::
 
 ---
@@ -397,7 +397,7 @@ When Super Learner predictions feed into TMLE or AIPW, we need well-calibrated *
 
 # Using the `SuperLearner` Package
 
-Now that you understand every step, let's see how the `SuperLearner` package does the same thing in a few lines.
+`SuperLearner()` automates the cross-validation and metalearner fitting described above.
 
 ```{webr-r}
 library(SuperLearner)
@@ -574,7 +574,7 @@ sl_expanded
 1. **Start diverse.** Include at least one parametric model (GLM), one regularized model (LASSO/elastic net), one tree-based model (random forest or xgboost), and one nonparametric smoother (MARS/earth or GAM).
 2. **Include a simple benchmark.** Always include `SL.mean` (intercept-only) and `SL.glm`. If these get most of the weight, your covariates may not be very predictive.
 3. **Vary tuning parameters.** Include 2–3 versions of flexible learners with different hyperparameters. This is computationally cheaper than formal grid search and lets the metalearner handle selection.
-4. **Don't worry about including "bad" learners.** They get zero weight. The oracle inequality guarantees you pay almost no price for library size.
+4. **Including weak learners is generally safe.** They receive near-zero weight. In large samples, the penalty for library size is logarithmic in $K$, but in finite samples, very large libraries can reduce effective sample size for metalearner estimation.
 :::
 
 ## Using screening wrappers
@@ -800,15 +800,15 @@ tibble(
 ```
 
 :::{.callout-tip}
-## Why Super Learner + TMLE Is the Modern Default
+## Super Learner + TMLE Pipeline
 
-This pipeline illustrates the recommended approach for modern causal inference:
+This pipeline combines:
 
-1. **Super Learner** for nuisance functions; reduces model misspecification risk
-2. **TMLE** for the causal estimate; provides double robustness and valid inference
-3. **EIC-based standard errors**; asymptotically valid even with machine learning
+1. **Super Learner** for nuisance functions, reducing model misspecification risk
+2. **TMLE** for the causal estimate, providing double robustness and valid inference
+3. **EIC-based standard errors**, asymptotically valid even with machine learning
 
-This is exactly what the `tmle` and `tmle3` packages automate. But understanding the hand-coded version ensures you know what happens under the hood.
+The `tmle` and `tmle3` packages automate this pipeline. Understanding the hand-coded version ensures you know what happens under the hood.
 :::
 
 ---
@@ -839,7 +839,7 @@ tmle_fit$estimates$ATE
 5. `Q.SL.library`: Super Learner ensemble for the outcome model $E[Y \mid A, W]$; diverse library with `earth` (MARS) and `ranger` (random forest) reduces misspecification risk
 6. `g.SL.library`: Super Learner ensemble for the propensity score $P(A=1 \mid W)$; can use the same or a different library from Q; a rich library here is especially important if treatment assignment depends on complex covariate patterns
 
-The `tmle` package does everything we did by hand in Sections 10.2–10.5: it fits Super Learner for both nuisance functions, performs the TMLE fluctuation step, and computes EIC-based inference. The hand-coded version from this chapter shows you exactly what those four lines are doing.
+The `tmle` package automates the full pipeline: Super Learner for both nuisance functions, the TMLE fluctuation step, and EIC-based inference.
 
 ---
 
@@ -872,7 +872,7 @@ For **larger datasets** (n > 10,000) or **high-dimensional covariates**, conside
 
 ### Practical tips
 
-1. **Always include a simple benchmark.** `SL.mean` and `SL.glm` should always be in the library. If the ensemble gives all weight to `SL.mean`, your covariates are not predictive, which may indicate a problem with your variable set or study design.
+1. **Always include a simple benchmark.** `SL.mean` and `SL.glm` should always be in the library. If the intercept-only learner receives substantial weight, this may reflect weak predictive signal in the covariates, limited sample size, an overly complex library relative to the data, or genuine simplicity in the outcome surface. It does not have a single interpretation and warrants investigation.
 
 2. **Match the loss function to the problem.** Use `method.NNloglik` for binary nuisance functions. Use `method.NNLS` for continuous outcomes.
 
@@ -886,46 +886,16 @@ For **larger datasets** (n > 10,000) or **high-dimensional covariates**, conside
 
 ---
 
-# Running Example: Antiretroviral Therapy Cohort
-
-See the [Running Case Study](00-case-study.qmd) for the full data description.
-
-The HIV antiretroviral therapy cohort illustrates why flexible nuisance estimation matters in practice. In the point-treatment simplification, we use a single baseline snapshot per patient with treatment `ever_haart`, outcome `died`, and covariates `age`, `sex`, and `cd4_sqrt_baseline`.
-
-Super Learner is valuable here because the relationship between baseline CD4 count and treatment initiation is unlikely to be linear on the logit scale. Clinicians may use threshold-based decision rules (for example, initiating HAART when CD4 drops below a clinical cutoff), and interactions between age and CD4 may influence both treatment decisions and mortality risk. A main-terms logistic regression cannot capture these patterns, but tree-based learners like `SL.ranger` and spline-based learners like `SL.earth` can detect them automatically.
-
-```{r}
-#| eval: false
-download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")
-source("load-haart-cohort.R")
-
-glimpse(haart_baseline)
-
-# Super Learner can be used for both nuisance models:
-# 1. Treatment model: P(ever_haart = 1 | age, sex, cd4_sqrt_baseline)
-# 2. Outcome model:   E[died | ever_haart, age, sex, cd4_sqrt_baseline]
-#
-# A suitable library for this cohort:
-sl_lib <- c("SL.glm", "SL.earth", "SL.ranger", "SL.glmnet", "SL.mean")
-#
-# earth and ranger can detect nonlinear CD4-treatment thresholds
-# and age-by-CD4 interactions without manual specification.
-```
-
-By letting Super Learner select the best combination of learners, we reduce the risk that a misspecified parametric model biases the downstream TMLE estimate for the effect of HAART on mortality. The ensemble weights also serve as a diagnostic: if `SL.glm` receives most of the weight, the relationships may be approximately linear; if tree-based or spline-based learners dominate, there is likely meaningful nonlinearity that a simple model would miss.
-
----
-
 # Summary
 
 :::{.callout-tip}
 ## Key Takeaways
 
-- **Super Learner** combines multiple algorithms using cross-validation and a metalearner to produce an ensemble with an oracle guarantee: it performs nearly as well as the best possible combination of candidates
+- **Super Learner** combines multiple algorithms using cross-validation and a metalearner to produce an ensemble with an asymptotic oracle guarantee: its excess risk relative to the best possible combination converges to zero as $n$ grows
 - The key mechanism is **honest cross-validated predictions**: each learner's quality is assessed on held-out data, preventing overfitting from inflating any learner's contribution
 - For causal inference, use **log-likelihood loss** for binary nuisance functions and **MSE** for continuous outcomes
 - Super Learner is the standard tool for estimating nuisance functions ($E[Y \mid A, W]$ and $P(A \mid W)$) in modern TMLE and AIPW analyses
-- You can (and should) include many diverse learners in the library: the oracle inequality guarantees that "bad" learners receive near-zero weight and do not harm the ensemble
+- Including many diverse learners in the library is generally safe: poorly performing learners receive near-zero weight, though in finite samples very large libraries can reduce effective sample size for metalearner estimation
 :::
 
 ---
@@ -935,14 +905,14 @@ By letting Super Learner select the best combination of learners, we reduce the 
 <details>
 <summary><strong>Q1. Why does Super Learner use cross-validated predictions rather than in-sample predictions to determine the metalearner weights?</strong></summary>
 
-If we used in-sample predictions, a highly flexible learner (like a deep random forest or neural network) could achieve near-perfect training accuracy by memorizing the data. The metalearner would then give it all the weight, and the ensemble would overfit badly. Cross-validated predictions provide an honest assessment of each learner's *generalization* performance. A learner that memorizes training data will predict poorly on the held-out fold, and the metalearner will down-weight it accordingly. This is the fundamental mechanism that makes Super Learner robust to overfitting.
+If we used in-sample predictions, a highly flexible learner (like a deep random forest or neural network) could achieve near-perfect training accuracy by memorizing the data. The metalearner would then give it all the weight, and the ensemble would overfit badly. Cross-validated predictions provide an honest assessment of each learner's *generalization* performance. A learner that memorizes training data will predict poorly on the held-out fold, and the metalearner will down-weight it accordingly.
 
 </details>
 
 <details>
 <summary><strong>Q2. You run Super Learner for a propensity score model and the intercept-only learner (`SL.mean`) receives the largest weight. What does this suggest?</strong></summary>
 
-This suggests that the covariates in your model are not very predictive of treatment assignment. In other words, after accounting for the covariates you included, treatment assignment appears nearly random; or at least, the predictive signal is too weak for any algorithm to exploit. This could mean: (1) treatment really is nearly randomized given your covariates (good news for causal inference), (2) important confounders are missing from your model (dangerous; you may have unmeasured confounding), or (3) the covariates need better pre-processing (e.g., you included age as a categorical variable when it should be continuous). You should investigate which interpretation is correct before proceeding with your causal analysis.
+If the intercept-only learner receives substantial weight, this may reflect weak predictive signal in the covariates, limited sample size, an overly complex library relative to the data, or genuine simplicity in the outcome surface. It does not have a single interpretation. Possible explanations include: (1) treatment really is nearly randomized given your covariates (good news for causal inference), (2) important confounders are missing from your model (dangerous; you may have unmeasured confounding), (3) the covariates need better pre-processing (e.g., you included age as a categorical variable when it should be continuous), or (4) the sample size is too small for flexible learners to outperform the marginal mean. You should investigate which interpretation is correct before proceeding with your causal analysis.
 
 </details>
 

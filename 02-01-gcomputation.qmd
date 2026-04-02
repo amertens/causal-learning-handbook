@@ -18,7 +18,7 @@ Outcome modeling and standardization, often referred to as **g-computation**, is
 G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions [@hernan2025whatif]. No reliance on a single regression coefficient required. It directly implements the identification formula from Chapter 1.2 ($E[Y(a)] = E_W[E[Y \mid A=a, W]]$), making it the most concrete entry point for learning causal estimation, and mapping the causal estimand to a statistical estimand.
 :::
 
-**Key point.** G-computation reconstructs what would have happened if *everyone* received treatment ($A=1$) and, separately, if *everyone* received control ($A=0$). The recipe is three steps: (1) fit an outcome model $E[Y \mid A, W]$, (2) predict outcomes for each individual under both treatments, and (3) average those predictions (standardization). That is the entire method.
+G-computation reconstructs what would have happened if *everyone* received treatment ($A=1$) and, separately, if *everyone* received control ($A=0$). The recipe is three steps: (1) fit an outcome model $E[Y \mid A, W]$, (2) predict outcomes for each individual under both treatments, and (3) average those predictions (standardization).
 
 # Implementation Example: HIV Antiretroviral Therapy Cohort
 
@@ -52,7 +52,7 @@ broom::tidy(mod, conf.int = TRUE) |> knitr::kable(digits = 3, caption = "Outcome
 
 ### Step 2: Predict Counterfactual Outcomes (The "What If" Step)
 
-This is where g-computation earns its name. We ask two "what if" questions for *every single person* in the dataset, regardless of what treatment they actually received: what if this person had been treated ($A=1$)? What if untreated ($A=0$)?
+We ask two "what if" questions for *every single person* in the dataset, regardless of what treatment they actually received: what if this person had been treated ($A=1$)? What if untreated ($A=0$)?
 
 ```{webr-r}
 # create counterfactual datasets
@@ -66,8 +66,7 @@ p0 <- predict(mod, newdata = dat0, type = "response")
 
 Here `p1[i]` and `p0[i]` are the predicted outcomes for person *i* under treatment and control, respectively. Notice we are *not* comparing treated vs. untreated groups. We are comparing two hypothetical worlds for the *same* people. This is the counterfactual reasoning that separates causal inference from plain regression.
 
-:::{.callout-important}
-## Step 3: Standardize. This Is the Step That Makes It Causal
+### Step 3: Standardize (Averaging Over the Population)
 
 Averaging the counterfactual predictions over the *entire population* converts model-based predictions into a **causal** estimate: a standardized (marginal) risk difference, the same quantity a well-randomized trial would yield.
 
@@ -80,7 +79,6 @@ knitr::kable(data.frame(risk1 = risk1, risk0 = risk0, ate = ate))
 ```
 
 Interpret the result as: “If the entire population had initiated HAART rather than not, the estimated change in mortality risk would be X percentage points.”
-:::
 
 ### Beyond the Risk Difference: Relative Risk and Population Attributable Fraction
 
@@ -138,7 +136,7 @@ G-computation bridges the gap: it uses the conditional model internally but **st
 :::{.callout-warning}
 ## Model Misspecification
 
-G-computation rests entirely on the outcome model $E[Y \mid A, W]$. If that model is wrong (e.g., omits interactions, assumes linearity when the truth is non-linear), bias propagates directly into the causal estimate. For example, if mortality risk depends on an interaction between CD4 count and age, but your model includes only main effects, the predicted counterfactual outcomes will be systematically off. Always check residuals and consider flexible alternatives (see Chapter 2.3).
+G-computation rests entirely on the outcome model $E[Y \mid A, W]$. If that model is wrong (e.g., omits interactions, assumes linearity when the truth is non-linear), bias propagates directly into the causal estimate. For example, suppose the true risk of virologic failure depends on a nonlinear interaction between baseline CD4 count and age, but the fitted model includes only main effects. The model will generate systematically wrong counterfactual predictions for patients with unusual combinations of CD4 and age, and the resulting ATE estimate will be biased. Unlike IPTW, where positivity failures produce visible extreme weights, g-computation's extrapolation errors are silent: the model returns a number with no warning that it is wrong. Always check residuals and consider flexible alternatives (see Chapter 2.3).
 :::
 
 ---
@@ -187,9 +185,9 @@ mean(p1_sl - p0_sl)
 :::{.callout-warning}
 ## Why G-Computation Is Less Common in Practice: No Built-In Inference
 
-A key limitation of g-computation is that it provides a **point estimate but no standard error or confidence interval** from the procedure itself. Unlike a regression model, which produces standard errors from the Fisher information matrix, g-computation's standardization step has no closed-form variance formula in general.
+The simple plug-in g-computation implementation shown here produces a point estimate but does not automatically provide standard errors or confidence intervals. This is a practical limitation of the plug-in approach, not a fundamental property of g-computation: influence-function-based variance estimators exist under regularity conditions and are used by TMLE (covered in Chapter 2.3).
 
-To obtain confidence intervals, you must use the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.
+In practice, the most common approach for inference with plug-in g-computation is the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.
 
 ```{webr-r, eval=FALSE}
 # Bootstrap confidence interval for g-computation
@@ -211,18 +209,6 @@ quantile(boot_ates, c(0.025, 0.975))
 
 This works but is computationally expensive and does not benefit from efficiency theory. The methods in the next two chapters (**IPTW** and especially **TMLE**) provide analytic standard errors and confidence intervals based on influence function theory, making them more practical for routine use. TMLE in particular combines the outcome-modeling strengths of g-computation with formal inference, which is one reason it is the recommended approach in later chapters.
 :::
-
-## Running Example: Antiretroviral Therapy Cohort
-
-See the [Running Case Study](00-case-study.qmd) for the full data description.
-
-Throughout this chapter we applied g-computation to a **point-treatment simplification** of the HIV antiretroviral therapy cohort. Rather than modeling HAART initiation as a time-varying decision, we collapsed each patient's treatment history into a single binary indicator: `ever_haart` (1 if the patient initiated HAART at any point, 0 otherwise). The outcome is `died` (1 if the patient died during follow-up, 0 if alive at the end of the study). The baseline confounders we adjusted for are `cd4_sqrt_baseline` (square-root transformed CD4 cell count at baseline), `age`, and `sex`.
-
-The method lets us ask a concrete causal question: "What would population mortality have looked like if *everyone* had initiated HAART, compared to a world where *no one* did?" We answered this by fitting an outcome model for `died` as a function of `ever_haart` and the confounders, predicting each patient's mortality risk under both treatment scenarios, and averaging those predictions to obtain the marginal risk difference.
-
-Because treatment is strongly confounded by baseline CD4 count and age (sicker patients are more likely to start HAART, but also more likely to die), a naive comparison of treated and untreated groups would be misleading. G-computation addresses this by standardizing over the full covariate distribution.
-
-The point-treatment analysis is a useful pedagogical starting point, but it does not fully capture the causal structure of this problem. In reality, HAART initiation is a time-varying treatment whose effect is confounded by evolving CD4 counts, which are themselves affected by prior treatment. Handling this feedback loop requires **longitudinal g-computation** and related methods (marginal structural models, longitudinal TMLE), which are covered in later chapters.
 
 :::{.callout-tip}
 ## Summary
