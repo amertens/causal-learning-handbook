@@ -1,0 +1,293 @@
+---
+title: "Short Course: Causal Inference with Targeted Learning"
+subtitle: "From roadmap to TMLE to longitudinal methods in one chapter"
+format: html
+---
+
+*Estimated reading time: 60 minutes*
+
+```{r}
+#| include: false
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4,
+  fig.align = "center"
+)
+```
+
+This chapter is a self-contained short course that walks through the core ideas of the handbook in a single sitting. It covers the Causal Roadmap, point-treatment TMLE (by hand and with software), longitudinal causal inference, and the `lmtp` package for realistic interventions. Each section is concise; the full handbook chapters provide deeper treatment.
+
+# The Causal Roadmap
+
+Every causal analysis in this handbook follows a structured sequence:
+
+1. **Define the causal question** using a target trial protocol
+2. **Specify the causal model** (draw a DAG)
+3. **Define the estimand** (e.g., the average treatment effect on the risk difference scale)
+4. **Identify** the estimand from observed data under stated assumptions
+5. **Estimate** using an appropriate statistical method
+6. **Sensitivity analysis** for violations of the causal assumptions
+7. **Interpret** in the context of the original question
+
+The key insight: the causal question and estimand are defined *before* any model is fit. The estimand determines which statistical quantity to target. The estimation method is chosen to match that target.
+
+## Identification: three assumptions
+
+Under three assumptions, the causal estimand equals a function of the observed data:
+
+- **Consistency**: the observed outcome equals the potential outcome under the treatment actually received. Treatment must be well-defined.
+- **Exchangeability**: conditional on measured covariates $W$, treatment is independent of potential outcomes. No unmeasured confounders.
+- **Positivity**: every covariate stratum has a nonzero probability of receiving each treatment. $0 < P(A = a \mid W) < 1$.
+
+Under these assumptions, the average treatment effect is identified by:
+
+$$
+E[Y(1)] - E[Y(0)] = E_W\!\left[E[Y \mid A=1, W] - E[Y \mid A=0, W]\right]
+$$
+
+This is the g-computation formula. It says: model the outcome within levels of treatment and covariates, then average over the covariate distribution.
+
+
+# Point-treatment TMLE
+
+## Setup: simulated clinical trial data
+
+```{r}
+library(tidyverse)
+
+set.seed(2026)
+n <- 1000
+
+# Baseline covariates
+age <- rnorm(n, 65, 10)
+cvd <- rbinom(n, 1, plogis(-2 + 0.03 * age))
+
+# Treatment (confounded by age and CVD history)
+A <- rbinom(n, 1, plogis(-0.5 + 0.02 * age + 0.5 * cvd))
+
+# Outcome (binary: adverse event)
+Y <- rbinom(n, 1, plogis(-2.5 + 0.03 * age + 0.5 * cvd - 0.4 * A))
+
+dat <- tibble(age, cvd, A, Y)
+cat("n =", n, ", treatment rate:", round(mean(A), 2),
+    ", outcome rate:", round(mean(Y), 2), "\n")
+```
+
+## G-computation in three steps
+
+G-computation is the simplest causal estimator. It implements the identification formula directly.
+
+```{r}
+# Step 1: Fit outcome model
+Qmod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
+
+# Step 2: Predict under each treatment for everyone
+Q1 <- predict(Qmod, newdata = mutate(dat, A = 1), type = "response")
+Q0 <- predict(Qmod, newdata = mutate(dat, A = 0), type = "response")
+
+# Step 3: Average (standardize)
+gcomp_ate <- mean(Q1) - mean(Q0)
+cat("G-computation ATE:", round(gcomp_ate, 4), "\n")
+```
+
+G-computation depends entirely on the outcome model. If the model is wrong, the estimate is biased.
+
+## TMLE by hand
+
+TMLE adds a targeting step that corrects the outcome model using the propensity score. This makes it doubly robust: consistent if either the outcome model or the treatment model is correctly specified.
+
+```{r}
+logit <- function(p) log(p / (1 - p))
+
+# Step 1: Initial outcome predictions (already done above)
+Qinit <- predict(Qmod, type = "response")
+
+# Step 2: Estimate propensity score
+gmod <- glm(A ~ age + cvd, family = binomial, data = dat)
+ps <- predict(gmod, type = "response")
+ps <- pmax(0.01, pmin(0.99, ps))  # bound away from 0/1
+
+# Step 3: Clever covariate
+H <- dat$A / ps - (1 - dat$A) / (1 - ps)
+
+# Step 4: Fluctuation (the targeting step)
+epsilon <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H,
+               family = binomial)$coef
+
+# Update counterfactual predictions
+H1 <- 1 / ps
+H0 <- -1 / (1 - ps)
+Q1_star <- plogis(logit(Q1) + epsilon * H1)
+Q0_star <- plogis(logit(Q0) + epsilon * H0)
+
+# TMLE estimate
+tmle_ate <- mean(Q1_star) - mean(Q0_star)
+cat("TMLE ATE:", round(tmle_ate, 4), "\n")
+```
+
+The fluctuation parameter $\hat{\epsilon}$ captures how much the treatment model corrects the outcome model. If the outcome model is already well-calibrated for the ATE, $\hat{\epsilon}$ is near zero.
+
+## Inference from the efficient influence curve
+
+```{r}
+# Efficient influence curve
+Qstar_obs <- ifelse(dat$A == 1, Q1_star, Q0_star)
+H_obs <- ifelse(dat$A == 1, H1, H0)
+EIC <- H_obs * (dat$Y - Qstar_obs) + Q1_star - Q0_star - tmle_ate
+
+# Standard error and 95% CI
+se <- sqrt(var(EIC) / n)
+ci <- tmle_ate + c(-1.96, 1.96) * se
+
+cat("ATE:", round(tmle_ate, 4), "\n")
+cat("SE: ", round(se, 4), "\n")
+cat("95% CI: [", round(ci[1], 4), ",", round(ci[2], 4), "]\n")
+```
+
+## Software implementation
+
+The `tmle` package automates all of this, including Super Learner for flexible nuisance estimation:
+
+```{r}
+#| eval: false
+library(tmle)
+
+result <- tmle(
+  Y = dat$Y, A = dat$A,
+  W = dat[, c("age", "cvd")],
+  Q.SL.library = c("SL.glm", "SL.mean"),
+  g.SL.library = c("SL.glm", "SL.mean")
+)
+result
+```
+
+
+# Longitudinal causal inference
+
+## The problem: treatment-confounder feedback
+
+In longitudinal settings, a time-varying confounder (like CD4 count) can be both a confounder of future treatment and a consequence of past treatment. Standard regression cannot handle both roles simultaneously: adjusting for CD4 blocks the treatment's indirect effect through CD4, while not adjusting leaves confounding.
+
+This is treatment-confounder feedback, and it requires g-methods.
+
+## Simulated longitudinal data
+
+```{r}
+set.seed(2026)
+n <- 2000
+
+# Baseline
+W_age <- rnorm(n, 40, 10)
+W_male <- rbinom(n, 1, 0.6)
+W_cd4_bl <- pmax(50, rnorm(n, 350, 120))
+W_vl_bl <- rnorm(n, 4.2, 0.7)
+W <- 0.01 * (W_age - 40) - 0.001 * (W_cd4_bl - 350) + 0.2 * W_vl_bl - 0.1 * W_male
+
+# Visit 1
+A1 <- rbinom(n, 1, plogis(0.3 + 0.5 * W))
+L1 <- rnorm(n, mean = 0.3 * W + 1.2 * A1, sd = 1)  # treatment affects confounder
+
+# Visit 2 (confounder affects future treatment)
+A2 <- rbinom(n, 1, plogis(-0.5 + 0.8 * L1 + 0.3 * A1))
+
+# Outcome
+Y <- rbinom(n, 1, plogis(-0.8 - 0.4 * A1 - 0.5 * A2 - 0.6 * L1 + 0.2 * W))
+dat_long <- tibble(W, A1, L1, A2, Y)
+```
+
+## Longitudinal G-computation by hand
+
+The backwards sequential regression resolves the feedback. At time 2, condition on $L_1$ to deconfound $A_2$. At time 1, do NOT condition on $L_1$ to preserve the mediated effect.
+
+```{r}
+# Oracle truth
+set.seed(9999)
+n_mc <- 100000; W_mc <- rep(W, length.out = n_mc)
+L1_cf <- rnorm(n_mc, mean = 0.3 * W_mc + 1.2, sd = 1)
+true_EY_11 <- mean(plogis(-0.8 - 0.4 - 0.5 - 0.6 * L1_cf + 0.2 * W_mc))
+
+# Step 1: Model outcome at time 2, conditioning on L1
+Q2_mod <- glm(Y ~ A2 + L1 + A1 + W, family = binomial, data = dat_long)
+Q2_A2is1 <- predict(Q2_mod, newdata = mutate(dat_long, A2 = 1), type = "response")
+
+# Step 2: Backwards regression — model Q2 predictions WITHOUT L1
+Q1_mod <- glm(Q2_A2is1 ~ A1 + W, family = quasibinomial, data = dat_long)
+Q1_A1is1 <- predict(Q1_mod, newdata = mutate(dat_long, A1 = 1), type = "response")
+
+gcomp_long <- mean(Q1_A1is1)
+
+# Compare to naive regression (which conditions on L1 throughout)
+naive_mod <- glm(Y ~ A1 + A2 + L1 + W, family = binomial, data = dat_long)
+naive_pred <- mean(predict(naive_mod,
+  newdata = mutate(dat_long, A1 = 1, A2 = 1), type = "response"))
+
+cat("True E[Y(1,1)]:     ", round(true_EY_11, 4), "\n")
+cat("Naive (biased):      ", round(naive_pred, 4), "\n")
+cat("G-computation (long):", round(gcomp_long, 4), "\n")
+```
+
+The naive estimate is biased because it conditions on $L_1$ (blocking part of the treatment effect). The backwards G-computation avoids this.
+
+## LMTP for realistic interventions
+
+Static regimes ("always treat") often violate positivity. The `lmtp` package estimates modified treatment policies that shift treatment by a feasible amount.
+
+```{r}
+#| eval: false
+library(lmtp)
+
+# Shift function: increase adherence by 10 percentage points
+shift_up <- function(data, trt) pmin(data[[trt]] + 0.10, 1.0)
+
+# Natural course (no intervention)
+shift_none <- function(data, trt) data[[trt]]
+
+# Estimate under each regime
+fit_shifted <- lmtp_tmle(
+  data = my_data,
+  trt = paste0("PDC_", 1:4),
+  outcome = paste0("Y_", 1:4),
+  baseline = c("W0", "A0"),
+  time_vary = lapply(1:4, function(t) paste0("L_", t)),
+  shift = shift_up,
+  mtp = TRUE,
+  outcome_type = "survival",
+  learners_outcome = c("SL.glm", "SL.mean"),
+  learners_trt = c("SL.glm", "SL.mean"),
+  folds = 2
+)
+
+# Contrast vs natural course
+contrast <- lmtp_contrast(fit_shifted, ref = fit_natural, type = "additive")
+contrast
+```
+
+The shift function defines the intervention: increase each patient's adherence by 10 percentage points at each visit, capped at 1.0. This stays within the observed data support because no patient is assigned an impossible adherence level. The `mtp = TRUE` flag tells `lmtp` that the shifted value depends on the natural treatment value.
+
+
+# Diagnostics and sensitivity
+
+No causal analysis is complete without checking its assumptions and stability.
+
+**Positivity.** Plot propensity scores. If they pile up near 0 or 1, the estimand is poorly supported. Consider restricting the population or using a shift intervention.
+
+**Model diagnostics.** Check Super Learner weights (which learners are driving predictions?), calibration of outcome and treatment models, and whether the TMLE fluctuation parameter $\hat{\epsilon}$ is unusually large.
+
+**Sensitivity to unmeasured confounding.** E-values quantify how strong an unmeasured confounder would need to be to explain away the result. Negative control outcomes test whether the analysis pipeline produces null effects where expected.
+
+**Sensitivity to analytic choices.** Vary the Super Learner library, propensity score truncation threshold, and (for longitudinal analyses) the number of time points. If the estimate is unstable across these choices, report the range rather than a single number.
+
+These tools are covered in detail in the [Positivity](03-02-positivity-overlap.qmd), [Diagnostics](03-05-advanced-diagnostics.qmd), and [Sensitivity Analysis](03-12-sensitivity-analysis.qmd) chapters.
+
+
+# Where to go next
+
+This short course covered the essentials. The full handbook develops each topic with more examples, diagnostics, and worked code:
+
+- **Part I** (Chapters 1.1-1.2): Why regression coefficients are not causal effects; the full 7-step Causal Roadmap
+- **Part II** (Chapters 2.1-2.4): G-computation, IPTW, TMLE, and Super Learner in detail
+- **Part III** (Chapters 3.7-3.3b): Longitudinal confounding, L-TMLE, and adherence shift methods with LMTP
+- **Part IV** (Chapters 3.2, 3.5, 3.12): Positivity diagnostics, advanced diagnostics, and sensitivity analysis
+- **Part V** (Chapter 5.1): A complete applied analysis with a dynamic treatment rule using `lmtp`
