@@ -1,0 +1,372 @@
+---
+title: "L-TMLE Debug: V4 Simplified DGP"
+subtitle: "Focused bias diagnosis — progressive horizons, all regimes, naive comparison"
+author: "HIV Adherence Simulation Project"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    theme: cosmo
+    self-contained: true
+execute:
+  echo: true
+  warning: true
+  message: false
+  cache: true
+---
+
+# Setup
+
+```{r setup, cache=FALSE}
+library(ltmle)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+theme_set(theme_minimal(base_size = 13))
+
+proj_root <- normalizePath(file.path(getwd(), ".."), winslash = "/")
+source(file.path(proj_root, "R", "sim_v4_dgp.R"))
+source(file.path(proj_root, "R", "oracle_v4.R"))
+source(file.path(proj_root, "R", "prepare_ltmle_v4.R"))
+
+K     <- 4
+N_SIM <- 5000
+SEED  <- 2024
+```
+
+# Scope
+
+This report diagnoses whether LTMLE can recover oracle risks for the V4 DGP.
+The V4 DGP is intentionally simple (1 baseline covariate, 1 time-varying
+confounder), so GLM-based LTMLE should work well. Any bias reveals structural
+issues rather than model misspecification.
+
+We examine all drug × regime combinations and track bias across progressive
+horizons (1 to 4 blocks).
+
+
+# Data Generation (Clean Setting)
+
+```{r data-gen}
+dat <- simulate_v4_data(n = N_SIM, K = K, seed = SEED, include_censoring = FALSE)
+p   <- attr(dat, "dgp_params")
+
+cat(sprintf("Clean dataset: n=%d, K=%d blocks\n", nrow(dat), K))
+cat(sprintf("Drug A patients: %d\n", sum(dat$A0 == 1)))
+cat(sprintf("Drug B patients: %d\n", sum(dat$A0 == 0)))
+cat(sprintf("Overall failure: %.1f%%\n", 100 * mean(dat$Y_final)))
+```
+
+# Oracle: Both Modes
+
+We compute two oracle variants for each category regime:
+
+- **Uniform**: PDC drawn uniformly within the category bounds (stochastic intervention)
+- **Midpoint**: PDC fixed at the category midpoint (deterministic intervention)
+
+```{r oracle, cache=TRUE}
+oracle_tab <- data.frame(
+  drug = integer(), drug_label = character(), category = character(),
+  oracle_uniform = numeric(), oracle_midpoint = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (d in 0:1) {
+  dlabel <- ifelse(d == 0, "Drug B", "Drug A")
+  for (cat_name in c("low", "mid", "high")) {
+    r_u <- oracle_static_category_v4(
+      category = cat_name, drug = d, K = K,
+      n_oracle = 200000,
+      seed = SEED + 1000 + d * 100 + match(cat_name, c("low","mid","high")))
+    r_m <- oracle_static_category_midpoint_v4(
+      category = cat_name, drug = d, K = K,
+      n_oracle = 200000,
+      seed = SEED + 2000 + d * 100 + match(cat_name, c("low","mid","high")))
+    oracle_tab <- rbind(oracle_tab, data.frame(
+      drug = d, drug_label = dlabel, category = cat_name,
+      oracle_uniform = r_u, oracle_midpoint = r_m,
+      stringsAsFactors = FALSE))
+  }
+}
+
+kable(oracle_tab[, c("drug_label", "category", "oracle_uniform", "oracle_midpoint")],
+      col.names = c("Drug", "Category", "Oracle (uniform)", "Oracle (midpoint)"),
+      digits = 4, caption = "Category-matched oracle (200k MC draws): two modes") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+
+# Data Inspection
+
+```{r inspect-data}
+dat_A <- dat[dat$A0 == 1, ]
+
+cat("Category distribution by block (Drug A):\n")
+for (t in 1:K) {
+  cat_col <- paste0("PDC_cat_", t)
+  tab <- table(dat_A[[cat_col]], useNA = "ifany")
+  pct <- round(100 * prop.table(tab), 1)
+  cat(sprintf("  Block %d: low=%d (%.1f%%)  mid=%d (%.1f%%)  high=%d (%.1f%%)\n",
+              t, tab["low"], pct["low"], tab["mid"], pct["mid"],
+              tab["high"], pct["high"]))
+}
+
+cat("\nBlock-by-block cumulative failure (Drug A):\n")
+for (t in 1:K) {
+  cat(sprintf("  Y_%d mean: %.4f\n", t, mean(dat_A[[paste0("Y_", t)]], na.rm = TRUE)))
+}
+```
+
+
+# Naive Analysis
+
+```{r naive, cache=TRUE}
+cat("=== NAIVE ANALYSIS: Drug A ===\n\n")
+
+pdc_cols <- paste0("PDC_", 1:K)
+dat_A$mean_pdc <- rowMeans(dat_A[, pdc_cols])
+dat_A$pdc_strat <- cut(dat_A$mean_pdc,
+                       breaks = c(0, p$pdc_cut_low, p$pdc_cut_high, 1),
+                       labels = c("low", "mid", "high"), include.lowest = TRUE)
+
+naive_tab <- data.frame(stratum = character(), risk = numeric(),
+                        n = integer(), stringsAsFactors = FALSE)
+for (s in c("low", "mid", "high")) {
+  idx <- dat_A$pdc_strat == s
+  naive_tab <- rbind(naive_tab, data.frame(
+    stratum = s, risk = mean(dat_A$Y_final[idx]),
+    n = sum(idx), stringsAsFactors = FALSE))
+}
+
+# Compare with oracle
+naive_comp <- merge(naive_tab, oracle_tab[oracle_tab$drug == 1,
+                    c("category", "oracle_uniform", "oracle_midpoint")],
+                    by.x = "stratum", by.y = "category")
+naive_comp$bias_uniform  <- naive_comp$risk - naive_comp$oracle_uniform
+naive_comp$bias_midpoint <- naive_comp$risk - naive_comp$oracle_midpoint
+
+kable(naive_comp, digits = 4,
+      caption = "Naive vs oracle (Drug A): conditioning on mean PDC is biased") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+
+# L-TMLE: Progressive Horizons (Drug A, always low)
+
+```{r ltmle-progressive, cache=TRUE}
+cat("=== L-TMLE: PROGRESSIVE HORIZONS (Drug A, always low) ===\n\n")
+
+horizon_results <- data.frame(
+  horizon = integer(), estimate = numeric(), se = numeric(),
+  oracle_u = numeric(), oracle_m = numeric(),
+  bias_u = numeric(), bias_m = numeric(),
+  in_ci = logical(), stringsAsFactors = FALSE
+)
+
+for (h in 1:K) {
+  cat(sprintf("--- Horizon: %d block(s) ---\n", h))
+
+  oracle_u <- oracle_static_category_v4(
+    category = "low", drug = 1, K = h,
+    n_oracle = 200000, seed = SEED + 3000 + h)
+  oracle_m <- oracle_static_category_midpoint_v4(
+    category = "low", drug = 1, K = h,
+    n_oracle = 200000, seed = SEED + 4000 + h)
+
+  res <- fit_ltmle_v4_static(dat, drug = 1, regime = "always_low",
+                              K = h, sl_lib = "glm", verbose = TRUE)
+
+  est  <- res$estimate
+  se   <- res$se
+  bu   <- if (!is.na(est)) est - oracle_u else NA_real_
+  bm   <- if (!is.na(est)) est - oracle_m else NA_real_
+  in_ci <- !is.na(est) && !is.na(se) && se > 0 && abs(bu) < 1.96 * se
+
+  cat(sprintf("  Estimate: %s  SE: %s\n",
+              ifelse(is.na(est), "NA", sprintf("%.4f", est)),
+              ifelse(is.na(se), "NA", sprintf("%.4f", se))))
+  cat(sprintf("  Oracle (uniform): %.4f  Oracle (midpoint): %.4f\n", oracle_u, oracle_m))
+  cat(sprintf("  Bias (uniform): %s\n\n",
+              ifelse(is.na(bu), "NA", sprintf("%+.4f", bu))))
+
+  horizon_results <- rbind(horizon_results, data.frame(
+    horizon = h, estimate = est, se = se,
+    oracle_u = oracle_u, oracle_m = oracle_m,
+    bias_u = bu, bias_m = bm,
+    in_ci = in_ci, stringsAsFactors = FALSE))
+}
+```
+
+```{r tbl-progressive}
+kable(horizon_results, digits = 4,
+      caption = "LTMLE estimates by horizon (Drug A, always low)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r fig-progressive, fig.width=7, fig.height=5, fig.cap="LTMLE bias by horizon (vs uniform oracle). Error bars = ±1.96 SE."}
+hr <- horizon_results[!is.na(horizon_results$bias_u), ]
+if (nrow(hr) > 0) {
+  ggplot(hr, aes(x = horizon, y = bias_u)) +
+    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+    geom_point(size = 3, colour = "#2166AC") +
+    geom_errorbar(aes(ymin = bias_u - 1.96 * se, ymax = bias_u + 1.96 * se),
+                  width = 0.1, colour = "#2166AC") +
+    scale_x_continuous(breaks = 1:K) +
+    labs(x = "Horizon (blocks)", y = "Bias (estimate - oracle)",
+         title = "LTMLE Bias by Horizon (Drug A, Always Low)")
+}
+```
+
+
+# L-TMLE: All Regimes at Full Horizon
+
+```{r ltmle-all, cache=TRUE}
+cat("=== L-TMLE: ALL REGIMES, FULL HORIZON ===\n\n")
+
+ltmle_res <- fit_ltmle_v4_all(dat, K = K, sl_lib = "glm", verbose = TRUE)
+
+# Merge with oracle
+ltmle_res$category <- gsub("always_", "", ltmle_res$regime)
+ltmle_merged <- merge(ltmle_res, oracle_tab,
+                      by.x = c("drug", "category"),
+                      by.y = c("drug", "category"))
+ltmle_merged$bias_u <- ltmle_merged$estimate - ltmle_merged$oracle_uniform
+ltmle_merged$bias_m <- ltmle_merged$estimate - ltmle_merged$oracle_midpoint
+```
+
+```{r tbl-all}
+display <- ltmle_merged[order(ltmle_merged$drug, ltmle_merged$category),
+  c("drug_label.x", "category", "estimate", "se", "oracle_uniform",
+    "oracle_midpoint", "bias_u", "bias_m", "converged")]
+names(display) <- c("Drug", "Category", "LTMLE", "SE",
+                     "Oracle (U)", "Oracle (M)", "Bias (U)", "Bias (M)", "Conv")
+
+kable(display, digits = 4,
+      caption = "LTMLE estimates for all drug × regime combinations (full horizon)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+
+# Manual Outcome Model Check
+
+```{r manual-check}
+cat("=== MANUAL OUTCOME MODEL CHECK (Drug A, block 1 only) ===\n\n")
+
+dat_A2 <- dat[dat$A0 == 1, ]
+fit_manual <- glm(Y_1 ~ W0 + L_1 +
+                    I(PDC_int_1 == 2) + I(PDC_int_1 == 3),
+                  data = dat_A2, family = binomial)
+
+cat("Manual outcome model coefficients:\n")
+print(round(coef(fit_manual), 4))
+
+# Predict under category = low (all dummies = 0)
+pred_data <- data.frame(W0 = dat_A2$W0, L_1 = dat_A2$L_1,
+                        PDC_int_1 = 1L)
+manual_gcomp <- mean(predict(fit_manual, newdata = pred_data, type = "response"))
+
+oracle_1b_u <- oracle_static_category_v4("low", drug = 1, K = 1,
+                                           n_oracle = 200000, seed = SEED + 5000)
+oracle_1b_m <- oracle_static_category_midpoint_v4("low", drug = 1, K = 1,
+                                                    n_oracle = 200000, seed = SEED + 5001)
+
+cat(sprintf("\nManual g-comp (Cat=low, block 1): %.4f\n", manual_gcomp))
+cat(sprintf("1-block oracle (uniform):         %.4f\n", oracle_1b_u))
+cat(sprintf("1-block oracle (midpoint):        %.4f\n", oracle_1b_m))
+cat(sprintf("Bias vs uniform:                  %+.4f\n", manual_gcomp - oracle_1b_u))
+```
+
+
+# Summary Comparison Table
+
+```{r summary-table}
+results <- data.frame(
+  Method = character(), Detail = character(),
+  Estimate = numeric(), Oracle = numeric(),
+  Bias = numeric(), SE = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Naive (Drug A)
+for (i in seq_len(nrow(naive_comp))) {
+  nc <- naive_comp[i, ]
+  results <- rbind(results, data.frame(
+    Method = "Naive", Detail = paste0("Drug A, ", nc$stratum),
+    Estimate = nc$risk, Oracle = nc$oracle_uniform,
+    Bias = nc$bias_uniform, SE = NA_real_,
+    stringsAsFactors = FALSE))
+}
+
+# LTMLE (all)
+for (i in seq_len(nrow(ltmle_merged))) {
+  lm <- ltmle_merged[i, ]
+  results <- rbind(results, data.frame(
+    Method = "LTMLE", Detail = paste0(lm$drug_label.x, ", ", lm$category),
+    Estimate = lm$estimate, Oracle = lm$oracle_uniform,
+    Bias = lm$bias_u, SE = lm$se,
+    stringsAsFactors = FALSE))
+}
+
+kable(results, digits = 4,
+      caption = "All estimators vs oracle (uniform): Drug-stratified") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+
+# Diagnostic Questions
+
+```{r diagnostics}
+cat("=== KEY DIAGNOSTIC QUESTIONS ===\n\n")
+
+cat("1. Are all LTMLE fits converging?\n")
+n_conv <- sum(ltmle_res$converged)
+n_tot  <- nrow(ltmle_res)
+cat(sprintf("   %d / %d converged\n\n", n_conv, n_tot))
+
+cat("2. Does LTMLE bias grow with horizon? (Drug A, always low)\n")
+hr <- horizon_results[!is.na(horizon_results$bias_u), ]
+if (nrow(hr) >= 2) {
+  bias_1 <- abs(hr$bias_u[1])
+  bias_K <- abs(hr$bias_u[nrow(hr)])
+  cat(sprintf("   |Bias| at 1 block: %.4f\n", bias_1))
+  cat(sprintf("   |Bias| at %d blocks: %.4f\n", K, bias_K))
+  if (bias_K > bias_1 * 2) {
+    cat("   Bias GROWS — potential compounding from positivity.\n\n")
+  } else {
+    cat("   Bias remains stable — models track the DGP well.\n\n")
+  }
+} else {
+  cat("   Not enough valid horizons to assess.\n\n")
+}
+
+cat("3. Support for extreme regimes:\n")
+for (d in 0:1) {
+  dlabel <- ifelse(d == 0, "Drug B", "Drug A")
+  idx <- dat$A0 == d
+  n_d <- sum(idx)
+  for (tgt in c("high", "low")) {
+    follows <- rep(TRUE, n_d)
+    for (t in 1:K) {
+      vals <- as.character(dat[[paste0("PDC_cat_", t)]][idx])
+      follows <- follows & !is.na(vals) & vals == tgt
+    }
+    pct <- 100 * sum(follows) / n_d
+    flag <- ifelse(pct < 5, " *** SPARSE ***", "")
+    cat(sprintf("   %s, always_%s: %.1f%%%s\n", dlabel, tgt, pct, flag))
+  }
+}
+
+cat("\n4. Uniform vs midpoint oracle comparison:\n")
+cat("   If both are similar, within-category PDC variation has little effect.\n")
+cat("   If they differ, nonlinearity of the hazard matters.\n")
+for (i in seq_len(nrow(oracle_tab))) {
+  ot <- oracle_tab[i, ]
+  cat(sprintf("   %s %s: uniform=%.4f  midpoint=%.4f  diff=%+.4f\n",
+              ot$drug_label, ot$category,
+              ot$oracle_uniform, ot$oracle_midpoint,
+              ot$oracle_uniform - ot$oracle_midpoint))
+}
+```

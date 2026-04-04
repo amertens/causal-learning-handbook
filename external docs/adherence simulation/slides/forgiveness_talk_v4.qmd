@@ -1,0 +1,690 @@
+---
+title: "Estimating ART Forgiveness in Real-World Data"
+subtitle: "A Causal Framework for Adherence-Response"
+author: ""
+date: today
+format:
+  revealjs:
+    theme: simple
+    slide-number: true
+    embed-resources: true
+    incremental: false
+    code-fold: true
+    transition: fade
+    transition-speed: fast
+    footer: "HIV Forgiveness Curves - V4 Simplified Simulation"
+    width: 1280
+    height: 720
+    margin: 0.08
+    smaller: true
+    highlight-style: github
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: true
+---
+
+```{r setup}
+#| label: setup
+#| include: false
+#| cache: false
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+
+proj_root <- normalizePath(file.path(getwd(), ".."), winslash = "/")
+source(file.path(proj_root, "R", "sim_v4_dgp.R"))
+source(file.path(proj_root, "R", "oracle_v4.R"))
+source(file.path(proj_root, "R", "prepare_ltmle_v4.R"))
+source(file.path(proj_root, "R", "prepare_lmtp_v4.R"))
+source(file.path(proj_root, "R", "diagnostics_v4.R"))
+
+pal <- c("Naive" = "#D73027", "L-TMLE" = "#4575B4",
+         "LMTP-shift" = "#1A9850", "Oracle" = "black")
+drug_pal <- c("Drug A" = "#2166AC", "Drug B" = "#B2182B")
+
+N_SIM <- 5000
+K     <- 4
+SEED  <- 2024
+```
+
+---
+
+## {.center}
+
+::: {style="text-align:center; padding-top:55px;"}
+### Estimating ART Forgiveness in Real-World Data {style="font-size:1.55em; line-height:1.2;"}
+
+**A Causal Framework for Adherence-Response**
+
+*From adherence thresholds to intervention-defined causal curves*
+
+<br/>
+
+**[Presenter name]**
+[Collaborators]
+[Affiliation]
+:::
+
+::: notes
+Core message: forgiveness is a causal question, not an observable feature of adherence-stratified data. Standard approaches answer the wrong question. We define the right one, show what it requires, and demonstrate with a simplified simulation that captures the essential structure of time-dependent confounding.
+:::
+
+---
+
+## Scientific motivation: what is "forgiveness"? {.smaller}
+
+::: {.columns}
+:::: {.column width="55%"}
+The assessment and analysis of adherence to ART is **critical to examining treatment benefits** among people with HIV.
+
+- Adherence is **on the causal pathway** from regimen initiation to most treatment outcomes
+- **Choice of adherence measure** reflects assumptions about the relationship with outcome
+- Comparing regimens requires disentangling pharmacologic effects from adherence behavior
+
+**The practical question:**
+> At what level of suboptimal adherence does a regimen still maintain virologic suppression --- and does this differ across regimens?
+
+::::
+:::: {.column width="45%"}
+```{r fig-motivating-curve}
+#| fig-height: 4.5
+#| fig-width: 5
+adh <- seq(0, 1, length.out = 150)
+d <- data.frame(
+  adherence = rep(adh, 2),
+  risk = c(plogis(-3 + 4.5*(1-adh) + 0.25),
+            plogis(-3 + 4.5*(1-adh) - 0.25 - 0.80*(1-adh))),
+  regimen = rep(c("Drug B (less forgiving)", "Drug A (more forgiving)"), each=150)
+)
+ggplot(d, aes(x=adherence, y=risk, colour=regimen)) +
+  geom_line(linewidth=1.3) +
+  scale_colour_manual(values=c("Drug B (less forgiving)"="#D73027",
+                                "Drug A (more forgiving)"="#4575B4")) +
+  scale_x_continuous(labels=scales::percent_format(), name="PDC (sustained adherence)") +
+  scale_y_continuous(labels=scales::percent_format(), name="Virologic failure risk",
+                     limits=c(0, 0.85)) +
+  annotate("segment", x=0.5, xend=0.5, y=0.08, yend=0.52,
+           colour="grey40", linetype="dashed", linewidth=0.7) +
+  annotate("text", x=0.52, y=0.30, label="Forgiveness\ngap", size=3.5,
+           colour="grey40", hjust=0) +
+  labs(colour=NULL) +
+  theme_minimal(base_size=12) +
+  theme(legend.position="bottom", legend.text=element_text(size=9),
+        panel.grid.minor=element_blank())
+```
+::::
+:::
+
+::: notes
+The forgiveness gap widens at lower adherence. Drug A is more forgiving. This is the causal quantity we want to estimate.
+:::
+
+---
+
+## Adherence is a post-treatment, time-varying variable {.smaller}
+
+::: {.columns}
+:::: {.column width="52%"}
+**The feedback loop:**
+
+- **Worsening health $\to$ reduced adherence:** side effects, complications lower the probability of taking medication
+- **Reduced adherence $\to$ worse virologic control:** subtherapeutic drug levels allow viral replication
+- **Worse viral control $\to$ further health deterioration:** clinical status worsens
+- **Updated clinical status influences next-period adherence:** the cycle continues
+
+. . .
+
+**Consequence:** Conditioning on observed adherence in a regression does two incompatible things simultaneously:
+
+> It attempts to *adjust for confounding* by health status,
+> while also *blocking the adherence effect* through that same health pathway.
+
+::::
+:::: {.column width="48%"}
+
+```{r fig-dag-simple}
+#| fig-height: 4.5
+#| fig-width: 5
+par(mar=c(0,0,0,0))
+plot.new()
+plot.window(xlim=c(0,12), ylim=c(0,8))
+# Block 1
+rect(0.5, 5.5, 2.5, 6.5, col="#F9E79F", border="grey50"); text(1.5, 6, "L_1", cex=1.1, font=2)
+rect(3.5, 5.5, 5.5, 6.5, col="#74ADD1", border="grey50"); text(4.5, 6, "PDC_1", cex=1.1, font=2)
+rect(3.5, 2.5, 5.5, 3.5, col="#D73027", border="grey50"); text(4.5, 3, "Y_1", cex=1.1, font=2)
+# Block 2
+rect(6.5, 5.5, 8.5, 6.5, col="#F9E79F", border="grey50"); text(7.5, 6, "L_2", cex=1.1, font=2)
+rect(9.5, 5.5, 11.5, 6.5, col="#74ADD1", border="grey50"); text(10.5, 6, "PDC_2", cex=1.1, font=2)
+rect(9.5, 2.5, 11.5, 3.5, col="#D73027", border="grey50"); text(10.5, 3, "Y_2", cex=1.1, font=2)
+# Baseline
+rect(0.5, 7.2, 2.5, 8.0, col="#AED6F1", border="grey50"); text(1.5, 7.6, "W_0, A_0", cex=1.0, font=2)
+# Arrows
+arrows(2.5,6, 3.5,6, length=0.1, lwd=1.5)    # L1 -> PDC1
+arrows(4.5,5.5, 4.5,3.5, length=0.1, lwd=1.5) # PDC1 -> Y1
+arrows(1.5,5.5, 4.0,3.5, length=0.1, lwd=1.5) # L1 -> Y1
+arrows(5.5,6, 6.5,6, length=0.1, lwd=1.5)     # PDC1 -> L2
+arrows(8.5,6, 9.5,6, length=0.1, lwd=1.5)     # L2 -> PDC2
+arrows(10.5,5.5, 10.5,3.5, length=0.1, lwd=1.5) # PDC2 -> Y2
+arrows(7.5,5.5, 10.0,3.5, length=0.1, lwd=1.5)  # L2 -> Y2
+arrows(1.5,7.2, 1.5,6.5, length=0.1, lwd=1.2, col="grey50") # W0 -> L1
+arrows(2.5,7.4, 3.5,6.5, length=0.1, lwd=1.2, col="grey50") # W0 -> PDC1
+text(6, 7, "Treatment-confounder feedback", cex=0.9, font=3, col="grey40")
+arrows(5.5,6.3, 6.5,6.3, length=0.1, lwd=2, col="firebrick")
+```
+
+::: {.callout-important appearance="simple" style="font-size:0.85em;"}
+$L_t$ is a **time-varying confounder** of $\text{PDC}_t \to Y_t$
+that is **itself affected by prior** $\text{PDC}_{t-1}$
+
+Standard regression cannot fix this. G-computation can.
+:::
+::::
+:::
+
+::: notes
+The DAG shows the V4 structure: W0 and A0 at baseline, then blocks of L_t -> PDC_t -> Y_t with feedback. This is the minimum structure needed to demonstrate time-dependent confounding.
+:::
+
+---
+
+## V4 Simplified simulation setup {.smaller}
+
+::: {.columns}
+:::: {.column width="50%"}
+
+```{r simulate-data}
+#| label: simulate-data
+dat <- simulate_v4_data(n = N_SIM, K = K, seed = SEED)
+p <- attr(dat, "dgp_params")
+```
+
+**Cohort design:**
+
+- $n$ = `r format(nrow(dat), big.mark=",")` patients, 4 quarterly (90-day) blocks, 12 months follow-up
+- Drug A vs. Drug B: fixed at baseline, randomised 1:1
+- **One baseline covariate:** $W_0 \sim N(0,1)$ (clinical severity)
+- **One time-varying confounder:** $L_t$ (health status, continuous)
+
+**Intentionally simplified:**
+
+- No informative monitoring (all patients observed)
+- No treatment switching
+- Optional censoring (off for validation)
+- Continuous block-level PDC generated directly in 90-day increments
+- Explicit treatment-confounder feedback: $\text{PDC}_{t-1} \to L_t \to \text{PDC}_t$
+
+::::
+:::: {.column width="50%"}
+
+**Key DGP properties:**
+
+| Feature | Value |
+|---|---|
+| Mean PDC (Drug A) | `r sprintf("%.2f", mean(rowMeans(dat[dat$A0==1, paste0("PDC_",1:K)])))` |
+| Mean PDC (Drug B) | `r sprintf("%.2f", mean(rowMeans(dat[dat$A0==0, paste0("PDC_",1:K)])))` |
+| Cumulative failure | `r sprintf("%.1f%%", 100*mean(dat$Y_final))` |
+
+**Forgiveness mechanism:**
+
+Drug A's failure hazard includes a protective interaction at low adherence:
+
+$\gamma_{A \times P} = `r p$gammaAP`$ (Drug A $\times$ poor adherence)
+
+- At high PDC: both drugs perform similarly
+- At low PDC: Drug A has substantially lower failure risk
+- Drugs have different adherence distributions (Drug A lower)
+
+::: {.callout-note appearance="simple" style="font-size:0.82em;"}
+**Why simplified?** GLM-based LTMLE is approximately unbiased here because the DGP is low-dimensional and parametric. This isolates the methodological lessons from model specification concerns.
+:::
+::::
+:::
+
+---
+
+## Oracle forgiveness curves {.smaller}
+
+```{r oracle-curves}
+#| label: oracle-curves
+#| cache: true
+pdc_grid <- seq(0.30, 1.00, by = 0.05)
+oracle_curve <- data.frame(pdc=numeric(), drug=character(), risk=numeric(), stringsAsFactors=FALSE)
+for (d in 0:1) {
+  dl <- ifelse(d==0, "Drug B", "Drug A")
+  for (pv in pdc_grid) {
+    r <- oracle_static_pdc_v4(pv, drug=d, K=K, n_oracle=100000,
+                              seed=SEED + d*100 + round(pv*100))
+    oracle_curve <- rbind(oracle_curve, data.frame(pdc=pv, drug=dl, risk=r, stringsAsFactors=FALSE))
+  }
+}
+```
+
+::: {.columns}
+:::: {.column width="55%"}
+```{r fig-oracle}
+#| fig-height: 5
+#| fig-width: 6
+ggplot(oracle_curve, aes(x=pdc, y=risk, colour=drug)) +
+  geom_line(linewidth=1.4) + geom_point(size=2) +
+  scale_x_continuous(labels=scales::percent, breaks=seq(0.3,1,0.1)) +
+  scale_y_continuous(labels=scales::percent) +
+  scale_colour_manual(values=drug_pal) +
+  labs(x="Adherence (PDC)", y="12-Month Failure Risk",
+       colour="Regimen", title="Oracle Forgiveness Curves") +
+  theme_minimal(base_size=13) + theme(legend.position="bottom")
+```
+::::
+:::: {.column width="45%"}
+
+```{r tbl-oracle-selected}
+sel <- oracle_curve[oracle_curve$pdc %in% c(0.40, 0.60, 0.75, 0.85, 0.95), ]
+wide <- reshape(sel, idvar="pdc", timevar="drug", direction="wide")
+names(wide) <- c("PDC","Drug A","Drug B")
+wide$RD <- wide$`Drug A` - wide$`Drug B`
+kable(wide, digits=3, row.names=FALSE,
+      caption="Oracle risks at selected PDC levels") |>
+  kable_styling(font_size=12, full_width=FALSE, bootstrap_options=c("condensed","striped"))
+```
+
+- At PDC $\geq$ 85%: Drug A and Drug B perform similarly
+- At PDC $\leq$ 50%: Drug A failure risk is dramatically lower
+- The **forgiveness gap** widens as adherence declines
+::::
+:::
+
+---
+
+## Naive adherence-stratified analyses are biased {.smaller}
+
+::: {.columns}
+:::: {.column width="52%"}
+**What stratification does:**
+Divide patients by observed mean PDC, compare outcomes within strata
+
+**What this produces:**
+
+| | High PDC group | Low PDC group |
+|---|---|---|
+| Who they are | Healthier | Sicker |
+| Virologic trajectory | Already suppressed | Already struggling |
+| Apparent effect | Large benefit | Large harm |
+| True source | **Selection** | **Selection** |
+
+**The result:** the naive forgiveness curve is **too steep** --- it overstates how much adherence matters because it compares different types of patients
+
+::::
+:::: {.column width="48%"}
+
+```{r naive-analysis}
+#| label: naive-analysis
+dat$mean_pdc <- rowMeans(dat[, paste0("PDC_",1:K)])
+dat$strat <- cut(dat$mean_pdc, c(0,p$pdc_cut_low,p$pdc_cut_high,1),
+                 labels=c("Low","Mid","High"), include.lowest=TRUE)
+dat$drug <- factor(ifelse(dat$A0==1,"Drug A","Drug B"), levels=c("Drug A","Drug B"))
+
+# Oracle for categories
+oracle_cat <- data.frame(drug=character(), cat=character(), oracle=numeric(), stringsAsFactors=FALSE)
+for(d in 0:1) {
+  dl <- ifelse(d==0,"Drug B","Drug A")
+  for(cn in c("low","mid","high")) {
+    r <- oracle_static_category_v4(cn, drug=d, K=K, n_oracle=100000,
+                                    seed=SEED+300+d*10+match(cn,c("low","mid","high")))
+    oracle_cat <- rbind(oracle_cat, data.frame(drug=dl, cat=cn, oracle=r, stringsAsFactors=FALSE))
+  }
+}
+```
+
+```{r fig-naive-bias}
+#| fig-height: 4.5
+#| fig-width: 5.5
+naive_tab <- aggregate(Y_final ~ drug + strat, data=dat, FUN=mean)
+ggplot(naive_tab, aes(x=strat, y=Y_final, fill=drug)) +
+  geom_col(position="dodge") +
+  scale_y_continuous(labels=scales::percent_format(1)) +
+  scale_fill_manual(values=drug_pal) +
+  labs(x="Mean PDC stratum", y="Cumulative failure",
+       fill="Drug", title="Naive Analysis (Biased)") +
+  theme_minimal(base_size=12) + theme(legend.position="bottom")
+```
+
+*Time-dependent confounding inflates failure rates in the low-adherence stratum*
+::::
+:::
+
+---
+
+## Positivity: when static estimation breaks down {.smaller}
+
+::: {.columns}
+:::: {.column width="52%"}
+**The problem:**
+Forcing *all* patients to the *same* PDC category across *all* 4 blocks is rare in observed data
+
+```{r fig-heatmap-slide}
+#| fig-height: 3.5
+#| fig-width: 5
+fig_support_heatmap_v4(dat, K = K)
+```
+
+::::
+:::: {.column width="48%"}
+**Two types of positivity failure:**
+
+**L-TMLE:** wide CIs, honest about uncertainty --- conservative but valid
+
+**Static LMTP:** density-ratio weights can collapse --- potentially invalid inference
+
+. . .
+
+::: {.callout-important appearance="simple" style="font-size:0.85em;"}
+**Solution:** Use **feasible shift interventions** (LMTP) that stay within observed support, rather than forcing implausible static regimes.
+
+$d(\text{PDC}_t) = \min(\text{PDC}_t + 0.10,\; 1.0)$
+
+Every patient's shifted PDC is a plausible value they could have achieved.
+:::
+::::
+:::
+
+---
+
+## L-TMLE results: static adherence regimes {.smaller}
+
+```{r ltmle-fit}
+#| label: ltmle-fit
+#| cache: true
+ltmle_res <- fit_ltmle_v4_all(dat, K=K, sl_lib="glm", verbose=FALSE)
+ltmle_res$category <- gsub("always_", "", ltmle_res$regime)
+ltmle_merged <- merge(ltmle_res, oracle_cat,
+                      by.x=c("drug_label","category"), by.y=c("drug","cat"))
+ltmle_merged$bias <- ltmle_merged$estimate - ltmle_merged$oracle
+```
+
+::: {.columns}
+:::: {.column width="55%"}
+
+```{r tbl-ltmle}
+disp <- ltmle_merged[order(ltmle_merged$drug, ltmle_merged$category),
+  c("drug_label","category","estimate","se","oracle","bias","converged")]
+names(disp) <- c("Drug","Category","LTMLE","SE","Oracle","Bias","Conv")
+kable(disp, digits=4,
+      caption="LTMLE estimates vs oracle (GLM nuisance, clean setting)") |>
+  kable_styling(font_size=11, full_width=FALSE, bootstrap_options=c("condensed","striped"))
+```
+
+- **`r sum(ltmle_res$converged)`/`r nrow(ltmle_res)` regimes converged**
+- GLM-based LTMLE is approximately unbiased in this low-dimensional clean setting
+- Higher SE for extreme regimes (positivity strain)
+
+::::
+:::: {.column width="45%"}
+
+```{r fig-ltmle-overlay}
+#| fig-height: 4.5
+#| fig-width: 5.5
+fine_path <- file.path(proj_root, "results", "ltmle_fine_grid.rds")
+if (file.exists(fine_path)) {
+  fine_grid <- readRDS(fine_path)
+  fg <- fine_grid[fine_grid$converged, ]
+  ggplot() +
+    geom_line(data=oracle_curve, aes(x=pdc, y=risk, colour=drug),
+              linewidth=1.1, alpha=0.5) +
+    geom_point(data=fg, aes(x=midpoint, y=estimate, colour=drug_label),
+               size=2.8, alpha=0.9) +
+    geom_errorbar(data=fg,
+                  aes(x=midpoint, ymin=estimate-1.96*se, ymax=estimate+1.96*se,
+                      colour=drug_label), width=0.012, alpha=0.7) +
+    scale_colour_manual(values=drug_pal) +
+    scale_x_continuous(labels=scales::percent, breaks=seq(0.3,1,0.1)) +
+    scale_y_continuous(labels=scales::percent) +
+    labs(x="PDC", y="Failure Risk", colour="Drug",
+         title="LTMLE vs Oracle (7 fine bins)") +
+    theme_minimal(base_size=11) + theme(legend.position="bottom")
+} else {
+  # Fallback: 3-category overlay
+  cat_mid <- c("low"=0.33, "mid"=0.75, "high"=0.925)
+  ltmle_merged$midpoint <- cat_mid[ltmle_merged$category]
+  ggplot() +
+    geom_line(data=oracle_curve, aes(x=pdc, y=risk, colour=drug),
+              linewidth=1, alpha=0.4) +
+    geom_point(data=ltmle_merged,
+               aes(x=midpoint, y=estimate, colour=drug_label), size=3.5) +
+    geom_errorbar(data=ltmle_merged,
+                  aes(x=midpoint, ymin=estimate-se, ymax=estimate+se,
+                      colour=drug_label), width=0.015) +
+    scale_colour_manual(values=drug_pal) +
+    scale_x_continuous(labels=scales::percent, breaks=seq(0.3,1,0.1)) +
+    scale_y_continuous(labels=scales::percent) +
+    labs(x="PDC", y="Failure Risk", colour="Drug",
+         title="LTMLE vs Oracle (3 categories)") +
+    theme_minimal(base_size=11) + theme(legend.position="bottom")
+}
+```
+::::
+:::
+
+---
+
+## LMTP shift: feasible adherence improvement {.smaller}
+
+```{r lmtp-shift}
+#| label: lmtp-shift
+#| cache: true
+shift_tab <- list()
+for (d in 0:1) {
+  dl <- ifelse(d==0,"Drug B","Drug A")
+  nat <- fit_lmtp_natural_v4(dat, drug=d, K=K, folds=1)
+  shf <- fit_lmtp_shift_v4(dat, delta=0.10, drug=d, K=K, folds=1)
+  o_nat <- oracle_natural_v4(drug=d, K=K, n_oracle=100000, seed=SEED+500+d)
+  o_shf <- oracle_shift_v4(delta=0.10, drug=d, K=K, n_oracle=100000, seed=SEED+600+d)
+  shift_tab[[dl]] <- data.frame(
+    drug=dl, natural=nat$estimate, natural_se=nat$se,
+    shifted=shf$estimate, shifted_se=shf$se,
+    nat_oracle=o_nat, shf_oracle=o_shf, stringsAsFactors=FALSE)
+}
+shift_df <- do.call(rbind, shift_tab)
+shift_df$nat_bias <- shift_df$natural - shift_df$nat_oracle
+shift_df$shf_bias <- shift_df$shifted - shift_df$shf_oracle
+```
+
+::: {.columns}
+:::: {.column width="55%"}
+
+```{r tbl-shift}
+disp_s <- shift_df[, c("drug","natural","nat_oracle","nat_bias",
+                        "shifted","shf_oracle","shf_bias")]
+names(disp_s) <- c("Drug","Natural","Nat.Oracle","Nat.Bias",
+                    "+10%","Shift Oracle","Shift Bias")
+kable(disp_s, digits=4,
+      caption="LMTP: natural risk and +10% PDC shift vs oracle") |>
+  kable_styling(font_size=11, full_width=FALSE, bootstrap_options=c("condensed","striped"))
+```
+
+- Shift estimand: $d(\text{PDC}_t) = \min(\text{PDC}_t + 0.10, 1)$
+- Stays within observed support --- stable inference
+- Policy-relevant: "what would an adherence-support program achieve?"
+
+::::
+:::: {.column width="45%"}
+
+```{r fig-shift-bar}
+#| fig-height: 4.5
+#| fig-width: 5
+sp <- data.frame(
+  drug=rep(shift_df$drug, 2),
+  type=factor(rep(c("Natural","+10% Shift"), each=nrow(shift_df)),
+              levels=c("Natural","+10% Shift")),
+  risk=c(shift_df$natural, shift_df$shifted),
+  oracle=c(shift_df$nat_oracle, shift_df$shf_oracle),
+  se=c(shift_df$natural_se, shift_df$shifted_se))
+
+ggplot(sp, aes(x=type, y=risk, fill=drug)) +
+  geom_col(position=position_dodge(0.8), width=0.7) +
+  geom_point(aes(y=oracle), position=position_dodge(0.8),
+             shape=4, size=3, stroke=1.5) +
+  geom_errorbar(aes(ymin=risk-1.96*se, ymax=risk+1.96*se),
+                position=position_dodge(0.8), width=0.15) +
+  scale_y_continuous(labels=scales::percent_format(1)) +
+  scale_fill_manual(values=drug_pal) +
+  labs(x=NULL, y="Failure risk", fill="Drug",
+       title="LMTP: Natural vs +10% Shift",
+       subtitle="Bars = estimates, crosses = oracle") +
+  theme_minimal(base_size=11) + theme(legend.position="bottom")
+```
+::::
+:::
+
+---
+
+## Comparing regimens under matched adherence {.smaller}
+
+```{r lmtp-matched}
+#| label: lmtp-matched
+#| cache: true
+mr <- fit_lmtp_matched_drug_contrast_v4(dat, reference_drug=0, K=K, folds=1)
+ct <- attr(mr, "contrast")
+mo <- oracle_matched_adherence_v4(reference_drug=0, K=K, n_oracle=100000, seed=SEED+700)
+```
+
+::: {.columns}
+:::: {.column width="55%"}
+
+**The question:**
+*If both drugs operated under the same adherence distribution, which produces lower failure risk?*
+
+**Implementation:** quantile-map Drug A's adherence to match Drug B's distribution, then estimate risk for each drug under Drug B-like adherence.
+
+```{r tbl-matched}
+md <- data.frame(
+  Estimand = c("Drug B (own adherence)", "Drug A (under Drug B adherence)",
+               "Risk difference (A - B)"),
+  Estimate = c(mr$estimate[mr$drug==0], mr$estimate[mr$drug==1], ct$rd),
+  Oracle = c(mo$risk_ref, mo$risk_other, mo$rd),
+  SE = c(mr$se[mr$drug==0], mr$se[mr$drug==1], ct$se))
+md$Bias <- md$Estimate - md$Oracle
+
+kable(md, digits=4,
+      caption="Drug comparison under matched (Drug B) adherence") |>
+  kable_styling(font_size=11, full_width=FALSE, bootstrap_options=c("condensed","striped")) |>
+  row_spec(3, bold=TRUE, background="#EBF3FB")
+```
+
+::::
+:::: {.column width="45%"}
+
+::: {.callout-note appearance="simple"}
+Under the same adherence distribution, Drug A has **lower** failure risk than Drug B.
+
+This isolates the **pharmacological forgiveness effect** from differential adherence patterns between regimens.
+
+The risk difference (`r sprintf("%+.3f", ct$rd)`) represents the causal drug effect at a common, realistic adherence distribution.
+:::
+::::
+:::
+
+---
+
+## Bias comparison across methods {.smaller}
+
+```{r fig-bias-comparison}
+#| fig-height: 5
+#| fig-width: 9
+bias_data <- data.frame(method=character(), estimand=character(),
+                        drug=character(), bias=numeric(), stringsAsFactors=FALSE)
+
+# Naive
+for (d in c("Drug A","Drug B")) {
+  for (s in c("High","Mid","Low")) {
+    nv <- mean(dat$Y_final[dat$drug==d & dat$strat==s], na.rm=TRUE)
+    cn <- tolower(s)
+    ov <- oracle_cat$oracle[oracle_cat$drug==d & oracle_cat$cat==cn]
+    if (length(nv)>0 && length(ov)>0)
+      bias_data <- rbind(bias_data, data.frame(method="Naive", estimand=paste0("always_",cn),
+                                                drug=d, bias=nv-ov, stringsAsFactors=FALSE))
+  }
+}
+# LTMLE
+for (i in seq_len(nrow(ltmle_merged)))
+  bias_data <- rbind(bias_data, data.frame(method="L-TMLE", estimand=paste0("always_",ltmle_merged$category[i]),
+                                            drug=ltmle_merged$drug_label[i], bias=ltmle_merged$bias[i], stringsAsFactors=FALSE))
+# LMTP
+for (i in seq_len(nrow(shift_df)))
+  bias_data <- rbind(bias_data, data.frame(method="LMTP (+10%)", estimand="shift",
+                                            drug=shift_df$drug[i], bias=shift_df$shf_bias[i], stringsAsFactors=FALSE))
+
+bias_data$abs_bias <- abs(bias_data$bias)
+bias_data$method <- factor(bias_data$method, levels=c("Naive","L-TMLE","LMTP (+10%)"))
+
+ggplot(bias_data, aes(x=estimand, y=abs_bias, fill=method)) +
+  geom_col(position=position_dodge(0.8), width=0.7) +
+  facet_wrap(~drug) +
+  scale_y_continuous(labels=scales::percent_format(0.1)) +
+  scale_fill_manual(values=c("Naive"="#D73027","L-TMLE"="#4575B4","LMTP (+10%)"="#1A9850")) +
+  labs(x="Estimand", y="|Bias|", fill="Method",
+       title="Absolute Bias by Method and Estimand") +
+  theme_minimal(base_size=12) +
+  theme(axis.text.x=element_text(angle=30, hjust=1), legend.position="bottom")
+```
+
+---
+
+## Takeaways
+
+1. **Naive adherence-stratified analyses are biased** --- time-dependent confounding inflates the apparent adherence-outcome gradient
+
+2. **L-TMLE recovers approximately unbiased estimates** for static adherence regimes when nuisance models are well-specified
+
+3. **Static regimes encounter positivity problems** --- "always low" or "always high" across all blocks is rare, especially for certain drug-adherence combinations
+
+4. **LMTP shift interventions avoid positivity problems** --- the +10% PDC shift is a feasible modification within observed support
+
+5. **Quantile-matched drug comparison isolates the pharmacological forgiveness effect** --- separating drug properties from adherence behavior
+
+6. **The simplified DGP validates the methodology** --- low-dimensional structure confirms that GLM-based LTMLE and LMTP work as expected before scaling to complex EHR simulations
+
+. . .
+
+::: {.callout-important appearance="simple"}
+**If you want to separate regimen properties from patient behavior, you need the right estimand.**
+:::
+
+---
+
+# Appendix {data-visibility="uncounted" .center}
+
+---
+
+## Appendix: V4 DGP parameters {data-visibility="uncounted" .smaller}
+
+::: {.columns}
+:::: {.column width="50%"}
+**Adherence process** (logit-normal AR(1)):
+
+| Parameter | Value | Role |
+|---|---|---|
+| $\alpha_0$ | `r p$alpha0` | Intercept |
+| $\alpha_A$ | `r p$alphaA` | Drug A effect |
+| $\alpha_W$ | `r p$alphaW` | Severity effect |
+| $\alpha_L$ | `r p$alphaL` | Health status effect |
+| $\rho$ | `r p$rho` | AR persistence |
+| $\sigma_u$ | `r p$sigma_u` | Random intercept SD |
+| $\sigma_e$ | `r p$sigma_e` | Innovation SD |
+
+::::
+:::: {.column width="50%"}
+**Failure hazard:**
+
+| Parameter | Value | Role |
+|---|---|---|
+| $\gamma_0$ | `r p$gamma0` | Intercept |
+| $\gamma_L$ | `r p$gammaL` | Health status effect |
+| $\gamma_W$ | `r p$gammaW` | Severity effect |
+| $\gamma_P$ | `r p$gammaP` | Poor adherence effect |
+| $\gamma_A$ | `r p$gammaA` | Drug A main effect |
+| $\gamma_{AP}$ | `r p$gammaAP` | Drug A forgiveness |
+
+$\gamma_{AP} < 0$: Drug A is *more forgiving* at low adherence
+::::
+:::

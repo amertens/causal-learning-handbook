@@ -1,0 +1,547 @@
+---
+title: "L-TMLE 2-Block Gate: Drug A, Sustained Low Adherence"
+author: "HIV Adherence Simulation Project"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    self_contained: true
+    theme: cosmo
+---
+
+**Goal:** Estimate the 2-block cumulative virologic failure risk for Drug A
+under sustained low adherence using L-TMLE, compare to the 2-block oracle,
+and identify the exact failure point if the fit does not return a valid estimate.
+
+This document is self-contained, focused only on Drug A / low adherence / 2 blocks.
+Do not generalize until this gate passes.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = TRUE, message = TRUE, error = FALSE)
+```
+
+# 1. Source DGP and Oracle
+
+```{r source}
+proj_root <- normalizePath(file.path(getwd(), ".."), winslash = "/")
+source(file.path(proj_root, "R", "sim_v4_dgp.R"))
+source(file.path(proj_root, "R", "oracle_v4.R"))
+library(ltmle)
+
+SEED  <- 2024
+N_SIM <- 5000
+K_TARGET <- 2
+DRUG <- 1  # Drug A
+```
+
+# 2. Freeze the Oracle Target
+
+```{r oracle}
+oracle_2b <- oracle_static_category_v4(
+  category = "low", drug = DRUG, K = K_TARGET,
+  n_oracle = 200000, seed = SEED + 7000
+)
+cat(sprintf("*** 2-BLOCK ORACLE (Drug A, always low): %.6f ***\n", oracle_2b))
+```
+
+# 3. Simulate Data
+
+```{r simulate}
+dat <- simulate_v4_data(n = N_SIM, K = 4, seed = SEED, include_censoring = FALSE)
+dat_A <- dat[dat$A0 == DRUG, ]
+cat(sprintf("Drug A patients: %d\n", nrow(dat_A)))
+cat(sprintf("Overall Drug A failure (4-block): %.3f\n", mean(dat_A$Y_final)))
+```
+
+# 4. Build Minimal 2-Block Dataset from Scratch
+
+No reuse of general functions. Every column is constructed explicitly.
+
+```{r build-data}
+ldata_2b <- data.frame(
+  W0      = dat_A$W0,
+  L_1     = dat_A$L_1,
+  Acat2_1 = as.integer(dat_A$PDC_int_1 == 2L),
+  Acat3_1 = as.integer(dat_A$PDC_int_1 == 3L),
+  Y_1     = dat_A$Y_1,
+  L_2     = dat_A$L_2,
+  Acat2_2 = as.integer(dat_A$PDC_int_2 == 2L),
+  Acat3_2 = as.integer(dat_A$PDC_int_2 == 3L),
+  Y_2     = dat_A$Y_2
+)
+
+# Enforce absorbing state: if Y_1 = 1, then L_2/A_2 → NA, Y_2 → 1
+failed_b1 <- !is.na(ldata_2b$Y_1) & ldata_2b$Y_1 == 1L
+ldata_2b$L_2[failed_b1]     <- NA_real_
+ldata_2b$Acat2_2[failed_b1] <- NA_integer_
+ldata_2b$Acat3_2[failed_b1] <- NA_integer_
+ldata_2b$Y_2[failed_b1]     <- 1L
+
+cat("=== DATA STRUCTURE ===\n")
+cat("Column names:", paste(names(ldata_2b), collapse = ", "), "\n")
+cat("Dimensions:", nrow(ldata_2b), "x", ncol(ldata_2b), "\n\n")
+str(ldata_2b)
+cat("\nFirst 10 rows:\n")
+print(head(ldata_2b, 10))
+```
+
+# 5. Explicit Node Specification
+
+```{r nodes}
+Anodes <- c("Acat2_1", "Acat3_1", "Acat2_2", "Acat3_2")
+Lnodes <- c("W0", "L_1", "L_2")
+Ynodes <- c("Y_1", "Y_2")
+
+# abar for sustained low = both dummies 0 at each block
+abar_low_2b <- c(0L, 0L, 0L, 0L)
+
+cat("=== NODE SPECIFICATION ===\n")
+cat("Anodes:", paste(Anodes, collapse = ", "), "\n")
+cat("Lnodes:", paste(Lnodes, collapse = ", "), "\n")
+cat("Ynodes:", paste(Ynodes, collapse = ", "), "\n")
+cat("abar:  ", paste(abar_low_2b, collapse = ", "), "\n")
+cat("length(abar):", length(abar_low_2b), "\n")
+cat("length(Anodes):", length(Anodes), "\n")
+
+stopifnot(length(abar_low_2b) == length(Anodes))
+cat("\n*** PASS: length(abar) == length(Anodes) ***\n")
+
+# Verify all nodes are present in data
+all_nodes <- c(Anodes, Lnodes, Ynodes)
+missing <- setdiff(all_nodes, names(ldata_2b))
+if (length(missing) > 0) {
+  stop("MISSING COLUMNS: ", paste(missing, collapse = ", "))
+} else {
+  cat("*** PASS: all nodes present in data ***\n")
+}
+
+# Verify column order matches temporal order
+expected_order <- c("W0", "L_1", "Acat2_1", "Acat3_1", "Y_1",
+                    "L_2", "Acat2_2", "Acat3_2", "Y_2")
+actual_order <- names(ldata_2b)
+if (!identical(actual_order, expected_order)) {
+  cat("WARNING: column order differs from expected.\n")
+  cat("  Expected:", paste(expected_order, collapse = ", "), "\n")
+  cat("  Actual:  ", paste(actual_order, collapse = ", "), "\n")
+} else {
+  cat("*** PASS: column order matches expected temporal order ***\n")
+}
+```
+
+# 6. Absorbing Outcome Audit
+
+```{r audit-outcome}
+cat("=== ABSORBING OUTCOME AUDIT ===\n\n")
+
+cat("table(Y_1, Y_2, useNA='ifany'):\n")
+print(table(Y_1 = ldata_2b$Y_1, Y_2 = ldata_2b$Y_2, useNA = "ifany"))
+
+# Check no Y_1=1, Y_2=0 (violation of absorbing state)
+violations <- sum(ldata_2b$Y_1 == 1 & ldata_2b$Y_2 == 0, na.rm = TRUE)
+cat(sprintf("\nAbsorbing violations (Y_1=1, Y_2=0): %d\n", violations))
+if (violations > 0) {
+  stop("FATAL: absorbing outcome structure violated")
+}
+cat("*** PASS: absorbing outcome structure valid ***\n")
+
+# Check no illegal NA
+na_y1 <- sum(is.na(ldata_2b$Y_1))
+na_y2_uncens <- sum(is.na(ldata_2b$Y_2) & ldata_2b$Y_1 == 0)
+cat(sprintf("\nNA in Y_1: %d\n", na_y1))
+cat(sprintf("NA in Y_2 among Y_1=0 (should be 0 in clean setting): %d\n", na_y2_uncens))
+if (na_y1 > 0) stop("FATAL: NA in Y_1 in clean setting")
+if (na_y2_uncens > 0) stop("FATAL: NA in Y_2 among non-failed in clean setting")
+cat("*** PASS: no illegal missingness ***\n")
+
+# Marginal outcome rates
+cat(sprintf("\nP(Y_1 = 1): %.4f\n", mean(ldata_2b$Y_1)))
+cat(sprintf("P(Y_2 = 1): %.4f\n", mean(ldata_2b$Y_2)))
+```
+
+# 7. Treatment Encoding Audit
+
+```{r audit-treatment}
+cat("=== TREATMENT ENCODING AUDIT ===\n\n")
+
+cat("Block 1 — table(Acat2_1, Acat3_1, useNA='ifany'):\n")
+print(table(Acat2_1 = ldata_2b$Acat2_1, Acat3_1 = ldata_2b$Acat3_1, useNA = "ifany"))
+
+cat("\nBlock 2 — table(Acat2_2, Acat3_2, useNA='ifany'):\n")
+print(table(Acat2_2 = ldata_2b$Acat2_2, Acat3_2 = ldata_2b$Acat3_2, useNA = "ifany"))
+
+# Check for impossible (1,1) combinations
+impossible_b1 <- sum(ldata_2b$Acat2_1 == 1 & ldata_2b$Acat3_1 == 1, na.rm = TRUE)
+impossible_b2 <- sum(ldata_2b$Acat2_2 == 1 & ldata_2b$Acat3_2 == 1, na.rm = TRUE)
+cat(sprintf("\nImpossible (1,1) at block 1: %d\n", impossible_b1))
+cat(sprintf("Impossible (1,1) at block 2: %d\n", impossible_b2))
+if (impossible_b1 > 0 || impossible_b2 > 0) {
+  stop("FATAL: impossible (1,1) treatment encoding")
+}
+cat("*** PASS: no impossible treatment combinations ***\n")
+
+# Support for sustained low regime over 2 blocks
+n_total <- nrow(ldata_2b)
+# Block 2 dummies are NA for failed subjects, so check only among non-failed
+alive_b2 <- ldata_2b$Y_1 == 0
+low_b1 <- ldata_2b$Acat2_1 == 0 & ldata_2b$Acat3_1 == 0
+low_b2 <- rep(FALSE, n_total)
+low_b2[alive_b2] <- ldata_2b$Acat2_2[alive_b2] == 0 & ldata_2b$Acat3_2[alive_b2] == 0
+
+sustained_low <- low_b1 & (ldata_2b$Y_1 == 1 | low_b2)
+# Actually: for the regime "always low", we need low at block 1, AND low at block 2 (among survivors)
+# Failed subjects at block 1 don't need block 2 adherence
+n_sustained <- sum(low_b1 & low_b2, na.rm = TRUE) + sum(low_b1 & ldata_2b$Y_1 == 1)
+pct_sustained <- 100 * n_sustained / n_total
+
+cat(sprintf("\nSubjects following sustained low for 2 blocks: %d / %d (%.1f%%)\n",
+            n_sustained, n_total, pct_sustained))
+if (pct_sustained < 1) {
+  cat("WARNING: very sparse support (<1%) for this regime\n")
+} else {
+  cat("*** PASS: support > 1% ***\n")
+}
+```
+
+# 8. Deterministic g-Function for 2 Blocks
+
+```{r det-g}
+# Track invocations for diagnostics
+det_g_2b_counts <- new.env(parent = emptyenv())
+det_g_2b_counts$Acat3_1 <- 0L
+det_g_2b_counts$Acat3_2 <- 0L
+
+det_g_2b <- function(data, current.node, nodes) {
+  # current.node = column index; nodes = list (NOT character vector)
+  # Correct resolution: names(data)[current.node]
+  node_name <- names(data)[current.node]
+
+  if (node_name == "Acat3_1") {
+    is_mid <- !is.na(data[["Acat2_1"]]) & data[["Acat2_1"]] == 1L
+    if (any(is_mid)) {
+      det_g_2b_counts$Acat3_1 <- det_g_2b_counts$Acat3_1 + sum(is_mid)
+      return(list(is.deterministic = is_mid, prob1 = 0))
+    }
+  }
+
+  if (node_name == "Acat3_2") {
+    is_mid <- !is.na(data[["Acat2_2"]]) & data[["Acat2_2"]] == 1L
+    if (any(is_mid)) {
+      det_g_2b_counts$Acat3_2 <- det_g_2b_counts$Acat3_2 + sum(is_mid)
+      return(list(is.deterministic = is_mid, prob1 = 0))
+    }
+  }
+
+  NULL
+}
+
+cat("Deterministic g-function defined for Acat3_1 and Acat3_2.\n")
+cat("Invocation counts will be printed after fit.\n")
+```
+
+# 9. Explicit Qform and gform for 2 Blocks
+
+Parsimonious Markov-style formulas. No full history.
+
+```{r formulas}
+Qform_2b <- c(
+  Y_1 = "Q.kplus1 ~ W0 + L_1 + Acat2_1 + Acat3_1",
+  Y_2 = "Q.kplus1 ~ W0 + L_2 + Acat2_2 + Acat3_2"
+)
+
+gform_2b <- c(
+  Acat2_1 = "Acat2_1 ~ W0 + L_1",
+  Acat3_1 = "Acat3_1 ~ W0 + L_1 + Acat2_1",
+  Acat2_2 = "Acat2_2 ~ W0 + L_2 + Acat2_1 + Acat3_1",
+  Acat3_2 = "Acat3_2 ~ W0 + L_2 + Acat2_1 + Acat3_1 + Acat2_2"
+)
+
+cat("=== FORMULAS ===\n")
+cat("Qform:\n")
+for (nm in names(Qform_2b)) cat(sprintf("  %s: %s\n", nm, Qform_2b[nm]))
+cat("gform:\n")
+for (nm in names(gform_2b)) cat(sprintf("  %s: %s\n", nm, gform_2b[nm]))
+```
+
+# 10. Call ltmle (2-Block)
+
+```{r ltmle-call}
+cat("=== CALLING ltmle (2-block) ===\n\n")
+
+ltmle_warnings <- character()
+fit_2b <- tryCatch(
+  withCallingHandlers(
+    ltmle::ltmle(
+      data                     = ldata_2b,
+      Anodes                   = Anodes,
+      Lnodes                   = Lnodes,
+      Ynodes                   = Ynodes,
+      abar                     = abar_low_2b,
+      Qform                    = Qform_2b,
+      gform                    = gform_2b,
+      SL.library               = "glm",
+      estimate.time            = FALSE,
+      survivalOutcome          = TRUE,
+      deterministic.g.function = det_g_2b,
+      variance.method          = "ic"
+    ),
+    warning = function(w) {
+      ltmle_warnings <<- c(ltmle_warnings, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  ),
+  error = function(e) {
+    cat("\n!!! LTMLE FIT ERROR !!!\n")
+    cat("Error message:", conditionMessage(e), "\n\n")
+    cat("Diagnostic dump:\n")
+    cat("  names(ldata_2b):", paste(names(ldata_2b), collapse = ", "), "\n")
+    cat("  Anodes:", paste(Anodes, collapse = ", "), "\n")
+    cat("  Lnodes:", paste(Lnodes, collapse = ", "), "\n")
+    cat("  Ynodes:", paste(Ynodes, collapse = ", "), "\n")
+    cat("  abar:", paste(abar_low_2b, collapse = ", "), "\n")
+    cat("  nrow:", nrow(ldata_2b), "\n")
+    cat("  Y_1 range:", range(ldata_2b$Y_1, na.rm = TRUE), "\n")
+    cat("  Y_2 range:", range(ldata_2b$Y_2, na.rm = TRUE), "\n")
+    NULL
+  }
+)
+if (length(ltmle_warnings) > 0) {
+  cat("Warnings captured during fit:\n")
+  for (w in unique(ltmle_warnings)) cat(sprintf("  - %s\n", w))
+}
+
+# Print det_g invocation counts
+cat("\nDeterministic g-function invocation counts:\n")
+cat(sprintf("  Acat3_1 constrained: %d rows total\n", det_g_2b_counts$Acat3_1))
+cat(sprintf("  Acat3_2 constrained: %d rows total\n", det_g_2b_counts$Acat3_2))
+if (det_g_2b_counts$Acat3_2 == 0) {
+  cat("  WARNING: det_g was NOT active at block 2 — possible specification issue\n")
+} else {
+  cat("  *** PASS: det_g active at both blocks ***\n")
+}
+```
+
+# 11. Extract Results (Only If Fit Succeeded)
+
+```{r extract}
+ltmle_2b_est <- NA_real_
+ltmle_2b_se  <- NA_real_
+
+if (!is.null(fit_2b)) {
+  cat("=== LTMLE FIT SUCCEEDED ===\n\n")
+
+  summ <- summary(fit_2b)
+  cat("summary(fit) structure:\n")
+  cat("  names(summ):", paste(names(summ), collapse = ", "), "\n")
+
+  # Extract treatment-specific mean
+  ltmle_2b_est <- as.numeric(fit_2b$estimates["tmle"])
+  ltmle_2b_se  <- summ$treatment$std.dev
+
+  cat(sprintf("\n  TMLE estimate: %.6f\n", ltmle_2b_est))
+  cat(sprintf("  SE:            %.6f\n", ltmle_2b_se))
+  cat(sprintf("  IPTW:          %.6f\n", as.numeric(fit_2b$estimates["iptw"])))
+  cat(sprintf("  Oracle:        %.6f\n", oracle_2b))
+  cat(sprintf("  Bias:          %+.6f\n", ltmle_2b_est - oracle_2b))
+
+  ci_lo <- ltmle_2b_est - 1.96 * ltmle_2b_se
+  ci_hi <- ltmle_2b_est + 1.96 * ltmle_2b_se
+  oracle_in_ci <- oracle_2b >= ci_lo & oracle_2b <= ci_hi
+  cat(sprintf("  95%% CI:        [%.4f, %.4f]\n", ci_lo, ci_hi))
+  cat(sprintf("  Oracle in CI:  %s\n", ifelse(oracle_in_ci, "YES", "NO")))
+
+} else {
+  cat("=== LTMLE FIT FAILED ===\n")
+  cat("fit_2b is NULL — see error output above.\n")
+}
+```
+
+# 12. Manual 2-Block Parametric G-Computation Benchmark
+
+A rough sequential outcome-model benchmark to check whether a finite
+2-block estimate can be produced from this data at all.
+
+```{r gcomp-benchmark}
+cat("=== MANUAL 2-BLOCK G-COMPUTATION ===\n\n")
+
+# Step 1: Fit Q2 model (Y_2 ~ W0 + L_2 + Acat2_2 + Acat3_2) among Y_1=0
+alive_idx <- ldata_2b$Y_1 == 0
+Q2_data <- ldata_2b[alive_idx, ]
+
+fit_Q2 <- glm(Y_2 ~ W0 + L_2 + Acat2_2 + Acat3_2,
+              data = Q2_data, family = binomial)
+cat("Q2 model fitted on", nrow(Q2_data), "alive-at-block-2 subjects\n")
+cat("Q2 coefficients:\n")
+print(round(coef(fit_Q2), 4))
+
+# Predict under intervention (Acat2=0, Acat3=0) for ALL subjects alive at block 2
+# But L_2 under intervention depends on PDC_1 being low → use observed L_2
+# (this is a simplification; true g-comp would recompute L_2)
+pred_Q2 <- Q2_data
+pred_Q2$Acat2_2 <- 0L
+pred_Q2$Acat3_2 <- 0L
+p_Y2_given_alive <- predict(fit_Q2, newdata = pred_Q2, type = "response")
+
+# Step 2: Fit Q1 model (Y_1 ~ W0 + L_1 + Acat2_1 + Acat3_1)
+fit_Q1 <- glm(Y_1 ~ W0 + L_1 + Acat2_1 + Acat3_1,
+              data = ldata_2b, family = binomial)
+cat("\nQ1 model fitted on", nrow(ldata_2b), "subjects\n")
+cat("Q1 coefficients:\n")
+print(round(coef(fit_Q1), 4))
+
+# Predict P(Y_1=1) under intervention
+pred_Q1 <- ldata_2b
+pred_Q1$Acat2_1 <- 0L
+pred_Q1$Acat3_1 <- 0L
+p_Y1 <- predict(fit_Q1, newdata = pred_Q1, type = "response")
+
+# 2-block cumulative risk = P(Y_1=1) + P(Y_1=0) * P(Y_2=1 | Y_1=0)
+# For subjects who failed at block 1, their contribution is 1
+# For alive subjects, their contribution is P(Y_2=1 | alive, intervention)
+# But we need to match subjects — the g-comp approach:
+# E[Y_2^{always low}] = E[ Y_1^{low} + (1 - Y_1^{low}) * Q2(0, L_2^{low}) ]
+# Simplified: use marginal averages
+mean_p_Y1 <- mean(p_Y1)
+mean_p_Y2_alive <- mean(p_Y2_given_alive)
+
+gcomp_risk_2b <- mean_p_Y1 + (1 - mean_p_Y1) * mean_p_Y2_alive
+
+cat(sprintf("\nManual g-comp 2-block risk: %.6f\n", gcomp_risk_2b))
+cat(sprintf("Oracle 2-block risk:       %.6f\n", oracle_2b))
+cat(sprintf("G-comp bias:               %+.6f\n", gcomp_risk_2b - oracle_2b))
+cat("\nNote: this is approximate — L_2 is not recomputed under intervention.\n")
+cat("It serves only to check whether a finite estimate is possible.\n")
+```
+
+# 13. Stop/Go Decision
+
+```{r decision}
+cat("\n")
+cat("##########################################################\n")
+cat("#                  2-BLOCK GATE DECISION                  #\n")
+cat("##########################################################\n\n")
+
+checks <- list()
+
+# 1. Absorbing outcome
+checks$absorbing <- violations == 0
+cat(sprintf("  [%s] Absorbing outcome structure\n",
+            ifelse(checks$absorbing, "PASS", "FAIL")))
+
+# 2. Treatment encoding
+checks$encoding <- impossible_b1 == 0 && impossible_b2 == 0
+cat(sprintf("  [%s] Treatment encoding (no (1,1) states)\n",
+            ifelse(checks$encoding, "PASS", "FAIL")))
+
+# 3. abar length
+checks$abar <- length(abar_low_2b) == length(Anodes)
+cat(sprintf("  [%s] abar length matches Anodes\n",
+            ifelse(checks$abar, "PASS", "FAIL")))
+
+# 4. Column order
+checks$col_order <- identical(names(ldata_2b), expected_order)
+cat(sprintf("  [%s] Column order matches temporal order\n",
+            ifelse(checks$col_order, "PASS", "FAIL")))
+
+# 5. det_g active at block 2
+checks$det_g_b2 <- det_g_2b_counts$Acat3_2 > 0
+cat(sprintf("  [%s] Deterministic g-function active at block 2\n",
+            ifelse(checks$det_g_b2, "PASS", "FAIL")))
+
+# 6. ltmle returned finite estimate
+checks$ltmle_finite <- !is.na(ltmle_2b_est) && is.finite(ltmle_2b_est)
+cat(sprintf("  [%s] LTMLE returned finite estimate\n",
+            ifelse(checks$ltmle_finite, "PASS", "FAIL")))
+
+# 7. SE finite
+checks$se_finite <- !is.na(ltmle_2b_se) && is.finite(ltmle_2b_se) && ltmle_2b_se > 0
+cat(sprintf("  [%s] LTMLE SE finite and positive\n",
+            ifelse(checks$se_finite, "PASS", "FAIL")))
+
+# 8. Directionally sensible
+checks$direction <- if (checks$ltmle_finite) {
+  ltmle_2b_est > 0 && ltmle_2b_est < 1
+} else FALSE
+cat(sprintf("  [%s] Estimate in (0, 1)\n",
+            ifelse(checks$direction, "PASS", "FAIL")))
+
+# 9. Not grossly inconsistent with oracle
+checks$oracle_close <- if (checks$ltmle_finite) {
+  abs(ltmle_2b_est - oracle_2b) < 0.20  # within 20pp
+} else FALSE
+cat(sprintf("  [%s] Not grossly inconsistent with oracle (within 20pp)\n",
+            ifelse(checks$oracle_close, "PASS", "FAIL")))
+
+# 10. Manual g-comp finite
+checks$gcomp_finite <- is.finite(gcomp_risk_2b)
+cat(sprintf("  [%s] Manual g-comp finite\n",
+            ifelse(checks$gcomp_finite, "PASS", "FAIL")))
+
+all_pass <- all(unlist(checks))
+
+cat("\n")
+if (all_pass) {
+  cat("*** 2-BLOCK GATE: PASS ***\n\n")
+  cat("It is safe to patch the main progressive-horizon script.\n")
+  cat("The 2-block L-TMLE specification is working correctly.\n")
+} else {
+  failed_checks <- names(checks)[!unlist(checks)]
+  cat("*** 2-BLOCK GATE: FAIL ***\n\n")
+  cat("Failed checks:", paste(failed_checks, collapse = ", "), "\n")
+  cat("Do NOT patch the main script until these are resolved.\n")
+}
+```
+
+```{r blocking-failure, eval=!all_pass, results='asis'}
+cat("\n# Exact Blocking Failure\n\n")
+
+if (!checks$ltmle_finite) {
+  cat("The L-TMLE fit did not return a finite estimate.\n\n")
+  if (is.null(fit_2b)) {
+    cat("**Root cause:** `ltmle()` threw an error. See error message above.\n")
+    cat("Most likely reason: the multi-timepoint specification (Qform, gform,\n")
+    cat("survivalOutcome, or node ordering) is incorrect.\n")
+  } else {
+    cat("**Root cause:** `ltmle()` returned an object but the estimate is NA.\n")
+    cat("Most likely reason: the TMLE update step failed to converge,\n")
+    cat("possibly due to near-zero treatment probabilities or\n")
+    cat("extreme clever-covariate values.\n")
+  }
+} else if (!checks$se_finite) {
+  cat("**Root cause:** estimate is finite but SE is NA/0/Inf.\n")
+  cat("Most likely reason: influence-curve variance estimation failed,\n")
+  cat("possibly due to positivity issues or near-constant predictions.\n")
+} else if (!checks$det_g_b2) {
+  cat("**Root cause:** deterministic g-function was not invoked at block 2.\n")
+  cat("Most likely reason: `current.node` indexing does not match the\n")
+  cat("expected Acat3_2 column position, or the g-function is not being\n")
+  cat("called for block-2 treatment nodes.\n")
+} else {
+  cat("**Root cause:** a non-critical check failed.\n")
+  cat("Failed checks:", paste(names(checks)[!unlist(checks)], collapse = ", "), "\n")
+}
+```
+
+# 14. Summary Table
+
+```{r summary-table}
+summary_df <- data.frame(
+  Quantity = c("Oracle (2-block, Drug A, always low)",
+               "L-TMLE estimate", "L-TMLE SE", "L-TMLE bias",
+               "Manual g-comp estimate", "G-comp bias",
+               "Gate decision"),
+  Value = c(
+    sprintf("%.6f", oracle_2b),
+    ifelse(is.na(ltmle_2b_est), "NA (FAILED)", sprintf("%.6f", ltmle_2b_est)),
+    ifelse(is.na(ltmle_2b_se), "NA", sprintf("%.6f", ltmle_2b_se)),
+    ifelse(is.na(ltmle_2b_est), "NA", sprintf("%+.6f", ltmle_2b_est - oracle_2b)),
+    sprintf("%.6f", gcomp_risk_2b),
+    sprintf("%+.6f", gcomp_risk_2b - oracle_2b),
+    ifelse(all_pass, "PASS", "FAIL")
+  )
+)
+
+knitr::kable(summary_df, col.names = c("", "Value"),
+             caption = "2-Block Gate Summary")
+```

@@ -1,0 +1,438 @@
+---
+title: "Causal Mediation Analysis of Drug Effects on Virologic Failure"
+subtitle: "Decomposing the Drug A vs Drug B Effect Through Adherence Pathways"
+author: "HIV Adherence Simulation Project"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    theme: cosmo
+    code-fold: true
+    code-summary: "Show code"
+    fig-width: 10
+    fig-height: 7
+    self-contained: true
+execute:
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| label: setup
+
+library(crumble)
+library(mlr3superlearner)
+library(mlr3extralearners)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+
+theme_set(theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(color = "grey40", size = 12),
+    strip.text = element_text(face = "bold", size = 12),
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  ))
+
+# Source V4 DGP
+v4_root <- file.path(dirname(getwd()))
+for (f in list.files(file.path(v4_root, "R"), full.names = TRUE, pattern = "\\.R$")) {
+  source(f, local = FALSE)
+}
+
+SEED <- 2026
+K <- 4
+N_MED <- 1500   # small to stay within memory on Windows with torch
+
+# Limit ALL threading to prevent OOM
+Sys.setenv(OMP_NUM_THREADS = "1", TORCH_NUM_THREADS = "1",
+           OMP_THREAD_LIMIT = "1", OPENBLAS_NUM_THREADS = "1",
+           MKL_NUM_THREADS = "1")
+
+# Lightweight crumble settings
+cr_control <- crumble_control(crossfit_folds = 2L, epochs = 20L)
+cr_nn      <- sequential_module(layers = 1, hidden = 16, dropout = 0.1)
+cr_learners <- c("mean", "glm")
+
+# Helper to safely run crumble and return tidy results
+safe_crumble <- function(...) {
+  tryCatch({
+    fit <- crumble(...)
+    tidy(fit)
+  }, error = function(e) {
+    message("crumble error: ", conditionMessage(e))
+    data.frame(estimand = "error", estimate = NA_real_, std.error = NA_real_,
+               conf.low = NA_real_, conf.high = NA_real_)
+  })
+}
+```
+
+# 1 Scientific Motivation
+
+## 1.1 The Question
+
+In the V4 simplified adherence simulation, **Drug A** is pharmacologically more forgiving than Drug B — it provides better virologic suppression at low adherence levels. But Drug A also happens to produce **lower observed adherence** than Drug B (perhaps due to side effects, dosing complexity, or taste).
+
+This creates an interesting causal question: **How much of the total drug effect operates *through* adherence, and how much is a direct pharmacological effect?**
+
+**Causal structure (simplified):**
+
+```
+     W0 (baseline health)
+     ↓         ↓
+    A0 ──→ PDC (adherence) ──→ Y (failure)
+     │              ↑                ↑
+     │         L (health status)─────┘
+     └──────────────────────────────→┘
+           (direct pharmacological effect)
+```
+
+**Pathways from Drug (A0) to Virologic Failure (Y):**
+
+- **Direct effect**: A0 → Y (the drug's pharmacological action independent of adherence)
+- **Indirect effect via adherence**: A0 → PDC → Y (the drug affects adherence, which affects outcome)
+- **Indirect effect via health status**: A0 → L → Y (the drug affects health status, which affects outcome)
+
+## 1.2 Mediation Framework
+
+We use the `crumble` package (Williams, Diaz, Liu, Rudolph 2024) which implements modern semiparametric mediation analysis using Riesz representers. Key effect types:
+
+| Effect | Description | Handles M→Y confounding? |
+|--------|-------------|--------------------------|
+| **Natural (N)** | Classic natural direct/indirect effects | No — requires cross-world assumption |
+| **Randomized Interventional (RI)** | Interventional analogues of NDE/NIE | Yes — uses mediator-outcome confounders |
+
+Since our V4 DGP has **L_t** as a mediator-outcome confounder (L affects both future PDC and Y), the **RI effects** are the most appropriate. We include Natural effects for comparison.
+
+# 2 Data Preparation
+
+```{r generate-data}
+#| label: generate-data
+
+set.seed(SEED)
+dat <- simulate_v4_data(n = N_MED, K = K, seed = SEED)
+
+cat(sprintf("Dataset: n = %d, K = %d blocks\n", nrow(dat), K))
+cat(sprintf("Drug A: n = %d, Drug B: n = %d\n",
+            sum(dat$A0 == 1), sum(dat$A0 == 0)))
+cat(sprintf("Overall failure rate: %.1f%%\n", mean(dat$Y_final) * 100))
+cat(sprintf("Drug A failure: %.1f%%, Drug B failure: %.1f%%\n",
+            mean(dat$Y_final[dat$A0 == 1]) * 100,
+            mean(dat$Y_final[dat$A0 == 0]) * 100))
+```
+
+```{r prepare-mediation-data}
+#| label: prepare-mediation-data
+
+# ── Version 1: Single-block (block 1) ──
+med_b1 <- data.frame(
+  W0    = as.double(dat$W0),
+  A0    = factor(dat$A0, levels = c(0, 1), labels = c("DrugB", "DrugA")),
+  L1    = as.double(dat$L_1),
+  PDC1  = as.double(dat$PDC_1),
+  Y1    = as.double(dat$Y_1)
+)
+
+# ── Version 2: Summary across all blocks ──
+pdc_cols <- paste0("PDC_", seq_len(K))
+l_cols <- paste0("L_", seq_len(K))
+
+med_summary <- data.frame(
+  W0       = as.double(dat$W0),
+  A0       = factor(dat$A0, levels = c(0, 1), labels = c("DrugB", "DrugA")),
+  mean_L   = as.double(rowMeans(dat[, l_cols], na.rm = TRUE)),
+  mean_PDC = as.double(rowMeans(dat[, pdc_cols], na.rm = TRUE)),
+  Y_final  = as.double(dat$Y_final)
+)
+
+cat("Mediation datasets prepared:\n")
+cat(sprintf("  Block 1:  %d obs, Y1 event rate = %.1f%%\n",
+            nrow(med_b1), mean(med_b1$Y1) * 100))
+cat(sprintf("  Summary:  %d obs, Y_final event rate = %.1f%%\n",
+            nrow(med_summary), mean(med_summary$Y_final) * 100))
+```
+
+## 2.1 Adherence by Drug
+
+```{r fig-adherence-by-drug}
+#| label: fig-adherence-by-drug
+#| fig-cap: "Adherence (PDC) distributions by drug and block. Drug A tends to have lower adherence than Drug B."
+#| fig-height: 5
+
+dens_list <- list()
+for (t in seq_len(K)) {
+  dens_list[[t]] <- data.frame(
+    Block = paste0("Block ", t),
+    Drug = ifelse(dat$A0 == 1, "Drug A", "Drug B"),
+    PDC = dat[[paste0("PDC_", t)]]
+  )
+}
+dens_df <- do.call(rbind, dens_list)
+
+ggplot(dens_df, aes(x = PDC, fill = Drug, colour = Drug)) +
+  geom_density(alpha = 0.3, linewidth = 0.6) +
+  facet_wrap(~ Block) +
+  scale_fill_manual(values = c("Drug A" = "#3498DB", "Drug B" = "#E67E22")) +
+  scale_colour_manual(values = c("Drug A" = "#3498DB", "Drug B" = "#E67E22")) +
+  scale_x_continuous(labels = scales::percent) +
+  labs(x = "PDC", y = "Density",
+       title = "Adherence Distribution by Drug and Block",
+       fill = NULL, colour = NULL)
+```
+
+# 3 Intervention Definitions
+
+```{r intervention-functions}
+#| label: intervention-functions
+
+# Treatment policies for crumble
+d0 <- function(data, trt) {
+  factor(rep("DrugB", nrow(data)), levels = c("DrugB", "DrugA"))
+}
+
+d1 <- function(data, trt) {
+  factor(rep("DrugA", nrow(data)), levels = c("DrugB", "DrugA"))
+}
+```
+
+# 4 Analysis 1: Single-Block Mediation (Block 1)
+
+We run two decompositions on the Block 1 cross-section: Natural effects (for comparison) and Randomized Interventional effects (the more credible approach given L1 confounds PDC1→Y1).
+
+## 4.1 Natural Direct and Indirect Effects
+
+The **natural direct effect (NDE)** captures the drug effect on failure risk if adherence were held at its "natural" level under Drug B. The **natural indirect effect (NIE)** captures how much the drug effect operates through changing adherence.
+
+::: {.callout-note}
+Natural effects require the cross-world independence assumption: the mediator under one treatment is independent of the outcome under another, conditional on confounders. This is untestable but may be plausible in our simulation.
+:::
+
+```{r nat-block1}
+#| label: nat-block1
+
+set.seed(SEED)
+nat_b1_tidy <- safe_crumble(
+  data      = med_b1,
+  trt       = "A0",
+  outcome   = "Y1",
+  covar     = "W0",
+  mediators = "PDC1",
+  d0        = d0,
+  d1        = d1,
+  effect    = "N",
+  learners  = cr_learners,
+  nn_module = cr_nn,
+  control   = cr_control
+)
+invisible(gc(verbose = FALSE))
+kable(nat_b1_tidy, digits = 4,
+      caption = "Natural direct and indirect effects (Block 1)") |>
+  kable_styling(full_width = FALSE)
+```
+
+## 4.2 Randomized Interventional Effects
+
+The **randomized interventional** effects decompose the total effect without requiring the cross-world assumption, instead drawing the mediator from its conditional distribution under each treatment. This requires specifying mediator-outcome confounders.
+
+In our V4 DGP, **L_1** is a confounder of the PDC_1 → Y_1 relationship.
+
+```{r ri-block1}
+#| label: ri-block1
+
+invisible(gc(verbose = FALSE))
+set.seed(SEED)
+ri_b1_tidy <- safe_crumble(
+  data      = med_b1,
+  trt       = "A0",
+  outcome   = "Y1",
+  covar     = "W0",
+  mediators = "PDC1",
+  moc       = "L1",
+  d0        = d0,
+  d1        = d1,
+  effect    = "RI",
+  learners  = cr_learners,
+  nn_module = cr_nn,
+  control   = cr_control
+)
+invisible(gc(verbose = FALSE))
+kable(ri_b1_tidy, digits = 4,
+      caption = "Randomized interventional effects (Block 1, mediator-outcome confounder: L1)") |>
+  kable_styling(full_width = FALSE)
+```
+
+## 4.3 Comparison: Natural vs RI (Block 1)
+
+```{r fig-compare-block1}
+#| label: fig-compare-block1
+#| fig-cap: "Comparison of Natural vs Randomized Interventional mediation effects for Block 1. Both decompose the total effect of Drug A vs Drug B."
+#| fig-height: 5
+
+all_b1 <- bind_rows(
+  nat_b1_tidy |> mutate(Effect_Type = "Natural (N)"),
+  ri_b1_tidy  |> mutate(Effect_Type = "Rand. Interventional (RI)")
+) |>
+  filter(!is.na(estimate))
+
+if (nrow(all_b1) > 0) {
+  ggplot(all_b1, aes(x = estimand, y = estimate, colour = Effect_Type)) +
+    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+    geom_pointrange(aes(ymin = conf.low, ymax = conf.high),
+                    position = position_dodge(width = 0.5),
+                    size = 0.6, linewidth = 0.8) +
+    scale_colour_brewer(palette = "Set1") +
+    labs(
+      title = "Mediation Decomposition: Drug Effect on Block 1 Failure",
+      subtitle = "A0: Drug A vs Drug B | Mediator: PDC (adherence)",
+      x = "Component", y = "Effect Estimate (risk difference scale)",
+      colour = "Decomposition"
+    ) +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1))
+} else {
+  cat("No valid estimates to plot.\n")
+}
+```
+
+```{r tbl-compare-block1}
+#| label: tbl-compare-block1
+
+if (nrow(all_b1) > 0) {
+  summary_b1 <- all_b1 |>
+    transmute(
+      Method = Effect_Type,
+      Component = estimand,
+      Estimate = sprintf("%.4f", estimate),
+      SE = sprintf("%.4f", std.error),
+      `95% CI` = sprintf("[%.4f, %.4f]", conf.low, conf.high)
+    )
+
+  kable(summary_b1,
+        caption = "All mediation decompositions: Block 1 analysis") |>
+    kable_styling(font_size = 11, full_width = FALSE)
+}
+```
+
+# 5 Analysis 2: Summary Mediation (Mean PDC → Final Outcome)
+
+This analysis treats mean adherence over all 4 blocks as a single mediator of the drug → failure effect, with mean health status as the mediator-outcome confounder.
+
+```{r ri-summary}
+#| label: ri-summary
+
+invisible(gc(verbose = FALSE))
+set.seed(SEED + 200)
+ri_summ_tidy <- safe_crumble(
+  data      = med_summary,
+  trt       = "A0",
+  outcome   = "Y_final",
+  covar     = "W0",
+  mediators = "mean_PDC",
+  moc       = "mean_L",
+  d0        = d0,
+  d1        = d1,
+  effect    = "RI",
+  learners  = cr_learners,
+  nn_module = cr_nn,
+  control   = cr_control
+)
+invisible(gc(verbose = FALSE))
+kable(ri_summ_tidy, digits = 4,
+      caption = "Randomized interventional effects: Summary analysis (mean PDC → final outcome)") |>
+  kable_styling(full_width = FALSE)
+```
+
+```{r fig-summary}
+#| label: fig-summary
+#| fig-cap: "RI mediation decomposition using summary (mean PDC) mediator and final virologic failure outcome."
+#| fig-height: 5
+
+ri_summ_ok <- ri_summ_tidy |> filter(!is.na(estimate))
+if (nrow(ri_summ_ok) > 0) {
+  ggplot(ri_summ_ok, aes(x = estimand, y = estimate)) +
+    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+    geom_pointrange(aes(ymin = conf.low, ymax = conf.high),
+                    colour = "#2E86C1", size = 0.8, linewidth = 1) +
+    labs(
+      title = "Mediation Decomposition: Drug Effect on 12-Month Failure",
+      subtitle = "Randomized Interventional | Mediator: Mean PDC | MOC: Mean L",
+      x = "Component", y = "Effect Estimate (risk difference scale)"
+    ) +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1))
+} else {
+  cat("Summary RI fit did not produce valid estimates.\n")
+}
+```
+
+# 6 Pathway Summary
+
+```{r pathway-summary, results='asis'}
+#| label: pathway-summary
+
+ri_vals <- ri_summ_tidy |> filter(!is.na(estimate))
+
+if (nrow(ri_vals) >= 2) {
+  de <- ri_vals$estimate[ri_vals$estimand == "direct"]
+  ie <- ri_vals$estimate[ri_vals$estimand == "indirect"]
+  te <- ri_vals$estimate[ri_vals$estimand == "ate"]
+
+  if (length(de) > 0 && length(ie) > 0) {
+    prop_mediated <- abs(ie) / (abs(de) + abs(ie)) * 100
+    prop_direct   <- 100 - prop_mediated
+
+    cat(sprintf("
+## Pathway Summary (Randomized Interventional, Summary Analysis)
+
+**Total Effect of Drug A vs Drug B on 12-month virologic failure:**
+
+| Pathway | Estimate | Proportion |
+|---------|----------|------------|
+| **Direct effect** (A0 → Y, not through PDC) | %.4f | %.0f%% |
+| **Indirect effect** (A0 → PDC → Y) | %.4f | %.0f%% |
+| **Total effect** (ATE) | %.4f | 100%% |
+
+", de[1], prop_direct[1], ie[1], prop_mediated[1], te[1]))
+
+    if (de[1] < 0 && ie[1] > 0) {
+      cat("**Interpretation:** Drug A has a beneficial *direct* pharmacological effect (lower failure risk) but a harmful *indirect* effect through reduced adherence. The net effect depends on the balance of these two pathways.\n\n")
+    } else if (de[1] < 0 && ie[1] < 0) {
+      cat("**Interpretation:** Both the direct pharmacological effect and the adherence pathway favor Drug A. Even though Drug A tends toward lower adherence, the forgiveness mechanism compensates.\n\n")
+    } else {
+      cat("**Interpretation:** The sign pattern suggests a complex interaction between the direct drug effect and the adherence-mediated pathway.\n\n")
+    }
+
+    cat("This decomposition is central to the HIV adherence simulation's scientific goal: understanding when a more 'forgiving' drug is preferable despite lower adherence.\n")
+  }
+} else {
+  cat("Summary RI effects were not available for pathway decomposition.\n")
+}
+```
+
+# 7 Key Takeaways
+
+```{r takeaways, results='asis'}
+cat("
+## Summary of Findings
+
+1. **The `crumble` package provides modern semiparametric mediation decompositions** using Riesz representers, supporting Natural (N) and Randomized Interventional (RI) effects among others.
+
+2. **The drug effect operates through multiple pathways:**
+   - A *direct pharmacological effect* (Drug A is more forgiving at low adherence)
+   - An *indirect adherence effect* (Drug A leads to lower adherence, which increases failure risk)
+   - These pathways can work in opposite directions
+
+3. **Since L_t confounds the PDC → Y relationship**, RI effects are more credible than Natural effects for the V4 DGP. The difference in practice may be modest when confounding is not too severe.
+
+4. **Connection to the LTMLE/LMTP analyses**: The total effect from the mediation analysis should align with the drug contrast from the LMTP matched-adherence analysis. The mediation analysis adds the *decomposition* — explaining *why* the effect exists and through which pathways.
+
+5. **Practical note**: The crumble package uses a torch-based neural network for Riesz representer estimation, which is memory-intensive. For large datasets or many repeated fits, consider using machines with ample RAM or reducing sample size.
+")
+```
+
+---
+
+*Report generated `r Sys.time()` using crumble v`r as.character(packageVersion('crumble'))`.*

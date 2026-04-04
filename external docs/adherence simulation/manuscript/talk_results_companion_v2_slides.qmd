@@ -1,0 +1,1907 @@
+---
+title: "Talk Results Companion V2: RWE MIB Symposium Slides"
+subtitle: "Figure and Table Bank — Maps to Each Slide Placeholder"
+author: "Sara Levintow & Andrew Mertens"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: true
+    code-summary: "Show code"
+    theme: cosmo
+    fig-width: 9
+    fig-height: 5.5
+    self-contained: true
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: true
+---
+
+```{r setup}
+#| cache: false
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(ltmle)
+library(lmtp)
+library(grid)
+library(gridExtra)
+library(dagitty)
+library(ggdag)
+
+talk_theme <- theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom",
+        plot.title    = element_text(face = "bold", size = 16),
+        subtitle      = element_text(size = 13, colour = "grey40"),
+        axis.title    = element_text(size = 13),
+        legend.text   = element_text(size = 12))
+theme_set(talk_theme)
+
+# ── Tableau 10 colour-blind friendly palette ──
+# https://www.tableau.com/blog/colors-upgrade-702
+tab10 <- c(
+  blue   = "#4E79A7",
+  orange = "#F28E2B",
+  red    = "#E15759",
+  teal   = "#76B7B2",
+  green  = "#59A14F",
+  yellow = "#EDC948",
+  purple = "#B07AA1",
+  pink   = "#FF9DA7",
+  brown  = "#9C755F",
+  grey   = "#BAB0AC"
+)
+
+drug_pal   <- c("Drug A" = tab10[["blue"]], "Drug B" = tab10[["orange"]])
+method_pal <- c("Naive" = tab10[["red"]], "LTMLE (GLM)" = tab10[["blue"]],
+                "LMTP (+10%)" = tab10[["green"]])
+
+# ---- Figure collector: stores ggplot objects for later export ----
+.fig_store <- new.env(parent = emptyenv())
+save_fig <- function(name) {
+  p <- ggplot2::last_plot()
+  if (!is.null(p)) .fig_store[[name]] <- p
+  invisible(p)
+}
+
+proj_root <- normalizePath(file.path(getwd(), ".."), winslash = "/")
+source(file.path(proj_root, "R", "sim_v4_dgp.R"))
+source(file.path(proj_root, "R", "oracle_v4.R"))
+source(file.path(proj_root, "R", "prepare_ltmle_v4.R"))
+source(file.path(proj_root, "R", "prepare_lmtp_v4.R"))
+source(file.path(proj_root, "R", "diagnostics_v4.R"))
+```
+
+```{r simulate}
+#| label: simulate
+#| eval: false
+#| include: false
+N_SIM <- 5000
+K     <- 4
+SEED  <- 2024
+
+set.seed(SEED)
+dat <- simulate_v4_data(n = N_SIM, K = K, seed = SEED)
+p   <- attr(dat, "dgp_params")
+
+dat$drug <- factor(ifelse(dat$A0 == 1, "Drug A", "Drug B"),
+                   levels = c("Drug A", "Drug B"))
+pdc_cols <- paste0("PDC_", 1:K)
+```
+
+```{r oracle-grid}
+#| label: oracle-grid
+#| eval: false
+#| include: false
+pdc_grid <- seq(0.30, 1.00, by = 0.05)
+oracle_curve <- data.frame(pdc = numeric(), drug = character(),
+                           risk = numeric(), stringsAsFactors = FALSE)
+for (d in 0:1) {
+  dlabel <- ifelse(d == 0, "Drug B", "Drug A")
+  for (pdc_val in pdc_grid) {
+    r <- oracle_static_pdc_v4(pdc_val, drug = d, K = K,
+                              n_oracle = 100000,
+                              seed = SEED + d * 100 + round(pdc_val * 100))
+    oracle_curve <- rbind(oracle_curve,
+      data.frame(pdc = pdc_val, drug = dlabel, risk = r, stringsAsFactors = FALSE))
+  }
+}
+```
+
+
+<!-- ============================================================ -->
+<!-- SLIDE-BY-SLIDE MAPPING                                       -->
+<!-- ============================================================ -->
+
+# Slide 1: Title Slide {#sec-slide1}
+
+> **"Untangling the relationship between time-varying adherence to antiretroviral therapy and treatment outcomes in real world data"**
+
+No figure needed — title slide only.
+
+---
+
+# Slide 2: Study Motivation {#sec-slide2}
+
+No figure/table placeholder — text-only content slide.
+
+---
+
+# Slide 3: Example — Percentage of Days Covered (PDC) {#sec-slide3}
+
+> Already have this figure — see presentation slide.
+
+---
+
+# Slide 6: Untangling time-dependent confounding {#sec-slide6}
+
+**REPLACES:** `Picture4.jpg` — a DAG showing time-dependent confounding where health status (L) affects both adherence and outcome.
+
+```{r fig-slide6-dag}
+#| label: fig-slide6-dag
+#| fig-cap: "Two-period DAG with time-dependent confounding. Red dashed arrows show feedback from treatment/outcome to future confounders — the structure that breaks standard regression."
+#| fig-height: 6
+#| fig-width: 11
+
+library(dagitty)
+library(ggdag)
+
+# ---- Define the DAG in dagitty syntax ----
+# Nodes: W (baseline), A0 (drug), L1/L2 (health), PDC1/PDC2 (adherence), Y1/Y2 (outcome)
+# Causal structure per period: L -> PDC -> Y, with L -> Y direct
+# Cross-period feedback: PDC1 -> L2, Y1 -> L2, Y1 -> PDC2
+dag <- dagitty('dag {
+  W   [pos="0,0.5"]
+  A0  [pos="1,-1"]
+  L1  [pos="2.5,1.5"]
+  PDC1 [pos="4,-1"]
+  Y1  [pos="5.5,0"]
+  L2  [pos="7,1.5"]
+  PDC2 [pos="8.5,-1"]
+  Y2  [pos="10,0"]
+
+  W -> A0
+  W -> L1
+  W -> PDC1
+  A0 -> L1
+  A0 -> PDC1
+  L1 -> PDC1
+  L1 -> Y1
+  PDC1 -> Y1
+  L1 -> L2
+  PDC1 -> L2
+  PDC1 -> PDC2
+  Y1 -> L2
+  Y1 -> PDC2
+  Y1 -> Y2
+  L2 -> PDC2
+  L2 -> Y2
+  PDC2 -> Y2
+}')
+
+# Convert to tidy dataframe
+dag_tidy <- tidy_dagitty(dag)
+dag_df <- dag_tidy$data
+
+# ---- Classify edges as causal vs feedback ----
+# Feedback edges: anything where a downstream node (PDC, Y) at t=1 feeds
+# into a confounder or treatment at t=2
+feedback_pairs <- list(
+  c("PDC1", "L2"),
+  c("Y1",   "L2"),
+  c("Y1",   "PDC2")
+)
+
+dag_df$edge_type <- "causal"
+for (fp in feedback_pairs) {
+  idx <- !is.na(dag_df$name) & !is.na(dag_df$to) &
+         dag_df$name == fp[1] & dag_df$to == fp[2]
+  dag_df$edge_type[idx] <- "feedback"
+}
+
+# ---- Classify nodes by role ----
+node_roles <- c(W = "baseline", A0 = "treatment",
+                L1 = "confounder", PDC1 = "treatment", Y1 = "outcome",
+                L2 = "confounder", PDC2 = "treatment", Y2 = "outcome")
+dag_df$role <- node_roles[dag_df$name]
+
+role_fills <- c("baseline"   = "#F0F0F0",
+                "confounder" = "#FEE0D2",
+                "treatment"  = "#DEEBF7",
+                "outcome"    = "#E5F5E0")
+
+# ---- Plot ----
+ggplot(dag_df, aes(x = x, y = y, xend = xend, yend = yend)) +
+  # Causal edges (solid grey)
+  geom_dag_edges_link(
+    data = function(d) d[!is.na(d$to) & d$edge_type == "causal", ],
+    arrow = grid::arrow(length = unit(0.10, "inches"), type = "closed"),
+    edge_colour = "#555555", edge_width = 0.6
+  ) +
+  # Feedback edges (dashed red) — use arc to distinguish visually
+  geom_dag_edges_arc(
+    data = function(d) d[!is.na(d$to) & d$edge_type == "feedback", ],
+    arrow = grid::arrow(length = unit(0.10, "inches"), type = "closed"),
+    edge_colour = tab10[["red"]], edge_width = 0.7,
+    edge_linetype = "dashed", curvature = 0.15
+  ) +
+  # Nodes
+  geom_dag_point(aes(fill = role), size = 16, shape = 21,
+                 colour = "grey30", stroke = 0.6) +
+  geom_dag_text(size = 3.5, fontface = "bold", colour = "black") +
+  scale_fill_manual(values = role_fills,
+                    labels = c("Baseline (W)", "Confounder (L)",
+                               "Outcome (Y)", "Treatment (A0, PDC)"),
+                    name = NULL) +
+  # Manual legend for edge types
+  annotate("segment", x = 0.5, xend = 1.5, y = -2.3, yend = -2.3,
+           colour = "#555555", linewidth = 0.7,
+           arrow = arrow(length = unit(0.08, "inches"), type = "closed")) +
+  annotate("text", x = 1.7, y = -2.3, label = "Causal path",
+           hjust = 0, size = 3.5) +
+  annotate("segment", x = 4, xend = 5, y = -2.3, yend = -2.3,
+           colour = tab10[["red"]], linewidth = 0.7, linetype = "dashed",
+           arrow = arrow(length = unit(0.08, "inches"), type = "closed")) +
+  annotate("text", x = 5.2, y = -2.3,
+           label = "Feedback (creates time-dependent confounding)",
+           hjust = 0, size = 3.5, colour = tab10[["red"]]) +
+  labs(title = "Time-Dependent Confounding: Why Standard Regression Fails",
+       subtitle = "Y1 and PDC1 feed back into L2 and PDC2 — conditioning on adherence induces bias") +
+  theme_dag(base_size = 14) +
+  theme(plot.title    = element_text(face = "bold", size = 15, hjust = 0.5),
+        plot.subtitle = element_text(size = 11, hjust = 0.5, colour = "grey40"),
+        legend.position = "bottom")
+save_fig("fig-slide6-dag")
+```
+
+---
+
+# Slide 7: Simulation Setup {#sec-slide7}
+
+**REPLACES:** `Picture7.jpg` (simulation schematic) and "Descriptive statistic table"
+
+## Descriptive statistics table (from simulation)
+
+```{r tbl-slide7-descriptive}
+#| label: tbl-slide7-descriptive
+#| eval: false
+#| include: false
+
+# Comprehensive descriptive statistics
+desc <- data.frame(
+  Characteristic = c(
+    "Sample size", "Follow-up", "Block size", "",
+    "Drug A, n (%)", "Drug B, n (%)", "",
+    "Mean PDC -- Drug A (SD)", "Mean PDC -- Drug B (SD)",
+    "Mean PDC Q1 -- Drug A", "Mean PDC Q1 -- Drug B",
+    "Mean PDC Q4 -- Drug A", "Mean PDC Q4 -- Drug B", "",
+    "Cumulative failure, n (%)",
+    "  Drug A", "  Drug B", "",
+    "PDC < 65% at any block (%)",
+    "  Drug A", "  Drug B"
+  ),
+  Value = c(
+    format(nrow(dat), big.mark = ","),
+    paste0(K * 3, " months (", K, " blocks)"),
+    "90 days (quarterly)", "",
+    sprintf("%s (%.1f%%)", format(sum(dat$A0 == 1), big.mark = ","), 100 * mean(dat$A0 == 1)),
+    sprintf("%s (%.1f%%)", format(sum(dat$A0 == 0), big.mark = ","), 100 * mean(dat$A0 == 0)), "",
+    sprintf("%.3f (%.3f)", mean(rowMeans(dat[dat$A0 == 1, pdc_cols])),
+            sd(rowMeans(dat[dat$A0 == 1, pdc_cols]))),
+    sprintf("%.3f (%.3f)", mean(rowMeans(dat[dat$A0 == 0, pdc_cols])),
+            sd(rowMeans(dat[dat$A0 == 0, pdc_cols]))),
+    sprintf("%.3f", mean(dat$PDC_1[dat$A0 == 1], na.rm = TRUE)),
+    sprintf("%.3f", mean(dat$PDC_1[dat$A0 == 0], na.rm = TRUE)),
+    sprintf("%.3f", mean(dat$PDC_4[dat$A0 == 1], na.rm = TRUE)),
+    sprintf("%.3f", mean(dat$PDC_4[dat$A0 == 0], na.rm = TRUE)), "",
+    sprintf("%s (%.1f%%)", sum(dat$Y_final), 100 * mean(dat$Y_final)),
+    sprintf("%.1f%%", 100 * mean(dat$Y_final[dat$A0 == 1])),
+    sprintf("%.1f%%", 100 * mean(dat$Y_final[dat$A0 == 0])), "",
+    "",
+    sprintf("%.1f%%", 100 * mean(apply(dat[dat$A0 == 1, pdc_cols], 1,
+                                        function(r) any(r < 0.65, na.rm = TRUE)))),
+    sprintf("%.1f%%", 100 * mean(apply(dat[dat$A0 == 0, pdc_cols], 1,
+                                        function(r) any(r < 0.65, na.rm = TRUE))))
+  )
+)
+
+kable(desc, col.names = c("Characteristic", "Value"),
+      caption = "Simulated cohort characteristics (N = 5,000, K = 4 quarters)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Simulation schematic — 3 candidate versions
+
+### Version 1: Layered data flow diagram {#sec-slide7-v1}
+
+```{r fig-slide7-v1}
+#| label: fig-slide7-v1
+#| fig-cap: "Version 1: Layered data flow from raw EHR tables to analytic blocks."
+#| fig-height: 5
+#| fig-width: 10
+
+# Data flow schematic
+layers <- data.frame(
+  label = c("Raw EHR Tables\n(6 tables: demographics, enrollment,\npharmacy, labs, diagnoses, encounters)",
+            "Monthly Latent Processes\n(Adherence, VL, CD4, Depression,\nSubstance use, Care engagement)",
+            "Quarterly Analytic Blocks\n(K=12 months / 4 blocks of 90 days)\nPDC per block from pharmacy claims",
+            "Outcomes\n(Monthly virologic failure\naggregated to block-level)"),
+  x = c(2, 5, 8, 11),
+  y = c(0, 0, 0, 0),
+  fill = c("#DEEBF7", "#FEE0D2", "#E5F5E0", "#FFF7BC")
+)
+
+ggplot() +
+  geom_tile(data = layers, aes(x = x, y = y, fill = fill),
+            width = 2.5, height = 2.5, colour = "grey50", linewidth = 0.5) +
+  geom_text(data = layers, aes(x = x, y = y, label = label),
+            size = 3, lineheight = 1.1) +
+  scale_fill_identity() +
+  geom_segment(aes(x = c(3.3, 6.3, 9.3), xend = c(3.7, 6.7, 9.7),
+                   y = 0, yend = 0),
+               arrow = arrow(length = unit(0.15, "inches"), type = "closed"),
+               linewidth = 1.2, colour = "#555555") +
+  annotate("text", x = 6.5, y = -1.8,
+           label = "5,000 patients | 2 drugs | 36 months | Confounded drug assignment",
+           size = 4, fontface = "italic", colour = "grey40") +
+  coord_cartesian(xlim = c(0.5, 12.5), ylim = c(-2.5, 2)) +
+  labs(title = "Simulation Architecture: Raw EHR to Causal Estimands") +
+  theme_void(base_size = 14) +
+  theme(plot.title = element_text(face = "bold", size = 15, hjust = 0.5))
+save_fig("fig-slide7-v1")
+```
+
+### Version 2: Node-timeline showing monthly processes {#sec-slide7-v2}
+
+```{r fig-slide7-v2}
+#| label: fig-slide7-v2
+#| fig-cap: "Version 2: Timeline showing monthly latent processes aggregated to quarterly blocks."
+#| fig-height: 5
+#| fig-width: 10
+
+# Timeline with blocks
+blocks <- data.frame(
+  block = paste0("Block ", 1:4),
+  xmin  = (0:3) * 3,
+  xmax  = (1:4) * 3,
+  y     = 0
+)
+
+monthly_vars <- data.frame(
+  label = c("Adherence", "Viral Load", "CD4", "Depression",
+            "Substance Use", "Care Engage."),
+  y = seq(2.5, 0, length.out = 6)
+)
+
+ggplot() +
+  # Block rectangles
+  geom_rect(data = blocks,
+            aes(xmin = xmin, xmax = xmax, ymin = -0.5, ymax = 3),
+            fill = rep(c("#DEEBF7", "#E5F5E0"), 2), alpha = 0.3,
+            colour = "grey60") +
+  geom_text(data = blocks, aes(x = (xmin + xmax) / 2, y = -0.8, label = block),
+            fontface = "bold", size = 4) +
+  # Monthly variable arrows within each block
+  annotate("text", x = -1.5, y = monthly_vars$y, label = monthly_vars$label,
+           hjust = 1, size = 3.5, fontface = "bold") +
+  # PDC output arrow at bottom
+  annotate("segment", x = 0, xend = 12, y = -1.5, yend = -1.5,
+           linewidth = 1.2, colour = tab10[["blue"]],
+           arrow = arrow(length = unit(0.12, "inches"))) +
+  annotate("text", x = 6, y = -2, label = "PDC per block (from pharmacy claims)",
+           size = 4, fontface = "bold", colour = tab10[["blue"]]) +
+  # Outcome arrow
+  annotate("segment", x = 0, xend = 12, y = -2.5, yend = -2.5,
+           linewidth = 1.2, colour = tab10[["orange"]],
+           arrow = arrow(length = unit(0.12, "inches"))) +
+  annotate("text", x = 6, y = -3, label = "Monthly virologic failure (absorbing event)",
+           size = 4, fontface = "bold", colour = tab10[["orange"]]) +
+  coord_cartesian(xlim = c(-4, 13), ylim = c(-3.5, 3.5)) +
+  labs(title = "Monthly Latent Processes Aggregated to 90-Day Blocks") +
+  theme_void(base_size = 14) +
+  theme(plot.title = element_text(face = "bold", size = 15, hjust = 0.5))
+save_fig("fig-slide7-v2")
+```
+
+### Version 3: Parameter table + compact structure diagram {#sec-slide7-v3}
+
+```{r tbl-slide7-v3}
+#| label: tbl-slide7-v3
+
+params_tbl <- data.frame(
+  Process = c("Adherence (PDC)", "", "", "",
+              "Health (L_t)", "", "",
+              "Failure (Y_t)", "", "",
+              "Drug A forgiveness", ""),
+  Parameter = c("Baseline mean", "Drug A effect", "AR(1) persistence", "Health feedback",
+                "Persistence", "PDC effect", "Baseline severity",
+                "Baseline hazard", "Health effect", "Adherence effect",
+                "At perfect PDC", "At PDC = 0.50"),
+  Value = c("~79%", "-0.35 (lower)", "rho = 0.45", "-0.30",
+            "0.35", "0.80 (poor adherence -> worse)", "0.30",
+            "exp(-3.80) ~ low", "0.50", "2.50 (strong)",
+            "-0.25 (small advantage)", "-0.65 (large advantage)")
+)
+
+kable(params_tbl,
+      caption = "Key DGP parameters: Drug A is more forgiving at low adherence") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  row_spec(c(1:4), background = "#DEEBF7") |>
+  row_spec(c(5:7), background = "#FEE0D2") |>
+  row_spec(c(8:10), background = "#E5F5E0") |>
+  row_spec(c(11:12), background = "#FFF7BC")
+```
+
+---
+
+# Slide 8: Danger in Prior Adherence-Stratified Analyses {#sec-slide8}
+
+**REPLACES:** "Stratified boxplot or cartoon/emoji schematic" and "Simulation results"
+
+## Naive analysis results (from simulation)
+
+```{r naive-compute}
+#| label: naive-compute
+#| eval: false
+#| include: false
+
+dat$mean_pdc <- rowMeans(dat[, pdc_cols])
+dat$pdc_strat <- cut(dat$mean_pdc,
+                     breaks = c(0, p$pdc_cut_low, p$pdc_cut_high, 1),
+                     labels = c("Low", "Mid", "High"), include.lowest = TRUE)
+
+naive_tab <- data.frame(Drug = character(), Stratum = character(),
+                        Risk = numeric(), N = integer(), stringsAsFactors = FALSE)
+for (d in c("Drug A", "Drug B")) {
+  for (s in c("Low", "Mid", "High")) {
+    idx <- dat$drug == d & dat$pdc_strat == s
+    naive_tab <- rbind(naive_tab, data.frame(
+      Drug = d, Stratum = s,
+      Risk = mean(dat$Y_final[idx], na.rm = TRUE),
+      N = sum(idx), stringsAsFactors = FALSE))
+  }
+}
+
+# Oracle for each category
+for (i in seq_len(nrow(naive_tab))) {
+  d <- ifelse(naive_tab$Drug[i] == "Drug A", 1L, 0L)
+  cat_name <- tolower(naive_tab$Stratum[i])
+  naive_tab$oracle[i] <- oracle_static_category_v4(
+    category = cat_name, drug = d, K = K, n_oracle = 100000,
+    seed = SEED + 900 + d * 10 + match(cat_name, c("high","mid","low")))
+}
+naive_tab$se <- sqrt(naive_tab$Risk * (1 - naive_tab$Risk) / naive_tab$N)
+naive_tab$bias <- naive_tab$Risk - naive_tab$oracle
+```
+
+```{r fig-slide8-naive}
+#| label: fig-slide8-naive
+#| fig-cap: "Naive adherence-stratified failure rates (points ± 95% CI) vs oracle truth (X). Bias from time-dependent confounding is visible at every stratum."
+#| fig-height: 5
+#| eval: false
+#| include: false
+
+ggplot(naive_tab, aes(x = Stratum, colour = Drug)) +
+  geom_pointrange(aes(y = Risk, ymin = Risk - 1.96 * se, ymax = Risk + 1.96 * se),
+                  position = position_dodge(0.5), size = 0.7, linewidth = 0.8) +
+  geom_point(aes(y = oracle), position = position_dodge(0.5),
+             shape = 4, size = 3.5, stroke = 1.5, show.legend = FALSE) +
+  scale_y_continuous(labels = scales::percent_format(1)) +
+  scale_colour_manual(values = drug_pal) +
+  labs(x = "Mean PDC stratum", y = "Cumulative failure risk",
+       colour = "Drug",
+       title = "Naive Adherence-Stratified Analysis (Biased)",
+       subtitle = "Points = naive estimates (± 95% CI), X = oracle truth")
+```
+
+```{r tbl-slide8-naive}
+#| label: tbl-slide8-naive
+#| eval: false
+#| include: false
+
+display_naive <- naive_tab[, c("Drug", "Stratum", "N", "Risk", "oracle", "bias")]
+names(display_naive) <- c("Drug", "Stratum", "N", "Naive Risk", "Oracle", "Bias")
+
+kable(display_naive, digits = 3,
+      caption = "Naive failure rates vs oracle truth: bias from time-dependent confounding") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Schematic: "selected healthier patients" — 3 candidate versions
+
+### Version 1: Selection funnel diagram {#sec-slide8-v1}
+
+```{r fig-slide8-schematic-v1}
+#| label: fig-slide8-schematic-v1
+#| fig-cap: "Version 1: Selection bias funnel. Conditioning on high adherence selects patients who were healthier."
+#| fig-height: 4.5
+#| fig-width: 8
+
+# Funnel visualization
+funnel <- data.frame(
+  stage = c("All patients\n(N=5,000)", "High adherence\nstratum", "Healthier subset\n(biased comparison)"),
+  x = c(1, 3, 5),
+  y = c(0, 0, 0),
+  width = c(3, 2, 1.2),
+  height = c(2.5, 2, 1.5),
+  fill = c("#DEEBF7", "#FEE0D2", "#FDDBC7")
+)
+
+ggplot() +
+  geom_tile(data = funnel, aes(x = x, y = y, width = width, height = height, fill = fill),
+            colour = "grey50", linewidth = 0.5) +
+  geom_text(data = funnel, aes(x = x, y = y, label = stage),
+            size = 4, fontface = "bold", lineheight = 1.1) +
+  scale_fill_identity() +
+  geom_segment(aes(x = 2.5, xend = 2.7, y = 0, yend = 0),
+               arrow = arrow(length = unit(0.12, "inches")), linewidth = 1) +
+  geom_segment(aes(x = 4.2, xend = 4.4, y = 0, yend = 0),
+               arrow = arrow(length = unit(0.12, "inches")), linewidth = 1) +
+  annotate("text", x = 3, y = -1.8,
+           label = "Conditioning on adherence = conditioning on a post-treatment variable\n-> collider bias: apparent drug effect is confounded by health status",
+           size = 3.5, fontface = "italic", colour = tab10[["red"]], lineheight = 1.2) +
+  coord_cartesian(xlim = c(-0.5, 6.5), ylim = c(-2.5, 2)) +
+  labs(title = "Why Stratifying on Adherence Is Dangerous") +
+  theme_void(base_size = 14) +
+  theme(plot.title = element_text(face = "bold", size = 15, hjust = 0.5))
+save_fig("fig-slide8-schematic-v1")
+```
+
+### Version 2: Side-by-side population comparison {#sec-slide8-v2}
+
+```{r fig-slide8-schematic-v2}
+#| label: fig-slide8-schematic-v2
+#| fig-cap: "Version 2: Population composition in high-adherence stratum differs between drugs."
+#| fig-height: 4.5
+#| fig-width: 9
+
+# Show how high-adherence stratum composition differs
+comp_df <- data.frame(
+  drug = rep(c("Drug A", "Drug B"), each = 3),
+  health = rep(c("Healthy", "Moderate", "Sick"), 2),
+  pct = c(
+    # Drug A: fewer healthy patients in high adherence (Drug A has lower adherence)
+    30, 45, 25,
+    # Drug B: more healthy patients in high adherence
+    55, 35, 10
+  )
+)
+comp_df$health <- factor(comp_df$health, levels = c("Sick", "Moderate", "Healthy"))
+
+health_pal <- c("Healthy" = tab10[["green"]], "Moderate" = tab10[["orange"]], "Sick" = tab10[["red"]])
+
+ggplot(comp_df, aes(x = drug, y = pct, fill = health)) +
+  geom_col(position = "stack", width = 0.6, colour = "white") +
+  geom_text(aes(label = paste0(pct, "%")),
+            position = position_stack(vjust = 0.5), size = 4, fontface = "bold") +
+  scale_fill_manual(values = health_pal) +
+  labs(x = NULL, y = "% of high-adherence stratum",
+       fill = "Underlying\nhealth",
+       title = "High Adherence Stratum: Different Compositions",
+       subtitle = "Stratifying on adherence selects different health profiles per drug") +
+  theme(axis.text.x = element_text(face = "bold", size = 14))
+save_fig("fig-slide8-schematic-v2")
+```
+
+### Version 3: Bias arrow diagram showing direction of confounding {#sec-slide8-v3}
+
+```{r fig-slide8-schematic-v3}
+#| label: fig-slide8-schematic-v3
+#| fig-cap: "Version 3: Bias direction diagram — naive analysis overestimates failure in high-adherence stratum."
+#| fig-height: 5
+#| fig-width: 9
+#| eval: false
+#| include: false
+
+# Bias direction plot
+bias_dir <- data.frame(
+  stratum = rep(c("Low", "Mid", "High"), 2),
+  drug = rep(c("Drug A", "Drug B"), each = 3),
+  naive = naive_tab$Risk,
+  oracle = naive_tab$oracle
+)
+bias_dir$stratum <- factor(bias_dir$stratum, levels = c("Low", "Mid", "High"))
+
+ggplot(bias_dir, aes(x = stratum)) +
+  geom_segment(aes(y = oracle, yend = naive, colour = drug),
+               position = position_dodge(0.4),
+               arrow = arrow(length = unit(0.08, "inches"), type = "closed"),
+               linewidth = 1.2) +
+  geom_point(aes(y = oracle, colour = drug),
+             position = position_dodge(0.4), size = 3,
+             shape = 4, stroke = 1.5) +
+  geom_point(aes(y = naive, colour = drug),
+             position = position_dodge(0.4), size = 3) +
+  scale_y_continuous(labels = scales::percent_format(1)) +
+  scale_colour_manual(values = drug_pal) +
+  labs(x = "Adherence stratum",
+       y = "Cumulative failure risk",
+       colour = "Drug",
+       title = "Direction and Magnitude of Naive Bias",
+       subtitle = "Arrows: oracle (X) to naive estimate. Longer arrows = more bias.") +
+  annotate("text", x = 3.3, y = mean(bias_dir$naive[bias_dir$stratum == "High"]),
+           label = "Naive overestimates\nrisk in high stratum",
+           colour = tab10[["red"]], size = 3.5, fontface = "italic", hjust = 0)
+```
+
+---
+
+# Slide 9: What Do We Really Want to Know? — Forgiveness Curves {#sec-slide9}
+
+**REPLACES:** `Picture5.jpg` — a forgiveness curve figure showing risk as a continuous function of adherence.
+
+```{r fig-slide9-forgiveness}
+#| label: fig-slide9-forgiveness
+#| fig-cap: "Oracle forgiveness curves: the true counterfactual risk surface. Drug A shows greater forgiveness at sub-optimal adherence. Key contrasts annotated."
+#| fig-height: 5.5
+#| fig-width: 9
+#| eval: false
+#| include: false
+
+# Annotated forgiveness curve
+risk_A_50 <- oracle_curve$risk[oracle_curve$drug == "Drug A" & oracle_curve$pdc == 0.50]
+risk_B_50 <- oracle_curve$risk[oracle_curve$drug == "Drug B" & oracle_curve$pdc == 0.50]
+risk_A_90 <- oracle_curve$risk[oracle_curve$drug == "Drug A" & oracle_curve$pdc == 0.90]
+risk_B_90 <- oracle_curve$risk[oracle_curve$drug == "Drug B" & oracle_curve$pdc == 0.90]
+
+ggplot(oracle_curve, aes(x = pdc, y = risk, colour = drug)) +
+  geom_line(linewidth = 1.6) +
+  geom_point(size = 2) +
+  # Forgiveness gap annotation at PDC = 50%
+  annotate("segment", x = 0.50, xend = 0.50,
+           y = risk_A_50, yend = risk_B_50,
+           linewidth = 0.8, colour = tab10[["orange"]], linetype = "dashed") +
+  annotate("text", x = 0.46, y = (risk_A_50 + risk_B_50) / 2,
+           label = "Forgiveness\ngap", colour = tab10[["orange"]],
+           fontface = "bold", size = 3.5, hjust = 1) +
+  # Convergence annotation at PDC = 90%
+  annotate("segment", x = 0.90, xend = 0.90,
+           y = risk_A_90, yend = risk_B_90,
+           linewidth = 0.8, colour = "grey50", linetype = "dotted") +
+  annotate("text", x = 0.93, y = (risk_A_90 + risk_B_90) / 2,
+           label = "Converge at\nhigh PDC", colour = "grey50",
+           fontface = "italic", size = 3, hjust = 0) +
+  # Threshold marker
+  geom_vline(xintercept = 0.85, linetype = "dotted", colour = "grey70") +
+  annotate("text", x = 0.855, y = max(oracle_curve$risk) * 0.95,
+           label = "85% threshold", colour = "grey50",
+           size = 3, hjust = 0, fontface = "italic") +
+  scale_x_continuous(labels = scales::percent, breaks = seq(0.3, 1, 0.1)) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_colour_manual(values = drug_pal) +
+  labs(x = "Sustained Adherence (PDC)", y = paste0(K * 3, "-Month Failure Risk"),
+       colour = "Regimen",
+       title = "Forgiveness = Adherence-Response Function",
+       subtitle = "Continuous function, not threshold. Regimen-specific.")
+```
+
+---
+
+# Slide 10: Causal Roadmap for Adherence Interventions {#sec-slide10}
+
+**REPLACES:** `GoogleShape133p18.jpg`, `GoogleShape132p18.jpg`, `image1gif.jpg` — DAGs/diagrams showing the causal roadmap for intervention types.
+
+## Intervention types table
+
+```{r tbl-slide10-interventions}
+#| label: tbl-slide10-interventions
+
+interventions <- data.frame(
+  Type = c("Static regime",
+           "Additive shift (+d)",
+           "Quantile match",
+           "Dynamic rule"),
+  Question = c("What if everyone maintained exactly PDC = x?",
+               "What if everyone's PDC increased by d%?",
+               "What if Drug A had Drug B's adherence pattern?",
+               "What if we switched anyone below threshold?"),
+  `Positivity Demand` = c("Very high (rarely observed)",
+                          "Moderate (within support)",
+                          "Moderate (distribution mapping)",
+                          "High (depends on rule)"),
+  `Key Strength` = c("Clear interpretation",
+                     "Realistic, feasible",
+                     "Isolates pharmacological effect",
+                     "Clinically actionable"),
+  check.names = FALSE
+)
+
+kable(interventions,
+      caption = "Intervention types for adherence: from static to modified treatment policies") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Choosing an intervention type
+
+```{r fig-slide10-flowchart}
+#| label: fig-slide10-flowchart
+#| fig-cap: "Choosing the right intervention type based on the causal question."
+#| fig-height: 5.5
+#| fig-width: 10
+
+flow_nodes <- data.frame(
+  label = c("What is the\ncausal question?",
+            "Effect at fixed\nadherence level?",
+            "Effect of realistic\nadherence improvement?",
+            "Pharmacological effect\nisolated from adherence?",
+            "Static Regime\n(L-TMLE)",
+            "Additive Shift\n(LMTP +d%)",
+            "Quantile Match\n(LMTP)"),
+  x = c(5, 2, 5, 8, 2, 5, 8),
+  y = c(4, 2, 2, 2, 0, 0, 0),
+  fill = c("#F0F0F0", "#DEEBF7", "#E5F5E0", "#FEE0D2",
+           "#DEEBF7", "#E5F5E0", "#FEE0D2")
+)
+
+flow_edges <- data.frame(
+  x    = c(5, 5, 5, 2, 5, 8),
+  y    = c(4, 4, 4, 2, 2, 2),
+  xend = c(2, 5, 8, 2, 5, 8),
+  yend = c(2, 2, 2, 0, 0, 0)
+)
+
+ggplot() +
+  geom_segment(data = flow_edges,
+               aes(x = x, y = y, xend = xend, yend = yend),
+               arrow = arrow(length = unit(0.1, "inches"), type = "closed"),
+               colour = "grey50", linewidth = 0.6) +
+  geom_label(data = flow_nodes, aes(x = x, y = y, label = label, fill = fill),
+             size = 3.3, fontface = "bold",
+             label.padding = unit(0.4, "lines"), lineheight = 1.1) +
+  scale_fill_identity() +
+  coord_cartesian(xlim = c(0, 10), ylim = c(-1, 5)) +
+  labs(title = "Choosing an Intervention Type") +
+  theme_void(base_size = 14) +
+  theme(plot.title = element_text(face = "bold", size = 15, hjust = 0.5))
+save_fig("fig-slide10-flowchart")
+```
+
+---
+
+# Slide 11: Estimation — Longitudinal TMLE {#sec-slide11}
+
+**REPLACES:** "Visual estimation figure" and "Pipeline diagram: data -> estimand -> counterfactual contrast -> estimate"
+
+## How L-TMLE works
+
+Longitudinal TMLE estimates counterfactual outcomes under hypothetical treatment regimes (e.g., "what if PDC were held at 'high' for all 4 blocks?") while properly adjusting for time-varying confounders that are themselves affected by prior treatment. It proceeds in three stages:
+
+1. **Define the node structure and intervention.** At each block $k$, the observed data follow the ordering $L_k \to A_k \to Y_k$, where $L_k$ is the time-varying confounder (health status), $A_k$ is adherence (categorised PDC), and $Y_k$ is the outcome (virologic failure, absorbing). The intervention $\bar{a}$ specifies the adherence category at every block (e.g., always "high").
+
+2. **Fit two nuisance models at each block:**
+   - **Q-model** (outcome regression): $E[Y_k \mid L_k, A_k, \text{past}]$ — predicts failure risk given current confounder, treatment, and history.
+   - **g-model** (propensity / treatment mechanism): $P(A_k \mid L_k, \text{past})$ — predicts the probability of the observed adherence category given covariates.
+
+3. **Backward iterative targeting.** Starting from the *last* time point ($k = K$) and working backward to $k = 1$:
+   - Compute the initial outcome prediction $\hat{Q}_k$ under the intervention $\bar{a}$.
+   - Update $\hat{Q}_k$ using the "clever covariate" derived from $\hat{g}_k$, solving a logistic regression submodel that debiases the plug-in estimate.
+   - Pass the updated $\hat{Q}_k^*$ backward as the pseudo-outcome for the next block's Q-model.
+   - At $k = 1$, the sample average of $\hat{Q}_1^*$ is the L-TMLE estimate of $E[Y(\bar{a})]$.
+
+This backward recursion is **not** the same as standard sequential regression: the TMLE targeting step makes the estimator **double-robust** — consistent if *either* the Q-model or the g-model is correctly specified, and locally efficient when both are correct. Standard errors come from the efficient influence curve.
+
+## Backward iteration diagram
+
+```{r fig-slide11-backward}
+#| label: fig-slide11-backward
+#| fig-cap: "L-TMLE backward iteration: starting from Block 4, each updated Q* becomes the pseudo-outcome for the previous block."
+#| fig-height: 5.5
+#| fig-width: 11
+
+# Build the main diagram
+blocks_seq <- data.frame(
+  block = paste0("Block ", 1:4),
+  x = 1:4 * 2.8,
+  y = 0
+)
+
+# Node labels for inside each block (ASCII safe)
+node_labels <- c("L1 -> A1 -> Y1", "L2 -> A2 -> Y2",
+                 "L3 -> A3 -> Y3", "L4 -> A4 -> Y4")
+
+ggplot() +
+  # Block boxes
+  geom_tile(data = blocks_seq, aes(x = x, y = y),
+            width = 2.3, height = 2.8, fill = "#DEEBF7", colour = "grey50") +
+  # Block titles
+  geom_text(data = blocks_seq, aes(x = x, y = y + 0.9, label = block),
+            fontface = "bold", size = 4.5) +
+  # Node ordering inside each block
+  geom_text(data = blocks_seq,
+            aes(x = x, y = y + 0.3, label = node_labels), size = 3) +
+  # Q and g labels inside blocks
+  geom_text(data = blocks_seq,
+            aes(x = x, y = y - 0.3,
+                label = c("Q1: E[Y1|L1,A1]", "Q2: E[Y2|L2,A2]",
+                           "Q3: E[Y3|L3,A3]", "Q4: E[Y4|L4,A4]")),
+            size = 2.7, colour = tab10[["blue"]]) +
+  geom_text(data = blocks_seq,
+            aes(x = x, y = y - 0.7,
+                label = c("g1: P(A1|L1)", "g2: P(A2|L2,A1)",
+                           "g3: P(A3|L3,A2)", "g4: P(A4|L4,A3)")),
+            size = 2.7, colour = tab10[["red"]]) +
+  # Forward arrows (observed data flow)
+  geom_segment(aes(x = seq(4.05, 9.65, by = 2.8), xend = seq(4.35, 9.95, by = 2.8),
+                   y = 0.6, yend = 0.6),
+               arrow = arrow(length = unit(0.08, "inches"), type = "closed"),
+               linewidth = 0.7, colour = "grey50") +
+  annotate("text", x = 7, y = 1.8,
+           label = "Observed data flows forward in time",
+           colour = "grey50", fontface = "italic", size = 3.5) +
+  geom_segment(aes(x = 4.5, xend = 9.5, y = 1.65, yend = 1.65),
+               arrow = arrow(length = unit(0.1, "inches"), type = "closed"),
+               linewidth = 0.5, colour = "grey50") +
+  # Backward arrows (TMLE targeting iteration)
+  geom_segment(aes(x = c(11.2, 8.4, 5.6),
+                   xend = c(8.4, 5.6, 2.8) + 0.3,
+                   y = -1.8, yend = -1.8),
+               arrow = arrow(length = unit(0.1, "inches"), type = "closed"),
+               linewidth = 1.2, colour = tab10[["red"]]) +
+  # Labels on backward arrows
+  annotate("text", x = 9.8, y = -2.2,
+           label = "Q4* -> pseudo-Y3", size = 3, colour = tab10[["red"]]) +
+  annotate("text", x = 7.0, y = -2.2,
+           label = "Q3* -> pseudo-Y2", size = 3, colour = tab10[["red"]]) +
+  annotate("text", x = 4.2, y = -2.2,
+           label = "Q2* -> pseudo-Y1", size = 3, colour = tab10[["red"]]) +
+  annotate("text", x = 7, y = -2.8,
+           label = "Backward TMLE targeting: update Qk with clever covariate from gk, pass Q*k backward",
+           colour = tab10[["red"]], fontface = "bold", size = 3.5) +
+  # Intervention annotation at top
+  annotate("rect", xmin = 1.5, xmax = 12.7, ymin = 2.1, ymax = 2.7,
+           fill = "#E8F4E4", colour = tab10[["green"]]) +
+  annotate("text", x = 7, y = 2.4,
+           label = "Intervention abar: set adherence to target category at every block (e.g., always 'high')",
+           colour = tab10[["green"]], fontface = "bold", size = 3.3) +
+  # Final estimate callout
+  annotate("rect", xmin = 0.8, xmax = 4.2, ymin = -3.5, ymax = -3.1,
+           fill = "#FFF7BC", colour = tab10[["orange"]]) +
+  annotate("text", x = 2.5, y = -3.3,
+           label = "mean(Q1*) = L-TMLE estimate of E[Y(abar)]",
+           fontface = "bold", size = 3, colour = tab10[["orange"]]) +
+  geom_segment(aes(x = 2.8, xend = 2.8, y = -1.4, yend = -3.05),
+               arrow = arrow(length = unit(0.08, "inches"), type = "closed"),
+               linewidth = 0.6, colour = tab10[["orange"]], linetype = "dashed") +
+  coord_cartesian(xlim = c(0.5, 13), ylim = c(-3.7, 3)) +
+  labs(title = "L-TMLE Estimation: Backward Iterative Targeting") +
+  theme_void(base_size = 14) +
+  theme(plot.title = element_text(face = "bold", size = 15, hjust = 0.5))
+save_fig("fig-slide11-backward")
+```
+
+## Step-by-step: how L-TMLE untangles the confounding
+
+Suppose we want to answer: "What would the 12-month failure risk be if every patient maintained high adherence at every quarter?" Here is what L-TMLE does, in plain English.
+
+**Step 1 — Learn the treatment mechanism (the "g-model").**
+At each quarter, we build a model that predicts: given a patient's current health status and history, how likely were they to actually have high adherence? This captures the real-world patterns — for example, sicker patients are less likely to be highly adherent. We need this model because it tells us *how unusual* it would be for a given patient to follow the hypothetical regime we're interested in.
+
+**Step 2 — Learn the outcome risk (the "Q-model").**
+At each quarter, we build a second model that predicts: given a patient's health status, adherence level, and history, what is their probability of virologic failure? This is the standard kind of prediction model clinicians are used to — but we fit one at every time point, not just at baseline.
+
+**Step 3 — Start at the last quarter and work backward.**
+This is the key step that handles time-dependent confounding. We start at Quarter 4 (the end of follow-up):
+
+- *Quarter 4:* Using the Q-model, predict each patient's failure risk *as if* they had high adherence in Q4, regardless of what they actually did. Then adjust this prediction using the g-model — patients who were unlikely to have high adherence naturally get upweighted, because they provide more information about what happens under the hypothetical regime. This adjustment is the "targeting" step, and it removes the bias that would come from simply plugging in the intervention.
+
+- *Quarter 3:* Now take the adjusted Q4 predictions and treat them as the "outcome" for Q3. Fit the Q-model again, this time predicting the Q4-adjusted risk as a function of Q3 health, adherence, and history. Again plug in "high adherence" for Q3 and apply the targeting adjustment using the Q3 g-model. This propagates the causal effect backward through time.
+
+- *Quarters 2 and 1:* Repeat the same process. Each step peels back one layer of time-dependent confounding. By the time we reach Q1, we have a predicted failure risk for each patient under the hypothetical regime of sustained high adherence across all four quarters — properly adjusted for the fact that health affects adherence, adherence affects health, and both affect outcomes.
+
+**Step 4 — Average over the population.**
+The final L-TMLE estimate is simply the average of the Q1 adjusted predictions across all patients. This is the estimated counterfactual risk: "if everyone had been highly adherent for 12 months, this is how many would have experienced virologic failure."
+
+**Why this works when standard regression doesn't:**
+Standard regression tries to estimate the effect of adherence by *conditioning* on it — essentially comparing patients who happened to be highly adherent to those who weren't. But patients with high adherence are systematically healthier (because health drives adherence), so this comparison is confounded. L-TMLE avoids this by never conditioning on adherence. Instead, it *intervenes* on adherence (setting it to the target level) and uses the g-model to reweight the analysis so that the comparison is fair. The backward iteration ensures that this reweighting accounts for the full chain of feedback between health and adherence across all time points.
+
+## Node structure in this simulation
+
+The table below shows how the V4 simulation maps onto the L-TMLE node structure. Adherence is categorised into three levels (low / mid / high) and dummy-coded as two binary treatment nodes per block; the `ltmle` package then sets these to the intervention value $\bar{a}$ rather than conditioning on them.
+
+```{r tbl-slide11-nodes}
+#| label: tbl-slide11-nodes
+
+node_tbl <- data.frame(
+  Block = rep(paste0("k = ", 1:K), each = 4),
+  Role = rep(c("Confounder (L)", "Treatment (A)", "Treatment (A)", "Outcome (Y)"), K),
+  Variable = unlist(lapply(1:K, function(t) {
+    c(paste0("L_", t), paste0("Acat2_", t), paste0("Acat3_", t), paste0("Y_", t))
+  })),
+  Description = rep(c(
+    "Time-varying health status (continuous)",
+    "1{PDC category = mid}",
+    "1{PDC category = high}  (reference = low)",
+    "Virologic failure (absorbing binary)"
+  ), K),
+  `L-TMLE action` = rep(c(
+    "Adjust for (in Q and g models)",
+    "SET to intervention value (abar)",
+    "SET to intervention value (abar)",
+    "Predict (target of estimation)"
+  ), K),
+  check.names = FALSE
+)
+
+kable(node_tbl,
+      caption = "L-TMLE node structure per block. Baseline W0 and A0 (drug) enter as fixed covariates.") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  row_spec(which(node_tbl$Role == "Treatment (A)"), background = "#DEEBF7", bold = TRUE) |>
+  row_spec(which(node_tbl$Role == "Outcome (Y)"), background = "#E5F5E0")
+```
+
+## Why this matters: double robustness
+
+```{r fig-slide11-double-robust}
+#| label: fig-slide11-double-robust
+#| fig-cap: "Double-robustness property of L-TMLE. The estimator is consistent if either the outcome model (Q) or the treatment model (g) is correctly specified."
+#| fig-height: 3.5
+#| fig-width: 9
+
+dr_nodes <- data.frame(
+  label = c("Q-model correct\ng-model correct",
+            "Q-model correct\ng-model wrong",
+            "Q-model wrong\ng-model correct",
+            "Q-model wrong\ng-model wrong"),
+  x = c(1, 3, 5, 7),
+  y = 0,
+  result = c("Consistent\n+ efficient", "Consistent", "Consistent", "BIASED"),
+  fill = c("#A1D99B", "#C7E9C0", "#C7E9C0", "#FEE0D2")
+)
+
+ggplot(dr_nodes) +
+  geom_tile(aes(x = x, y = 0.8, fill = fill),
+            width = 1.7, height = 1.2, colour = "grey50") +
+  geom_text(aes(x = x, y = 0.8, label = label),
+            size = 2.8, lineheight = 1.1) +
+  geom_tile(aes(x = x, y = -0.5, fill = fill),
+            width = 1.7, height = 0.7, colour = "grey50") +
+  geom_text(aes(x = x, y = -0.5, label = result),
+            size = 3, fontface = "bold", lineheight = 1.1) +
+  scale_fill_identity() +
+  geom_segment(aes(x = x, xend = x, y = 0.15, yend = -0.1),
+               arrow = arrow(length = unit(0.06, "inches"), type = "closed"),
+               linewidth = 0.5) +
+  coord_cartesian(xlim = c(-0.5, 8.5), ylim = c(-1.3, 1.8)) +
+  labs(title = "Double Robustness: Two Chances to Get It Right",
+       subtitle = "Standard regression has only one model; L-TMLE has two independent chances") +
+  theme_void(base_size = 14) +
+  theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+        plot.subtitle = element_text(size = 11, hjust = 0.5, colour = "grey40"))
+save_fig("fig-slide11-double-robust")
+```
+
+### Key properties of L-TMLE in this setting
+
+- **Intervenes rather than conditions.** Standard regression conditions on adherence as a covariate (inducing collider bias when adherence is affected by prior health). L-TMLE *replaces* the observed adherence with the intervention value $\bar{a}$, then estimates what would have happened.
+
+- **Handles the feedback loop.** At each block, the g-model learns the treatment mechanism $P(A_k \mid L_k, \text{past})$ and the Q-model learns the outcome risk $E[Y_k \mid L_k, A_k, \text{past}]$. The targeting step reweights the Q-model using the g-model to remove confounding bias, even though $L_k$ is affected by prior adherence.
+
+- **Backward recursion is essential.** Because the outcome is cumulative (survival over $K$ blocks), L-TMLE must propagate information backward: the updated prediction $\hat{Q}_k^*$ at block $k$ becomes the pseudo-outcome for block $k-1$. This iterative conditional expectation (ICE) approach correctly accounts for the sequential structure.
+
+- **Influence-curve inference.** Standard errors and 95% CIs are derived from the efficient influence curve, not from bootstrap or sandwich estimators. This provides valid inference under the semiparametric model even when Super Learner is used for the nuisance models.
+```
+
+---
+
+# Slide 12: Static Intervention Results {#sec-slide12}
+
+**REPLACES:** "(Simulation results figure)", "(Estimated forgiveness curve)", "Table showing node setup"
+
+## LTMLE results (from simulation)
+
+```{r ltmle-fit-slide12}
+#| label: ltmle-fit-slide12
+#| eval: false
+#| include: false
+
+# Oracle for categories
+oracle_cat <- data.frame(drug = integer(), drug_label = character(),
+                         category = character(), oracle_u = numeric(),
+                         stringsAsFactors = FALSE)
+for (d in 0:1) {
+  dlabel <- ifelse(d == 0, "Drug B", "Drug A")
+  for (cat_name in c("high", "mid", "low")) {
+    r_u <- oracle_static_category_v4(
+      category = cat_name, drug = d, K = K, n_oracle = 100000,
+      seed = SEED + 300 + d * 10 + match(cat_name, c("high","mid","low")))
+    oracle_cat <- rbind(oracle_cat, data.frame(
+      drug = d, drug_label = dlabel, category = cat_name,
+      oracle_u = r_u, stringsAsFactors = FALSE))
+  }
+}
+
+# Fit LTMLE
+ltmle_res <- fit_ltmle_v4_all(dat, K = K, sl_lib = "glm", verbose = FALSE)
+ltmle_res$category <- gsub("always_", "", ltmle_res$regime)
+ltmle_merged <- merge(ltmle_res, oracle_cat,
+                      by.x = c("drug", "category"),
+                      by.y = c("drug", "category"))
+# merge may produce drug_label.x / drug_label.y — normalise
+if ("drug_label.x" %in% names(ltmle_merged)) {
+  ltmle_merged$drug_label <- ltmle_merged$drug_label.x
+}
+ltmle_merged$bias <- ltmle_merged$estimate - ltmle_merged$oracle_u
+```
+
+```{r fig-slide12-ltmle}
+#| label: fig-slide12-ltmle
+#| fig-cap: "LTMLE static regime estimates (3 categories) overlaid on oracle forgiveness curves. LTMLE tracks the oracle well despite time-dependent confounding."
+#| fig-height: 5
+#| eval: false
+#| include: false
+
+cat_midpoints <- c("low" = 0.33, "mid" = 0.75, "high" = 0.925)
+ltmle_merged$midpoint <- cat_midpoints[ltmle_merged$category]
+
+ggplot() +
+  geom_line(data = oracle_curve, aes(x = pdc, y = risk, colour = drug),
+            linewidth = 1.2, alpha = 0.4) +
+  geom_point(data = oracle_curve, aes(x = pdc, y = risk, colour = drug),
+             size = 1, alpha = 0.3) +
+  geom_pointrange(data = ltmle_merged,
+             aes(x = midpoint, y = estimate,
+                 ymin = estimate - 1.96 * se, ymax = estimate + 1.96 * se,
+                 colour = drug_label), size = 0.8, linewidth = 0.9) +
+  scale_colour_manual(values = drug_pal) +
+  scale_x_continuous(labels = scales::percent, breaks = seq(0.3, 1, 0.1)) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "Adherence (PDC)", y = paste0(K*3, "-Month Failure Risk"),
+       colour = "Drug",
+       title = "LTMLE Estimates vs Oracle Forgiveness Curves",
+       subtitle = "Points = LTMLE (± 95% CI) at category midpoints; lines = oracle truth")
+```
+
+```{r tbl-slide12-ltmle}
+#| label: tbl-slide12-ltmle
+#| eval: false
+#| include: false
+
+display_ltmle <- ltmle_merged[order(ltmle_merged$drug, ltmle_merged$category),
+  c("drug_label", "category", "estimate", "se", "oracle_u", "bias", "converged")]
+names(display_ltmle) <- c("Drug", "Category", "LTMLE", "SE", "Oracle", "Bias", "Converged")
+
+kable(display_ltmle, digits = 4,
+      caption = "LTMLE static regime estimates vs oracle (GLM nuisance models)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Node setup table (for animation on slide)
+
+```{r tbl-slide12-nodes}
+#| label: tbl-slide12-nodes
+#| eval: false
+#| include: false
+
+# Show the LTMLE node structure
+node_tbl <- data.frame(
+  Block = rep(paste0("k=", 1:K), each = 3),
+  Node = rep(c("L (confounder)", "A (treatment/PDC)", "Y (outcome)"), K),
+  Variable = c(
+    paste0("L_", rep(1:K, each = 3))[seq(1, K*3, 3)],
+    paste0("PDC_cat_", rep(1:K, each = 3))[seq(2, K*3, 3)],
+    paste0("Y_", rep(1:K, each = 3))[seq(3, K*3, 3)],
+    paste0("L_", rep(1:K, each = 3))[seq(1, K*3, 3)],
+    paste0("PDC_cat_", rep(1:K, each = 3))[seq(2, K*3, 3)],
+    paste0("Y_", rep(1:K, each = 3))[seq(3, K*3, 3)]
+  )[1:(K*3)],
+  Intervention = rep(c("Adjust for", "SET to regime", "Outcome"), K)
+)
+# Fix variable names
+node_tbl$Variable <- c("L_1","PDC_cat_1","Y_1","L_2","PDC_cat_2","Y_2",
+                        "L_3","PDC_cat_3","Y_3","L_4","PDC_cat_4","Y_4")
+
+kable(node_tbl,
+      caption = "LTMLE node structure: L nodes are adjusted for, A nodes are intervened on, Y nodes are outcomes") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  row_spec(which(node_tbl$Node == "A (treatment/PDC)"), background = "#DEEBF7", bold = TRUE)
+```
+
+---
+
+# Slide 13: Positivity Issues {#sec-slide13}
+
+**REPLACES:** `Picture4.jpg`, `Picture2.jpg`, `Picture7.jpg` — positivity/support diagnostics.
+
+## PDC distribution by drug and block
+
+```{r fig-slide13-pdc}
+#| label: fig-slide13-pdc
+#| fig-cap: "PDC distribution by drug and quarter. Drug A has slightly lower adherence. Extreme regimes (always high, always low) are rarely observed."
+#| fig-height: 5
+#| eval: false
+#| include: false
+
+fig_pdc_by_drug_block_v4(dat, K = K)
+```
+
+## Support heatmap
+
+```{r fig-slide13-support}
+#| label: fig-slide13-support
+#| fig-cap: "Proportion of subjects naturally following each static regime across all 4 blocks. Values below 5% flagged — these regimes face positivity violations."
+#| fig-height: 4
+#| eval: false
+#| include: false
+
+fig_support_heatmap_v4(dat, K = K)
+```
+
+## Support table
+
+```{r tbl-slide13-support}
+#| label: tbl-slide13-support
+#| eval: false
+#| include: false
+
+supp <- tbl_support_detail_v4(dat, K = K)
+kable(supp,
+      caption = "Effective support: per-block category frequencies and full-regime adherence") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# Slide 14: LMTP — Modified Treatment Policies {#sec-slide14}
+
+**REPLACES:** "Figure: Weight distribution plot" and LMTP results text.
+
+## LMTP shift results (from simulation)
+
+```{r lmtp-shift-slide14}
+#| label: lmtp-shift-slide14
+#| eval: false
+#| include: false
+
+lmtp_learners_trt <- c("SL.mean", "SL.glm", "SL.earth")
+lmtp_learners_out <- c("SL.mean", "SL.glm", "SL.earth")
+
+shift_results <- list()
+for (d in 0:1) {
+  dlabel <- ifelse(d == 0, "Drug B", "Drug A")
+  nat_res   <- fit_lmtp_natural_v4(dat, drug = d, K = K, folds = 5,
+                                    learners_trt = lmtp_learners_trt,
+                                    learners_outcome = lmtp_learners_out)
+  shift_res <- fit_lmtp_shift_v4(dat, delta = 0.10, drug = d, K = K, folds = 5,
+                                  learners_trt = lmtp_learners_trt,
+                                  learners_outcome = lmtp_learners_out)
+  nat_oracle   <- oracle_natural_v4(drug = d, K = K, n_oracle = 100000,
+                                     seed = SEED + 500 + d)
+  shift_oracle <- oracle_shift_v4(delta = 0.10, drug = d, K = K,
+                                   n_oracle = 100000, seed = SEED + 600 + d)
+  shift_results[[dlabel]] <- data.frame(
+    drug = dlabel,
+    natural = nat_res$estimate, natural_se = nat_res$se,
+    shifted = shift_res$estimate, shifted_se = shift_res$se,
+    natural_oracle = nat_oracle, shift_oracle = shift_oracle,
+    stringsAsFactors = FALSE)
+}
+shift_combined <- do.call(rbind, shift_results)
+shift_combined$natural_bias <- shift_combined$natural - shift_combined$natural_oracle
+shift_combined$shift_bias   <- shift_combined$shifted - shift_combined$shift_oracle
+```
+
+```{r fig-slide14-lmtp}
+#| label: fig-slide14-lmtp
+#| fig-cap: "LMTP: natural risk vs +10% PDC shift. Points = estimates (± 95% CI), X = oracle truth."
+#| fig-height: 5
+#| eval: false
+#| include: false
+
+shift_plot <- data.frame(
+  drug   = rep(shift_combined$drug, 2),
+  type   = rep(c("Natural", "+10% Shift"), each = nrow(shift_combined)),
+  risk   = c(shift_combined$natural, shift_combined$shifted),
+  oracle = c(shift_combined$natural_oracle, shift_combined$shift_oracle),
+  se     = c(shift_combined$natural_se, shift_combined$shifted_se)
+)
+shift_plot$type <- factor(shift_plot$type, levels = c("Natural", "+10% Shift"))
+
+ggplot(shift_plot, aes(x = type, colour = drug)) +
+  geom_pointrange(aes(y = risk, ymin = risk - 1.96 * se, ymax = risk + 1.96 * se),
+                  position = position_dodge(0.6), size = 0.7, linewidth = 0.8) +
+  geom_point(aes(y = oracle), position = position_dodge(0.6),
+             shape = 4, size = 3.5, stroke = 1.5, show.legend = FALSE) +
+  scale_y_continuous(labels = scales::percent_format(1)) +
+  scale_colour_manual(values = drug_pal) +
+  labs(x = NULL, y = "Cumulative failure risk", colour = "Drug",
+       title = "LMTP: Natural vs +10% PDC Shift",
+       subtitle = "Modified treatment policy stays within observed data support")
+```
+
+```{r tbl-slide14-lmtp}
+#| label: tbl-slide14-lmtp
+#| eval: false
+#| include: false
+
+display_shift <- shift_combined[, c("drug", "natural", "natural_oracle", "natural_bias",
+                                     "shifted", "shift_oracle", "shift_bias")]
+names(display_shift) <- c("Drug", "Natural", "Nat. Oracle", "Nat. Bias",
+                           "+10% Shift", "Shift Oracle", "Shift Bias")
+
+kable(display_shift, digits = 4,
+      caption = "LMTP estimates: natural and +10% shifted risk vs oracle") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Shift distribution visualization
+
+```{r fig-slide14-shift-dist}
+#| label: fig-slide14-shift-dist
+#| fig-cap: "Observed vs +10% shifted PDC distribution by drug and block. The shift stays within observed support."
+#| fig-height: 5
+#| eval: false
+#| include: false
+
+fig_shift_distribution_v4(dat, delta = 0.10, K = K)
+```
+
+---
+
+# Slide 15: LMTP Quantile-Matched Adherence Shifts {#sec-slide15}
+
+**REPLACES:** `Picture6.jpg` (quantile matching illustration), `Picture2.jpg` (results)
+
+## Quantile-matched drug comparison (from simulation)
+
+```{r lmtp-matched-slide15}
+#| label: lmtp-matched-slide15
+#| eval: false
+#| include: false
+
+# Both directions
+matched_B <- fit_lmtp_matched_drug_contrast_v4(
+  dat, reference_drug = 0, K = K, folds = 5,
+  learners_trt = lmtp_learners_trt, learners_outcome = lmtp_learners_out)
+contrast_B <- attr(matched_B, "contrast")
+oracle_B <- oracle_matched_adherence_v4(reference_drug = 0, K = K,
+                                         n_oracle = 100000, seed = SEED + 700)
+
+matched_A <- fit_lmtp_matched_drug_contrast_v4(
+  dat, reference_drug = 1, K = K, folds = 5,
+  learners_trt = lmtp_learners_trt, learners_outcome = lmtp_learners_out)
+contrast_A <- attr(matched_A, "contrast")
+oracle_A <- oracle_matched_adherence_v4(reference_drug = 1, K = K,
+                                         n_oracle = 100000, seed = SEED + 800)
+```
+
+```{r fig-slide15-matched}
+#| label: fig-slide15-matched
+#| fig-cap: "Drug comparison under quantile-matched adherence. Under either drug's adherence distribution, Drug A has lower failure risk."
+#| fig-height: 5
+#| eval: false
+#| include: false
+
+bar_data <- data.frame(
+  direction = rep(c("Under Drug B\nadherence", "Under Drug A\nadherence"), each = 2),
+  drug = rep(c("Drug B", "Drug A"), 2),
+  risk = c(
+    matched_B$estimate[matched_B$drug == 0],
+    matched_B$estimate[matched_B$drug == 1],
+    matched_A$estimate[matched_A$drug == 0],
+    matched_A$estimate[matched_A$drug == 1]
+  ),
+  se = c(
+    matched_B$se[matched_B$drug == 0],
+    matched_B$se[matched_B$drug == 1],
+    matched_A$se[matched_A$drug == 0],
+    matched_A$se[matched_A$drug == 1]
+  ),
+  oracle = c(
+    oracle_B$risk_ref, oracle_B$risk_other,
+    oracle_A$risk_other, oracle_A$risk_ref
+  )
+)
+bar_data$se[is.na(bar_data$se)] <- 0
+
+ggplot(bar_data, aes(x = direction, colour = drug)) +
+  geom_pointrange(aes(y = risk, ymin = risk - 1.96 * se, ymax = risk + 1.96 * se),
+                  position = position_dodge(0.6), size = 0.8, linewidth = 0.9) +
+  geom_point(aes(y = oracle), position = position_dodge(0.6),
+             shape = 4, size = 3.5, stroke = 1.5, show.legend = FALSE) +
+  scale_y_continuous(labels = scales::percent_format(1)) +
+  scale_colour_manual(values = drug_pal) +
+  labs(x = NULL, y = "Cumulative failure risk", colour = "Drug",
+       title = "Drug Comparison Under Matched Adherence",
+       subtitle = "Quantile-matching isolates pharmacological effect from adherence differences")
+```
+
+```{r tbl-slide15-matched}
+#| label: tbl-slide15-matched
+#| eval: false
+#| include: false
+
+both_dir <- data.frame(
+  Direction = c(
+    "Under Drug B adherence: Drug B",
+    "Under Drug B adherence: Drug A",
+    "RD (A - B) under Drug B adherence",
+    "Under Drug A adherence: Drug A",
+    "Under Drug A adherence: Drug B",
+    "RD (A - B) under Drug A adherence"
+  ),
+  Estimate = c(
+    matched_B$estimate[matched_B$drug == 0],
+    matched_B$estimate[matched_B$drug == 1],
+    contrast_B$rd,
+    matched_A$estimate[matched_A$drug == 1],
+    matched_A$estimate[matched_A$drug == 0],
+    -(contrast_A$rd)
+  ),
+  Oracle = c(
+    oracle_B$risk_ref, oracle_B$risk_other, oracle_B$rd,
+    oracle_A$risk_ref, oracle_A$risk_other, -(oracle_A$rd)
+  ),
+  stringsAsFactors = FALSE
+)
+both_dir$Bias <- both_dir$Estimate - both_dir$Oracle
+
+kable(both_dir, digits = 4,
+      caption = "Quantile-matched drug comparison: both reference directions") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  row_spec(c(3, 6), bold = TRUE, background = "#EBF3FB")
+```
+
+## Quantile-matching density visualization
+
+```{r fig-slide15-density}
+#| label: fig-slide15-density
+#| fig-cap: "Quantile-matched adherence distributions at Block 4."
+#| fig-height: 5
+#| fig-width: 9
+#| eval: false
+#| include: false
+
+shift_B_to_A <- make_quantile_match_shift_v4(dat, from_drug = 0, to_drug = 1, K = K)
+shift_A_to_B <- make_quantile_match_shift_v4(dat, from_drug = 1, to_drug = 0, K = K)
+
+pdc_col <- paste0("PDC_", K)
+pdc_A <- dat[[pdc_col]][dat$A0 == 1]; pdc_A <- pdc_A[!is.na(pdc_A)]
+pdc_B <- dat[[pdc_col]][dat$A0 == 0]; pdc_B <- pdc_B[!is.na(pdc_B)]
+
+df_tmp_A <- data.frame(x = pdc_A); names(df_tmp_A) <- pdc_col
+mapped_A_to_B <- shift_A_to_B(df_tmp_A, pdc_col)
+df_tmp_B <- data.frame(x = pdc_B); names(df_tmp_B) <- pdc_col
+mapped_B_to_A <- shift_B_to_A(df_tmp_B, pdc_col)
+
+dens_q_df <- rbind(
+  data.frame(Panel = "Drug A mapped to Drug B adherence",
+             Status = "Observed", PDC = pdc_A, stringsAsFactors = FALSE),
+  data.frame(Panel = "Drug A mapped to Drug B adherence",
+             Status = "Shifted", PDC = mapped_A_to_B, stringsAsFactors = FALSE),
+  data.frame(Panel = "Drug B mapped to Drug A adherence",
+             Status = "Observed", PDC = pdc_B, stringsAsFactors = FALSE),
+  data.frame(Panel = "Drug B mapped to Drug A adherence",
+             Status = "Shifted", PDC = mapped_B_to_A, stringsAsFactors = FALSE)
+)
+dens_q_df$Status <- factor(dens_q_df$Status, levels = c("Observed", "Shifted"))
+
+ggplot(dens_q_df, aes(x = PDC, fill = Status, colour = Status)) +
+  geom_density(alpha = 0.3, linewidth = 0.7) +
+  facet_wrap(~ Panel, ncol = 1, scales = "free_y") +
+  scale_x_continuous(labels = scales::percent, limits = c(0, 1.05)) +
+  scale_fill_manual(values = c("Observed" = tab10[["grey"]], "Shifted" = tab10[["blue"]])) +
+  scale_colour_manual(values = c("Observed" = tab10[["grey"]], "Shifted" = tab10[["blue"]])) +
+  labs(x = "PDC (Block 4)", y = "Density",
+       title = "Quantile-Matched Adherence Distributions (Block 4)",
+       fill = NULL, colour = NULL) +
+  theme(strip.text = element_text(face = "bold", size = 12))
+```
+
+---
+
+# Slide 16: Extension 1 — Intercurrent Events {#sec-slide16}
+
+**REPLACES:** `Picture2.jpg`, `Picture7.jpg`, "(Simulation results)" — intercurrent events handling.
+
+This extension has not yet been implemented in the V4 simulation. Below are 3 schematic proposals.
+
+## Expanded DAG with intercurrent events
+
+```{r fig-slide16-dag}
+#| label: fig-slide16-dag
+#| fig-cap: "Longitudinal DAG with intercurrent events. At each block the ordering is: L (health) -> A (adherence) -> C (censoring) -> S (switching) -> Y (outcome). All earlier nodes feed forward. Dashed red arrows show feedback from treatment to future confounders."
+#| fig-height: 6
+#| fig-width: 12
+
+# ---- Node positions ----
+# Two periods, each with 5 nodes: L, A, C, S, Y
+# Lay out left-to-right with consistent y-positions by role
+#   L (confounder): y = 1.5
+#   A (adherence):  y = 0
+#   C (censoring):  y = -1.5
+#   S (switching):  y = -3.0
+#   Y (outcome):    y = 0  (but offset right of S)
+# Plus baseline W (far left, y=1.5) and A0 (far left, y=0)
+
+nodes <- data.frame(
+  label = c("W",    "A0",
+            "L1",   "A1",   "C1",   "S1",   "Y1",
+            "L2",   "A2",   "C2",   "S2",   "Y2"),
+  x     = c(0,      1.5,
+            3.5,    5,      6.5,    8,      9.5,
+            11.5,   13,     14.5,   16,     17.5),
+  y     = c(1.5,    0,
+            1.5,    0,      -1.5,   -1.5,   0,
+            1.5,    0,      -1.5,   -1.5,   0),
+  role  = c("baseline", "baseline",
+            "confounder", "treatment", "ice", "ice", "outcome",
+            "confounder", "treatment", "ice", "ice", "outcome"),
+  stringsAsFactors = FALSE
+)
+
+role_pal <- c("baseline"   = "#F0F0F0",
+              "confounder" = "#FEE0D2",
+              "treatment"  = "#DEEBF7",
+              "ice"        = "#FFF7BC",
+              "outcome"    = "#E5F5E0")
+
+# ---- Edges ----
+# Causal arrows within and across periods.
+# Convention: solid grey = standard causal, dashed red = feedback
+edges <- data.frame(
+  from = c(
+    # Baseline -> Period 1
+    "W",  "W",  "W",  "A0", "A0",
+    # Within Period 1: L1 -> A1 -> C1 -> S1 -> Y1
+    "L1", "L1", "L1", "L1",
+    "A1", "A1", "A1",
+    "C1",
+    "S1",
+    # Period 1 -> Period 2 (forward)
+    "L1", "A1", "Y1",
+    # Period 1 -> Period 2 (feedback: treatment/outcome -> future confounder)
+    "A1", "Y1",
+    # Within Period 2: L2 -> A2 -> C2 -> S2 -> Y2
+    "L2", "L2", "L2", "L2",
+    "A2", "A2", "A2",
+    "C2",
+    "S2"
+  ),
+  to = c(
+    "L1", "A1", "C1", "L1", "A1",
+    "A1", "C1", "S1", "Y1",
+    "C1", "S1", "Y1",
+    "Y1",
+    "Y1",
+    "L2", "A2", "Y2",
+    "L2", "L2",
+    "A2", "C2", "S2", "Y2",
+    "C2", "S2", "Y2",
+    "Y2",
+    "Y2"
+  ),
+  stringsAsFactors = FALSE
+)
+
+# Look up coordinates
+edges$x    <- nodes$x[match(edges$from, nodes$label)]
+edges$y    <- nodes$y[match(edges$from, nodes$label)]
+edges$xend <- nodes$x[match(edges$to,   nodes$label)]
+edges$yend <- nodes$y[match(edges$to,   nodes$label)]
+
+# Mark feedback arrows (treatment/outcome at t affecting confounder at t+1)
+edges$feedback <- (edges$from == "A1" & edges$to == "L2") |
+                  (edges$from == "Y1" & edges$to == "L2")
+edges$colour   <- ifelse(edges$feedback, tab10[["red"]], "#555555")
+edges$linetype <- ifelse(edges$feedback, "dashed",  "solid")
+
+# Shorten arrows so they don't overlap with node circles:
+# move start/end 0.4 units toward the other endpoint
+shorten <- 0.45
+for (i in seq_len(nrow(edges))) {
+  dx <- edges$xend[i] - edges$x[i]
+  dy <- edges$yend[i] - edges$y[i]
+  len <- sqrt(dx^2 + dy^2)
+  if (len > 0) {
+    ux <- dx / len; uy <- dy / len
+    edges$x[i]    <- edges$x[i]    + shorten * ux
+    edges$y[i]    <- edges$y[i]    + shorten * uy
+    edges$xend[i] <- edges$xend[i] - shorten * ux
+    edges$yend[i] <- edges$yend[i] - shorten * uy
+  }
+}
+
+ggplot() +
+  # Period background shading
+  annotate("rect", xmin = 2.5, xmax = 10.5, ymin = -3.8, ymax = 2.5,
+           fill = "#F7F7F7", colour = "grey80", linetype = "dotted") +
+  annotate("rect", xmin = 10.5, xmax = 18.5, ymin = -3.8, ymax = 2.5,
+           fill = "#FAFAFA", colour = "grey80", linetype = "dotted") +
+  annotate("text", x = 6.5, y = 2.3, label = "Period 1", fontface = "bold",
+           size = 4, colour = "grey50") +
+  annotate("text", x = 14.5, y = 2.3, label = "Period 2", fontface = "bold",
+           size = 4, colour = "grey50") +
+  # Edges
+  geom_segment(data = edges,
+               aes(x = x, y = y, xend = xend, yend = yend),
+               colour = edges$colour, linetype = edges$linetype,
+               arrow = arrow(length = unit(0.10, "inches"), type = "closed"),
+               linewidth = 0.5) +
+  # Nodes (drawn on top)
+  geom_point(data = nodes, aes(x = x, y = y, fill = role),
+             shape = 21, size = 13, colour = "grey30", stroke = 0.6) +
+  geom_text(data = nodes, aes(x = x, y = y, label = label),
+            size = 3.5, fontface = "bold") +
+  scale_fill_manual(values = role_pal,
+                    labels = c("Baseline", "Confounder (L)",
+                               "Intercurrent (C, S)",
+                               "Outcome (Y)", "Treatment (A)"),
+                    name = NULL) +
+  # Role labels on right margin
+  annotate("text", x = 19, y = 1.5,  label = "L: Health", hjust = 0,
+           size = 3, colour = tab10[["orange"]]) +
+  annotate("text", x = 19, y = 0,    label = "A: Adherence\nY: Outcome", hjust = 0,
+           size = 3, colour = tab10[["blue"]], lineheight = 0.9) +
+  annotate("text", x = 19, y = -1.5, label = "C: Censoring\nS: Switching", hjust = 0,
+           size = 3, colour = tab10[["orange"]], lineheight = 0.9) +
+  # Legend for arrow types
+  annotate("segment", x = 2.5, xend = 4, y = -4.3, yend = -4.3,
+           colour = "#555555", linewidth = 0.6,
+           arrow = arrow(length = unit(0.08, "inches"), type = "closed")) +
+  annotate("text", x = 4.2, y = -4.3, label = "Causal path", hjust = 0, size = 3) +
+  annotate("segment", x = 8, xend = 9.5, y = -4.3, yend = -4.3,
+           colour = tab10[["red"]], linewidth = 0.6, linetype = "dashed",
+           arrow = arrow(length = unit(0.08, "inches"), type = "closed")) +
+  annotate("text", x = 9.7, y = -4.3, label = "Feedback (creates confounding)",
+           hjust = 0, size = 3, colour = tab10[["red"]]) +
+  coord_cartesian(xlim = c(-0.8, 22), ylim = c(-4.8, 2.8)) +
+  labs(title = "Longitudinal DAG with Intercurrent Events",
+       subtitle = "Node ordering per period: L -> A -> C -> S -> Y. All prior nodes affect all later nodes.") +
+  theme_void(base_size = 14) +
+  theme(plot.title = element_text(face = "bold", size = 15, hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5, colour = "grey40", size = 11),
+        legend.position = "bottom")
+save_fig("fig-slide16-dag")
+```
+
+## Version 2: Table of intercurrent event handling strategies {#sec-slide16-v2}
+
+```{r tbl-slide16-v2}
+#| label: tbl-slide16-v2
+
+ice_strategies <- data.frame(
+  `Intercurrent Event` = c("Informative monitoring",
+                           "Informative censoring (LTFU)",
+                           "Treatment switching",
+                           "Competing risks"),
+  `Challenge` = c("Patients monitored more often may be sicker",
+                  "Patients who drop out differ from those who stay",
+                  "Patients switch regimens based on health status",
+                  "Death precludes failure observation"),
+  `L-TMLE Handling` = c("Include monitoring as L-node, adjust in g-model",
+                        "IPCW: weight by inverse censoring probability",
+                        "Include switching as treatment node or censor at switch",
+                        "Treat as censoring event; estimate cause-specific risk"),
+  check.names = FALSE
+)
+
+kable(ice_strategies,
+      caption = "Intercurrent events and how L-TMLE handles them") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Version 3: Before/after comparison schematic {#sec-slide16-v3}
+
+```{r fig-slide16-v3}
+#| label: fig-slide16-v3
+#| fig-cap: "Version 3: Before/after — simplified simulation vs full complexity."
+#| fig-height: 4
+#| fig-width: 10
+
+compare <- data.frame(
+  panel = rep(c("Current\n(simplified)", "Extension\n(full complexity)"), each = 5),
+  feature = rep(c("Confounding", "Censoring", "Monitoring", "Switching", "Competing risks"), 2),
+  status = c("Included", "Not included", "Not included", "Not included", "Not included",
+             "Included", "Included", "Included", "Included", "Included"),
+  x = rep(1:5, 2),
+  y = rep(c(1, -1), each = 5)
+)
+compare$fill <- ifelse(compare$status == "Included", "#A1D99B", "#FEE0D2")
+
+ggplot(compare, aes(x = x, y = y)) +
+  geom_tile(aes(fill = fill), width = 0.8, height = 0.7, colour = "grey50") +
+  geom_text(aes(label = feature), size = 3, fontface = "bold") +
+  scale_fill_identity() +
+  annotate("text", x = 0, y = c(1, -1), label = c("Current\n(simplified)", "Extension\n(full)"),
+           fontface = "bold", size = 3.5, hjust = 1) +
+  geom_segment(aes(x = 0.3, xend = 5.5, y = 0, yend = 0),
+               linetype = "dashed", colour = "grey60") +
+  coord_cartesian(xlim = c(-1.5, 6), ylim = c(-2, 2)) +
+  labs(title = "Simulation Complexity: Current vs Extension",
+       subtitle = "Green = included, Red = not yet implemented") +
+  theme_void(base_size = 14) +
+  theme(plot.title = element_text(face = "bold", size = 15, hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5, colour = "grey40"))
+save_fig("fig-slide16-v3")
+```
+
+---
+
+# Slide 17: Extensions 2-3 — Mediation & Adherence History {#sec-slide17}
+
+**REPLACES:** `Picture45.jpg`, `Picture2.jpg` — mediation analysis and timing of poor adherence.
+
+These extensions have not yet been implemented. Below are 3 schematic proposals.
+
+## Version 1: Mediation DAG (treatment -> adherence -> outcome) {#sec-slide17-v1}
+
+```{r fig-slide17-v1}
+#| label: fig-slide17-v1
+#| fig-cap: "Version 1: Mediation DAG — decomposing the total effect of treatment into direct, mediated (through adherence), and other pathways."
+#| fig-height: 4.5
+#| fig-width: 9
+
+med_nodes <- data.frame(
+  label = c("Treatment\n(LAI vs Oral)", "Adherence\n(PDC)", "Outcome\n(VF/Resistance)",
+            "Other Pathways\n(pharmacokinetics,\nconvenience)"),
+  x = c(1, 4, 7, 4),
+  y = c(0, 1.5, 0, -1.5),
+  fill = c("#DEEBF7", "#FEE0D2", "#E5F5E0", "#D9D9D9")
+)
+
+med_edges <- data.frame(
+  x    = c(1,  1,  4,   1),
+  y    = c(0,  0,  1.5, 0),
+  xend = c(4,  7,  7,   4),
+  yend = c(1.5, 0, 0,  -1.5),
+  label = c("A -> M\n(treatment affects adherence)",
+            "Direct effect",
+            "M -> Y\n(adherence affects outcome)",
+            "Other pathways"),
+  colour = c(tab10[["red"]], tab10[["blue"]], tab10[["red"]], tab10[["grey"]])
+)
+
+ggplot() +
+  geom_segment(data = med_edges,
+               aes(x = x, y = y, xend = xend, yend = yend),
+               colour = med_edges$colour,
+               arrow = arrow(length = unit(0.12, "inches"), type = "closed"),
+               linewidth = 1.2) +
+  geom_label(data = med_nodes, aes(x = x, y = y, label = label, fill = fill),
+             size = 3.5, fontface = "bold",
+             label.padding = unit(0.5, "lines"), lineheight = 1) +
+  scale_fill_identity() +
+  # Path labels
+  annotate("text", x = 2.5, y = 1.2, label = "Mediated path",
+           colour = tab10[["red"]], fontface = "bold", size = 3.5) +
+  annotate("text", x = 4, y = -0.3, label = "Direct path",
+           colour = tab10[["blue"]], fontface = "bold", size = 3.5) +
+  coord_cartesian(xlim = c(-0.5, 8.5), ylim = c(-2.5, 2.5)) +
+  labs(title = "Mediation: How Much of the Treatment Effect Goes Through Adherence?",
+       subtitle = "LAI injectables may improve outcomes partly by improving adherence") +
+  theme_void(base_size = 14) +
+  theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5, colour = "grey40"))
+save_fig("fig-slide17-v1")
+```
+
+## Version 2: Adherence trajectory patterns {#sec-slide17-v2}
+
+```{r fig-slide17-v2}
+#| label: fig-slide17-v2
+#| fig-cap: "Version 2: Example adherence trajectories — early vs late disengagement, single gap vs multiple gaps."
+#| fig-height: 5
+#| fig-width: 9
+
+# Create example trajectories
+traj <- data.frame(
+  pattern = rep(c("Sustained high", "Early disengagement",
+                  "Late disengagement", "Multiple gaps"), each = 12),
+  month = rep(1:12, 4),
+  pdc = c(
+    # Sustained high
+    rep(0.95, 12),
+    # Early disengagement (drops at month 3)
+    0.95, 0.90, 0.40, 0.30, 0.25, 0.20, 0.15, 0.10, 0.05, 0.05, 0.05, 0.05,
+    # Late disengagement (drops at month 9)
+    0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.90, 0.85, 0.40, 0.20, 0.10, 0.05,
+    # Multiple gaps
+    0.95, 0.90, 0.30, 0.85, 0.90, 0.25, 0.80, 0.85, 0.30, 0.85, 0.90, 0.40
+  )
+)
+traj$pattern <- factor(traj$pattern,
+  levels = c("Sustained high", "Early disengagement",
+             "Late disengagement", "Multiple gaps"))
+
+# Compute overall PDC per pattern
+overall_pdc <- aggregate(pdc ~ pattern, data = traj, FUN = mean)
+overall_pdc$label <- sprintf("Overall PDC = %.0f%%", overall_pdc$pdc * 100)
+
+ggplot(traj, aes(x = month, y = pdc, colour = pattern)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  facet_wrap(~ pattern, ncol = 2) +
+  geom_hline(yintercept = 0.85, linetype = "dashed", colour = "grey60") +
+  geom_text(data = overall_pdc, aes(x = 6, y = 0.1, label = label),
+            inherit.aes = FALSE, size = 3.5, fontface = "bold", colour = "grey40") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  scale_colour_brewer(palette = "Set1", guide = "none") +
+  labs(x = "Month", y = "Monthly PDC",
+       title = "Adherence Trajectory Patterns",
+       subtitle = "Different histories may have different effects — timing matters") +
+  theme(strip.text = element_text(face = "bold"))
+save_fig("fig-slide17-v2")
+```
+
+## Version 3: Effect decomposition bar chart (conceptual) {#sec-slide17-v3}
+
+```{r fig-slide17-v3}
+#| label: fig-slide17-v3
+#| fig-cap: "Version 3: Conceptual decomposition of treatment effect into direct and adherence-mediated components."
+#| fig-height: 4.5
+#| fig-width: 8
+
+# Conceptual decomposition
+decomp <- data.frame(
+  component = c("Total effect\n(LAI vs Oral)", "Direct effect\n(pharmacological)",
+                "Mediated through\nadherence", "Other pathways"),
+  effect = c(0.15, 0.08, 0.05, 0.02),
+  fill = c(tab10[["blue"]], tab10[["teal"]], tab10[["red"]], tab10[["grey"]])
+)
+decomp$component <- factor(decomp$component, levels = rev(decomp$component))
+
+ggplot(decomp, aes(x = component, y = effect, fill = fill)) +
+  geom_col(width = 0.6, colour = "white") +
+  geom_text(aes(label = sprintf("%.0f%%", effect * 100)),
+            hjust = -0.2, fontface = "bold", size = 4) +
+  scale_fill_identity() +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.20)) +
+  coord_flip() +
+  labs(x = NULL, y = "Risk difference (absolute)",
+       title = "Hypothetical Effect Decomposition",
+       subtitle = "How much of the LAI advantage comes from improved adherence?") +
+  theme(axis.text.y = element_text(face = "bold", size = 11))
+save_fig("fig-slide17-v3")
+```
+
+---
+
+# Slide 18: Takeaway {#sec-slide18}
+
+No figure/table placeholder — text-only summary slide. Key points from simulation:
+
+```{r tbl-slide18-takeaway}
+#| label: tbl-slide18-takeaway
+#| eval: false
+#| include: false
+
+takeaway <- data.frame(
+  Finding = c(
+    "Naive adherence-stratified analysis",
+    "LTMLE on categorised adherence",
+    "LMTP additive shift (+10%)",
+    "Quantile-matched drug comparison",
+    "Drug A forgiveness advantage"
+  ),
+  Result = c(
+    sprintf("Biased by %.1f-%.1f pp due to time-dependent confounding",
+            min(abs(naive_tab$bias)) * 100, max(abs(naive_tab$bias)) * 100),
+    sprintf("Bias <= %.1f pp in clean setting (GLM nuisance)",
+            max(abs(ltmle_merged$bias)) * 100),
+    sprintf("Bias <= %.1f pp; stays within observed support",
+            max(abs(shift_combined$shift_bias)) * 100),
+    "Isolates pharmacological effect from adherence behaviour",
+    "Drug A has lower failure risk under matched adherence"
+  )
+)
+
+kable(takeaway,
+      caption = "Summary of key simulation findings") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# Slide 19: Next Steps {#sec-slide19}
+
+No figure/table placeholder — text-only slide.
+
+---
+
+# Appendix: Bias Comparison — Naive vs L-TMLE {#sec-appendix}
+
+This figure loads pre-computed Monte Carlo results (30 iterations, N = 3,000)
+from `run_bias_mc.R`. The MC average reveals the *systematic* bias difference:
+naive stratification is biased by time-dependent confounding, while L-TMLE
+removes it — **in well-supported strata** (Mid, High). The Low stratum has
+severe positivity violations (very few patients sustain low adherence for all
+4 blocks), so both methods struggle there.
+
+```{r bias-load}
+#| label: bias-load
+
+mc_path <- file.path(proj_root, "results", "bias_mc_results.rds")
+stopifnot(file.exists(mc_path))
+mc_bias <- readRDS(mc_path)
+
+all_iter     <- mc_bias$raw
+bias_settings <- mc_bias$settings
+
+# Summarise
+bias_summary <- aggregate(bias ~ method + drug + stratum, data = all_iter,
+  FUN = function(x) c(mean = mean(x), se = sd(x) / sqrt(length(x)), n = length(x)))
+bias_summary <- do.call(data.frame, bias_summary)
+names(bias_summary) <- c("method", "drug", "stratum", "mean_bias", "se_mean", "n_iter")
+
+bias_summary$method  <- factor(bias_summary$method, levels = c("Naive", "L-TMLE"))
+bias_summary$stratum <- factor(bias_summary$stratum, levels = c("Low", "Mid", "High"))
+```
+
+```{r fig-bias-all}
+#| label: fig-bias-all
+#| fig-cap: "Monte Carlo bias comparison (30 iterations, N = 3,000). Points = mean bias; error bars = 95% CI of the mean. In well-supported strata (Mid, High) L-TMLE is clearly closer to zero. The Low stratum has positivity violations — both methods are biased there."
+#| fig-height: 5.5
+#| fig-width: 10
+
+method_pal_2 <- c("Naive" = tab10[["red"]], "L-TMLE" = tab10[["blue"]])
+
+# Shade the Low stratum using a geom_rect with discrete x-axis
+shade_df <- data.frame(xmin = 0.5, xmax = 1.5, ymin = -Inf, ymax = Inf)
+
+# Compute label y-position
+label_y <- max(bias_summary$mean_bias + 1.96 * bias_summary$se_mean, na.rm = TRUE) * 0.9
+
+ggplot(bias_summary, aes(x = stratum, y = mean_bias, colour = method)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+  # Shade Low stratum (use numeric mapping since discrete x maps to 1,2,3)
+  geom_rect(data = shade_df, inherit.aes = FALSE,
+            aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            fill = "#FEE0D2", alpha = 0.3) +
+  annotate("text", x = "Low", y = label_y,
+           label = "Positivity\nviolation", size = 3, colour = tab10[["orange"]],
+           fontface = "italic", lineheight = 0.9) +
+  geom_pointrange(aes(ymin = mean_bias - 1.96 * se_mean,
+                      ymax = mean_bias + 1.96 * se_mean),
+                  position = position_dodge(0.5), size = 0.8, linewidth = 0.9) +
+  facet_wrap(~ drug) +
+  scale_y_continuous(labels = scales::percent_format(0.1)) +
+  scale_colour_manual(values = method_pal_2) +
+  labs(x = "Adherence stratum (static regime)",
+       y = "Mean bias (estimate - oracle)",
+       colour = "Method",
+       title = "Bias Comparison: Naive vs L-TMLE",
+       subtitle = sprintf("%d MC iterations, N = %s. L-TMLE is less biased where positivity holds (Mid, High).",
+                           bias_settings$N_ITER, format(bias_settings$N, big.mark = ","))) +
+  theme(legend.position = "bottom")
+save_fig("fig-bias-all")
+```
+
+```{r tbl-bias-all}
+#| label: tbl-bias-all
+
+tbl_display <- bias_summary[order(bias_summary$drug, bias_summary$stratum, bias_summary$method), ]
+tbl_display$bias_fmt <- sprintf("%+.1f pp", tbl_display$mean_bias * 100)
+tbl_display$se_fmt   <- sprintf("%.1f pp", tbl_display$se_mean * 100)
+tbl_display$n_fmt    <- as.integer(tbl_display$n_iter)
+
+kable(tbl_display[, c("drug", "stratum", "method", "bias_fmt", "se_fmt", "n_fmt")],
+      col.names = c("Drug", "Stratum", "Method", "Mean Bias", "SE(mean)", "Iterations"),
+      caption = sprintf("MC bias summary (%d iterations, N = %s). L-TMLE is less biased in Mid and High strata. Low stratum has positivity violations — this motivates the LMTP shift approach.",
+                         bias_settings$N_ITER, format(bias_settings$N, big.mark = ",")),
+      row.names = FALSE) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+
+# Export: saved ggplot objects {#sec-export}
+
+All figures rendered during this document are saved to a single `.rds` file.
+Load in R with `figs <- readRDS("talk_v2_figures.rds")` then access
+individual plots by name (e.g., `figs$"fig-slide6-dag"`). You can then
+modify themes, resize with `+ theme(...)`, or save with `ggsave()`.
+
+```{r export-figures}
+#| label: export-figures
+#| cache: false
+
+fig_list <- as.list(.fig_store)
+out_path <- file.path(getwd(), "talk_v2_figures.rds")
+saveRDS(fig_list, out_path)
+cat(sprintf("Saved %d figure(s) to %s\n", length(fig_list), out_path))
+cat("Available figures:\n")
+cat(paste(" -", sort(names(fig_list))), sep = "\n")
+```

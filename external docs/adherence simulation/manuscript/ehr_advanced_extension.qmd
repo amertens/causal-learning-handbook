@@ -1,0 +1,1134 @@
+---
+title: "Advanced Extension: Informative Processes and Distribution-Shift Drug Comparisons"
+subtitle: "Handling censoring, monitoring, switching, and comparing drugs under matched adherence"
+author: "HIV Adherence Simulation Project"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: true
+    code-summary: "Show code"
+    theme: cosmo
+    fig-width: 8
+    fig-height: 5
+    self-contained: true
+execute:
+  warning: false
+  message: false
+  cache: true
+---
+
+```{r setup}
+#| cache: false
+library(data.table)
+library(ggplot2)
+library(lmtp)
+library(quantreg)
+library(knitr)
+library(kableExtra)
+
+theme_set(theme_minimal(base_size = 13))
+
+# lmtp 1.5.0 API helper: extract point estimate and SE from lmtp fit
+lmtp_theta <- function(fit) {
+  if (!is.null(fit$theta)) return(fit$theta)
+  if (!is.null(fit$estimate)) return(fit$estimate@x)
+  NA_real_
+}
+lmtp_se <- function(fit) {
+  if (!is.null(fit$standard_error)) return(fit$standard_error)
+  if (!is.null(fit$estimate)) return(ife::tidy(fit$estimate)$std.error)
+  NA_real_
+}
+# Safe contrast extraction: handles both ife objects and data frames
+tidy_contrast <- function(contrast) {
+  est <- contrast$estimates
+  if (is.data.frame(est)) return(as.data.frame(est))
+  ife::tidy(est)
+}
+
+# Source helper functions
+source(file.path("..", "R", "generate_ehr_cohort.R"))
+source(file.path("..", "R", "transform_ehr_to_analytic.R"))
+source(file.path("..", "R", "estimation_helpers.R"))
+```
+
+
+# Introduction
+
+The main tutorial demonstrated the EHR-to-causal pipeline and estimated forgiveness curves using LTMLE and LMTP with a simple additive adherence shift. This extension tackles three additional challenges that arise in real HIV observational studies:
+
+1. **Informative censoring**: Patients who disenroll or are lost to follow-up differ systematically from those who remain.
+2. **Informative monitoring**: Viral load measurement frequency depends on patient health and adherence status.
+3. **Treatment switching**: Patients who switch regimens after virologic failure introduce post-baseline confounding.
+
+We then implement a more sophisticated drug comparison using **quantile-regression-based adherence distribution mapping**: instead of comparing drugs under the same additive shift, we ask what would happen if Drug B patients had the adherence distribution of Drug A patients, conditional on their clinical characteristics.
+
+## Generate the cohort
+
+We use the same simulated EHR cohort as the main tutorial.
+
+```{r simulate}
+#| label: simulate-cohort
+#| cache: true
+
+set.seed(2024)
+ehr <- generate_ehr_cohort(n = 5000, K_months = 12, seed = 2024)
+```
+
+```{r build-data}
+#| label: build-data
+#| cache: true
+
+# Build panel and wide format
+panel <- build_panel(ehr, block_days = 90)
+K_blocks <- 4
+wide <- panel_to_wide(panel, K_blocks = K_blocks)
+
+# --- LOCF imputation + censoring flip for lmtp ---
+# lmtp requires non-NA treatment and covariate values for uncensored rows.
+# After censoring or death, the wide format has NAs. We carry forward the
+# last observed value, fill remaining NAs with defaults, and flip the
+# censoring indicator (our panel: C=1=censored; lmtp wants: 1=uncensored).
+prep_wide_for_lmtp <- function(wide_dt, K_blocks) {
+  w <- copy(wide_dt)
+  tv_prefixes <- c("PDC_", "VL_log10_locf_", "CD4_locf_",
+                   "depression_", "substance_use_", "S_", "M_",
+                   "n_encounters_", "D_", "Y_")
+  for (prefix in tv_prefixes) {
+    cols <- paste0(prefix, 0:(K_blocks - 1))
+    cols <- intersect(cols, names(w))
+    if (length(cols) > 1) {
+      for (j in 2:length(cols)) {
+        na_idx <- is.na(w[[cols[j]]])
+        if (any(na_idx)) w[[cols[j]]][na_idx] <- w[[cols[j - 1]]][na_idx]
+      }
+    }
+  }
+  for (k in 0:(K_blocks - 1)) {
+    pdc_col <- paste0("PDC_", k)
+    if (any(is.na(w[[pdc_col]]))) w[[pdc_col]][is.na(w[[pdc_col]])] <- 0.5
+    for (prefix in c("depression_", "substance_use_", "S_", "M_", "D_", "Y_")) {
+      col <- paste0(prefix, k)
+      if (col %in% names(w) && any(is.na(w[[col]]))) w[[col]][is.na(w[[col]])] <- 0
+    }
+    vl_col <- paste0("VL_log10_locf_", k)
+    if (vl_col %in% names(w) && any(is.na(w[[vl_col]]))) w[[vl_col]][is.na(w[[vl_col]])] <- 1.3
+    cd4_col <- paste0("CD4_locf_", k)
+    if (cd4_col %in% names(w) && any(is.na(w[[cd4_col]]))) w[[cd4_col]][is.na(w[[cd4_col]])] <- 400
+    # Censoring: lmtp expects 1=uncensored, 0=censored; our panel has C=1=censored
+    c_col <- paste0("C_", k)
+    if (c_col %in% names(w)) {
+      w[[c_col]] <- as.integer(w[[c_col]])
+      w[[c_col]][is.na(w[[c_col]])] <- 0L
+      w[[c_col]] <- 1L - w[[c_col]]  # flip
+    }
+  }
+  w
+}
+
+wide <- prep_wide_for_lmtp(wide, K_blocks)
+
+cat(sprintf("Panel: %d rows, %d patients\n", nrow(panel), length(unique(panel$patient_id))))
+cat(sprintf("Wide: %d patients x %d columns\n", nrow(wide), ncol(wide)))
+K_max <- max(panel$block)
+cat(sprintf("NAs remaining in PDC_0: %d, PDC_%d: %d\n",
+            sum(is.na(wide$PDC_0)), K_max, sum(is.na(wide[[paste0("PDC_", K_max)]]))))
+```
+
+## Oracle truth
+
+Because we control the DGP, we can compute oracle counterfactual risks under fixed adherence levels with no censoring, switching, or monitoring artifacts. This gives us a ground-truth benchmark for evaluating estimator bias.
+
+```{r oracle}
+#| label: oracle-truth
+#| cache: true
+
+oracle <- compute_oracle_grid(
+  adh_levels = seq(0.30, 1.0, by = 0.05),
+  K_months   = 12,
+  n_oracle   = 200000,
+  seed       = 99999
+)
+oracle[, drug := ifelse(a0 == 1, "Drug A (INSTI)", "Drug B (NNRTI)")]
+```
+
+```{r fig-oracle-ext}
+#| label: fig-oracle-ext
+#| fig-cap: "Oracle forgiveness curves from the V3 DGP. These are the true counterfactual risks we aim to recover."
+
+ggplot(oracle, aes(x = adh_target, y = cum_risk, color = drug)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  scale_x_continuous(labels = scales::percent, breaks = seq(0.3, 1, 0.1)) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values = c("Drug A (INSTI)" = "#2166AC",
+                                "Drug B (NNRTI)" = "#B2182B")) +
+  labs(x = "Adherence (PDC)", y = "12-Month Virologic Failure Risk",
+       color = "Regimen", title = "Oracle Forgiveness Curves") +
+  theme(legend.position = "bottom")
+```
+
+```{r oracle-table-ext}
+#| label: tbl-oracle-ext
+
+oracle_wide <- dcast(oracle, adh_target ~ drug, value.var = "cum_risk")
+setnames(oracle_wide, c("PDC", "Drug A", "Drug B"))
+oracle_wide[, RD := `Drug A` - `Drug B`]
+kable(oracle_wide[PDC %in% seq(0.3, 1.0, 0.1)], digits = 3,
+      caption = "Oracle risks and risk differences at selected PDC levels") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+We will use these oracle values below to compute bias for each estimator.
+
+
+# Part 1: Adjusting for All Three Informative Processes
+
+## Diagnosing the processes
+
+Before adjusting, we quantify how informative each process is.
+
+### Informative censoring
+
+```{r cens-model}
+#| label: cens-diagnostics
+
+# Fit censoring model
+cens_dt <- panel[D == 0, ]
+cens_fit <- glm(C ~ PDC + VL_log10_locf + CD4_locf + depression +
+                  substance_use + A0 + factor(block),
+                data = cens_dt, family = binomial)
+
+cens_coefs <- data.table(
+  Variable = c("PDC", "VL (log10)", "CD4", "Depression",
+               "Substance use", "Drug A"),
+  OR = exp(coef(cens_fit)[c("PDC", "VL_log10_locf", "CD4_locf",
+                              "depression", "substance_use", "A0")]),
+  p_value = summary(cens_fit)$coefficients[c("PDC", "VL_log10_locf", "CD4_locf",
+                                              "depression", "substance_use", "A0"), 4]
+)
+
+cat("=== Censoring Model (OR for disenrollment) ===\n")
+kable(cens_coefs, digits = 3) |>
+  kable_styling(bootstrap_options = c("striped"), full_width = FALSE)
+```
+
+Low adherence strongly predicts disenrollment (OR for PDC < 1 means higher PDC is protective against censoring). This confirms censoring is informative: patients who leave the study are systematically less adherent and sicker.
+
+### Informative monitoring
+
+```{r mon-model-ext}
+#| label: mon-diagnostics
+
+mon_dt <- panel[C == 0 & D == 0, ]
+mon_fit <- glm(M ~ PDC + VL_log10_locf + CD4_locf + depression +
+                 substance_use + S + A0 + factor(block),
+               data = mon_dt, family = binomial)
+
+mon_coefs <- data.table(
+  Variable = c("PDC", "VL (log10)", "CD4", "Depression",
+               "Substance use", "Switched", "Drug A"),
+  OR = exp(coef(mon_fit)[c("PDC", "VL_log10_locf", "CD4_locf",
+                             "depression", "substance_use", "S", "A0")]),
+  p_value = summary(mon_fit)$coefficients[c("PDC", "VL_log10_locf", "CD4_locf",
+                                             "depression", "substance_use", "S", "A0"), 4]
+)
+
+cat("=== Monitoring Model (OR for VL measurement) ===\n")
+kable(mon_coefs, digits = 3) |>
+  kable_styling(bootstrap_options = c("striped"), full_width = FALSE)
+```
+
+Monitoring probability depends on adherence and health status. Less adherent patients are monitored less frequently, meaning their virologic failures go undetected. This is a form of outcome-dependent measurement that biases naive analyses.
+
+### Treatment switching
+
+```{r switch-model}
+#| label: switch-diagnostics
+
+# Among uncensored, alive, not-yet-switched patients
+switch_dt <- panel[C == 0 & D == 0 & S == 0, ]
+if (nrow(switch_dt[block > 0]) > 50) {
+  switch_fit <- glm(S ~ PDC + VL_log10_locf + CD4_locf + depression +
+                      A0 + factor(block),
+                    data = switch_dt[block > 0], family = binomial)
+
+  switch_coefs <- data.table(
+    Variable = c("PDC", "VL (log10)", "CD4", "Depression", "Drug A"),
+    OR = exp(coef(switch_fit)[c("PDC", "VL_log10_locf", "CD4_locf",
+                                  "depression", "A0")]),
+    p_value = summary(switch_fit)$coefficients[c("PDC", "VL_log10_locf", "CD4_locf",
+                                                   "depression", "A0"), 4]
+  )
+
+  cat("=== Switching Model (OR for regimen change) ===\n")
+  kable(switch_coefs, digits = 3) |>
+    kable_styling(bootstrap_options = c("striped"), full_width = FALSE)
+} else {
+  cat("Too few switching events to fit model.\n")
+}
+```
+
+High viral load and poor adherence predict switching, confirming that treatment switching is clinically driven rather than random. Patients switch because their current regimen is failing, introducing informative post-baseline confounding.
+
+
+## LMTP estimation adjusting for all three processes
+
+The `lmtp` package handles censoring directly via censoring nodes. For monitoring and switching, we include them as time-varying confounders in $L_t$, using the treatment-policy strategy: we estimate the outcome under a world where the natural monitoring and switching processes continue as they would, but adherence is shifted.
+
+```{r lmtp-full-adjustment}
+#| label: lmtp-full
+#| cache: true
+
+# Use the full estimation pipeline with all informative processes modeled
+# Censoring: modeled via cens_nodes in lmtp
+# Monitoring: M_t included in time_vary (treatment-policy)
+# Switching: S_t included in time_vary (treatment-policy)
+
+dt_full <- as.data.frame(copy(wide))
+
+baseline <- c("sex", "age_at_index", "msm", "cci",
+              "race_black", "race_hispanic",
+              "region_south", "region_midwest", "region_west", "A0")
+
+trt_nodes <- paste0("PDC_", 0:(K_blocks - 1))
+outcome_nodes <- paste0("Y_", 0:(K_blocks - 1))
+cens_nodes <- paste0("C_", 0:(K_blocks - 1))
+
+# Time-varying confounders: VL, CD4, depression, substance use, S, M, D
+time_vary <- lapply(0:(K_blocks - 1), function(k) {
+  c(paste0("VL_log10_locf_", k),
+    paste0("CD4_locf_", k),
+    paste0("depression_", k),
+    paste0("substance_use_", k),
+    paste0("S_", k),
+    paste0("M_", k),
+    paste0("D_", k))
+})
+
+sl_lib <- c("SL.glm", "SL.mean")
+
+# When subsetting by drug, drop A0 from baseline (constant within subset)
+baseline_nodrug <- setdiff(baseline, "A0")
+
+# --- Fit for each drug separately under +10pp shift ---
+results_full <- list()
+
+for (a0 in 0:1) {
+  sub_data <- dt_full[dt_full$A0 == a0, ]
+  drug_label <- ifelse(a0 == 1, "Drug A", "Drug B")
+
+  # Natural (no shift) - observed adherence policy
+  fit_nat <- lmtp::lmtp_sdr(
+    data             = sub_data,
+    trt              = trt_nodes,
+    outcome          = outcome_nodes,
+    baseline         = baseline_nodrug,
+    time_vary        = time_vary,
+    cens             = cens_nodes,
+    shift            = NULL,
+    mtp              = FALSE,
+    outcome_type     = "survival",
+    learners_outcome = sl_lib,
+    learners_trt     = sl_lib,
+    folds            = 1
+  )
+
+  # Shifted (+10pp)
+  shift_10 <- function(data, trt) pmin(1.0, data[[trt]] + 0.10)
+
+  fit_shift <- lmtp::lmtp_sdr(
+    data             = sub_data,
+    trt              = trt_nodes,
+    outcome          = outcome_nodes,
+    baseline         = baseline_nodrug,
+    time_vary        = time_vary,
+    cens             = cens_nodes,
+    shift            = shift_10,
+    mtp              = TRUE,
+    outcome_type     = "survival",
+    learners_outcome = sl_lib,
+    learners_trt     = sl_lib,
+    folds            = 1
+  )
+
+  contrast <- lmtp::lmtp_contrast(fit_shift, ref = fit_nat, type = "additive")
+
+  ct <- tidy_contrast(contrast)
+  results_full[[drug_label]] <- data.table(
+    Drug         = drug_label,
+    risk_natural = 1 - lmtp_theta(fit_nat),
+    risk_shift   = 1 - lmtp_theta(fit_shift),
+    RD           = ct$estimate,
+    RD_se        = ct$std.error,
+    RD_ci_lo     = ct$conf.low,
+    RD_ci_hi     = ct$conf.high
+  )
+
+  cat(sprintf("%s: natural risk = %.3f, shifted risk = %.3f, RD = %.3f (%.3f, %.3f)\n",
+              drug_label,
+              1 - lmtp_theta(fit_nat), 1 - lmtp_theta(fit_shift),
+              ct$estimate, ct$conf.low, ct$conf.high))
+}
+
+results_full_dt <- rbindlist(results_full)
+```
+
+```{r tbl-full-adjustment}
+#| label: tbl-full-adjustment
+
+kable(results_full_dt, digits = 3,
+      caption = "LMTP shift estimates (+10pp PDC) adjusting for censoring, monitoring, and switching") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+### How each informative process is handled
+
+**Censoring.** The `cens` argument tells `lmtp` to model $P(C_t = 0 \mid \text{history})$ at each time point and use inverse-probability-of-censoring weighting in the density ratio estimation. This ensures that patients who leave the study early contribute appropriately to the causal estimate rather than being silently dropped.
+
+**Monitoring.** The monitoring indicator $M_t$ is included in the time-varying confounders. Under the treatment-policy strategy, we estimate the outcome under a hypothetical intervention on adherence while allowing the monitoring process to continue as it naturally would. This avoids the need for a separate IPMW model but assumes that monitoring is fully captured by measured history (coarsening at random conditional on $L_t$).
+
+**Switching.** The switch indicator $S_t$ is also included in time-varying confounders. Under the treatment-policy strategy, we follow patients regardless of whether they switch regimens. The intervention targets adherence, not regimen assignment, so switching is part of the natural treatment process that we condition on.
+
+
+## Sensitivity: Censor-at-switch analysis
+
+An alternative to the treatment-policy approach for switching is to censor patients at the time of their first regimen switch. This asks a different causal question: what would the failure risk be if patients stayed on their initial regimen throughout follow-up?
+
+```{r censor-at-switch}
+#| label: censor-at-switch
+#| cache: true
+
+# Create modified panel where switching triggers censoring
+panel_cas <- censor_at_switch(panel)
+wide_cas <- panel_to_wide(panel_cas, K_blocks = K_blocks)
+wide_cas <- prep_wide_for_lmtp(wide_cas, K_blocks)
+
+cat(sprintf("Original: %d patients\n", nrow(wide)))
+cat(sprintf("After censor-at-switch: NAs in Y_11: %d\n",
+            sum(wide_cas$Y_11 == 0)))
+
+# Re-estimate under censor-at-switch
+dt_cas <- as.data.frame(copy(wide_cas))
+
+results_cas <- list()
+for (a0 in 0:1) {
+  sub_data <- dt_cas[dt_cas$A0 == a0, ]
+  drug_label <- ifelse(a0 == 1, "Drug A", "Drug B")
+
+  shift_10 <- function(data, trt) pmin(1.0, data[[trt]] + 0.10)
+
+  fit_nat <- lmtp::lmtp_sdr(
+    data             = sub_data,
+    trt              = trt_nodes,
+    outcome          = outcome_nodes,
+    baseline         = baseline_nodrug,
+    time_vary        = time_vary,
+    cens             = cens_nodes,
+    shift            = NULL,
+    mtp              = FALSE,
+    outcome_type     = "survival",
+    learners_outcome = sl_lib,
+    learners_trt     = sl_lib,
+    folds            = 1
+  )
+
+  fit_shift <- lmtp::lmtp_sdr(
+    data             = sub_data,
+    trt              = trt_nodes,
+    outcome          = outcome_nodes,
+    baseline         = baseline_nodrug,
+    time_vary        = time_vary,
+    cens             = cens_nodes,
+    shift            = shift_10,
+    mtp              = TRUE,
+    outcome_type     = "survival",
+    learners_outcome = sl_lib,
+    learners_trt     = sl_lib,
+    folds            = 1
+  )
+
+  contrast <- lmtp::lmtp_contrast(fit_shift, ref = fit_nat, type = "additive")
+
+  ct <- tidy_contrast(contrast)
+  results_cas[[drug_label]] <- data.table(
+    Drug         = drug_label,
+    Strategy     = "Censor-at-switch",
+    risk_natural = 1 - lmtp_theta(fit_nat),
+    risk_shift   = 1 - lmtp_theta(fit_shift),
+    RD           = ct$estimate,
+    RD_se        = ct$std.error,
+    RD_ci_lo     = ct$conf.low,
+    RD_ci_hi     = ct$conf.high
+  )
+}
+
+results_cas_dt <- rbindlist(results_cas)
+```
+
+```{r tbl-sensitivity-comparison}
+#| label: tbl-sensitivity
+
+# Compare treatment-policy vs censor-at-switch
+results_full_dt[, Strategy := "Treatment-policy"]
+comparison <- rbind(
+  results_full_dt[, .(Drug, Strategy, risk_natural, risk_shift, RD, RD_se, RD_ci_lo, RD_ci_hi)],
+  results_cas_dt[, .(Drug, Strategy, risk_natural, risk_shift, RD, RD_se, RD_ci_lo, RD_ci_hi)]
+)
+
+kable(comparison, digits = 3,
+      caption = "Sensitivity analysis: treatment-policy vs censor-at-switch") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+The treatment-policy strategy answers "what would happen under this adherence shift, allowing natural switching?" while censor-at-switch answers "what would happen if patients stayed on their initial regimen?" If the estimates differ substantially, switching is an important driver of the observed outcomes.
+
+
+## IPMW sensitivity analysis for monitoring
+
+As an additional sensitivity check, we compute inverse-probability-of-monitoring weights and examine whether the monitoring-adjusted estimates differ from the treatment-policy estimates.
+
+```{r ipmw-analysis}
+#| label: ipmw-analysis
+#| cache: true
+
+ipmw_result <- compute_ipmw(panel, K_blocks = K_blocks)
+```
+
+```{r ipmw-diagnostics}
+#| label: fig-ipmw
+#| fig-cap: "Distribution of stabilized IPMW weights among monitored observations. Well-behaved weights cluster near 1.0; extreme weights indicate near-violations of the coarsening-at-random assumption."
+
+monitored <- ipmw_result$panel_weighted[M == 1]
+ggplot(monitored, aes(x = ipmw_stab)) +
+  geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red") +
+  labs(x = "Stabilized IPMW", y = "Count",
+       title = "Distribution of Monitoring Weights") +
+  coord_cartesian(xlim = c(0, quantile(monitored$ipmw_stab, 0.99)))
+```
+
+
+## Bias assessment: LMTP-shift estimates vs oracle
+
+We can also run LMTP-static at specific PDC levels to compare directly against the oracle forgiveness curves.
+
+```{r lmtp-static-for-bias}
+#| label: lmtp-static-bias
+#| cache: true
+
+# Run LMTP-static at PDC levels matching the oracle grid
+pdc_eval <- c(0.50, 0.70, 0.80, 0.90, 0.95)
+dt_bias <- as.data.frame(copy(wide))
+
+static_results <- list()
+for (a0 in 0:1) {
+  sub_data <- dt_bias[dt_bias$A0 == a0, ]
+  drug_label <- ifelse(a0 == 1, "Drug A", "Drug B")
+
+  for (pdc_target in pdc_eval) {
+    shift_static <- function(data, trt) rep(pdc_target, nrow(data))
+
+    fit <- tryCatch(
+      lmtp::lmtp_sdr(
+        data = sub_data, trt = trt_nodes, outcome = outcome_nodes,
+        baseline = baseline_nodrug, time_vary = time_vary, cens = cens_nodes,
+        shift = shift_static, mtp = FALSE, outcome_type = "survival",
+        learners_outcome = sl_lib, learners_trt = sl_lib, folds = 1
+      ),
+      error = function(e) NULL
+    )
+
+    if (!is.null(fit)) {
+      # Look up oracle truth
+      oracle_val <- oracle[a0 == (a0) & abs(adh_target - pdc_target) < 0.001, cum_risk]
+      if (length(oracle_val) == 0) oracle_val <- NA
+
+      est_val <- 1 - lmtp_theta(fit)
+      static_results[[length(static_results) + 1]] <- data.table(
+        Drug       = drug_label,
+        PDC        = pdc_target,
+        Estimate   = est_val,
+        Oracle     = oracle_val,
+        Bias       = est_val - oracle_val,
+        SE         = lmtp_se(fit)
+      )
+    }
+  }
+}
+
+static_bias_dt <- rbindlist(static_results)
+```
+
+```{r tbl-bias-static}
+#| label: tbl-bias-static
+
+kable(static_bias_dt, digits = 4,
+      caption = "LMTP-static estimates vs oracle truth: bias assessment") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r fig-bias-static}
+#| label: fig-bias-static
+#| fig-cap: "Bias of LMTP-static estimates relative to oracle truth. Points near zero indicate low bias; larger deviations at extreme PDC levels reflect positivity strain."
+#| fig-height: 4.5
+
+if (nrow(static_bias_dt) > 0) {
+  ggplot(static_bias_dt, aes(x = PDC, y = Bias, color = Drug)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+    geom_point(size = 3) +
+    geom_line(linewidth = 0.8) +
+    scale_x_continuous(labels = scales::percent) +
+    scale_color_manual(values = c("Drug A" = "#2166AC", "Drug B" = "#B2182B")) +
+    labs(x = "Target PDC", y = "Bias (Estimate − Oracle)",
+         title = "LMTP-Static Bias by Adherence Level and Drug") +
+    theme(legend.position = "bottom")
+}
+```
+
+```{r fig-est-vs-oracle}
+#| label: fig-est-vs-oracle
+#| fig-cap: "LMTP-static estimates (points with ±1 SE bars) overlaid on oracle forgiveness curves (lines). Good agreement at well-supported PDC levels; divergence at extremes."
+#| fig-height: 5
+
+if (nrow(static_bias_dt) > 0) {
+  static_bias_dt[, drug_full := ifelse(Drug == "Drug A", "Drug A (INSTI)", "Drug B (NNRTI)")]
+
+  ggplot() +
+    geom_line(data = oracle, aes(x = adh_target, y = cum_risk, color = drug),
+              linewidth = 1, alpha = 0.5) +
+    geom_point(data = static_bias_dt,
+               aes(x = PDC, y = Estimate, color = drug_full), size = 3) +
+    geom_errorbar(data = static_bias_dt,
+                  aes(x = PDC, ymin = Estimate - SE, ymax = Estimate + SE,
+                      color = drug_full),
+                  width = 0.015) +
+    scale_color_manual(values = c("Drug A (INSTI)" = "#2166AC",
+                                  "Drug B (NNRTI)" = "#B2182B")) +
+    scale_x_continuous(labels = scales::percent, breaks = seq(0.3, 1, 0.1)) +
+    scale_y_continuous(labels = scales::percent) +
+    labs(x = "Adherence (PDC)", y = "12-Month Virologic Failure Risk",
+         color = "Regimen",
+         title = "Estimated vs Oracle Forgiveness Curves") +
+    theme(legend.position = "bottom")
+}
+```
+
+Bias tends to be smallest at moderate-to-high adherence levels where positivity is well-supported. At lower PDC targets (0.50), the LMTP-static estimator must extrapolate because few patients naturally maintain such low adherence throughout follow-up, leading to larger bias and wider standard errors. This is a structural limitation of static interventions and a key motivation for the shift-based approaches below.
+
+
+# Part 2: Quantile-Regression Adherence Distribution Shift
+
+## Motivation
+
+The additive shift (+10pp PDC for everyone) is a useful and interpretable intervention, but it does not answer the question most relevant for drug comparison:
+
+> What would happen to Drug B patients if their adherence distribution looked like that of Drug A patients?
+
+This is a fundamentally different question. Drug A patients may have higher adherence on average (perhaps because the regimen has fewer side effects), and this adherence advantage may vary by patient characteristics. A young, healthy patient on Drug A might have only slightly better adherence than on Drug B, while an older patient with comorbidities might have substantially better adherence on Drug A due to better tolerability.
+
+The quantile-regression approach operationalizes this question by mapping each Drug B patient's adherence to where they would fall in the Drug A distribution, conditional on their clinical characteristics.
+
+## How the conditional quantile mapping works
+
+At each time block $t$, we fit conditional quantile regressions at a grid of levels $\tau \in \{0.05, 0.10, \ldots, 0.95\}$ for both drugs:
+
+$$
+Q_{A}(\tau \mid X) = X'\beta_A(\tau) \quad \text{and} \quad Q_{B}(\tau \mid X) = X'\beta_B(\tau)
+$$
+
+For a Drug B patient with covariates $X$ and observed adherence $\text{PDC}_t$:
+
+1. Find their percentile rank $\tau^*$ in the Drug B conditional distribution by inverting $\hat{Q}_B(\tau \mid X)$.
+2. Map to the Drug A conditional distribution: $\text{PDC}_t^{\text{shifted}} = \hat{Q}_A(\tau^* \mid X)$.
+
+This preserves each patient's relative position within their covariate-specific distribution while shifting to what their adherence would plausibly look like under Drug A.
+
+```{r fig-qmap-schematic}
+#| label: fig-qmap-schematic
+#| fig-cap: "Schematic of the conditional quantile mapping. A Drug B patient at the 30th percentile of the Drug B distribution (given their covariates) is mapped to the 30th percentile of the Drug A distribution (given the same covariates)."
+#| fig-height: 4
+
+# Illustrative figure
+set.seed(42)
+x_grid <- seq(0, 1, length.out = 200)
+
+d_schematic <- data.frame(
+  adherence = c(qbeta(x_grid, 4, 3), qbeta(x_grid, 5, 2)),
+  quantile  = rep(x_grid, 2),
+  Drug      = rep(c("Drug B", "Drug A"), each = 200)
+)
+
+# Highlight the mapping for a specific patient
+tau_star <- 0.30
+pdc_b <- qbeta(tau_star, 4, 3)
+pdc_a <- qbeta(tau_star, 5, 2)
+
+ggplot(d_schematic, aes(x = quantile, y = adherence, color = Drug)) +
+  geom_line(linewidth = 1.2) +
+  geom_segment(aes(x = tau_star, xend = tau_star, y = 0, yend = pdc_b),
+               linetype = "dashed", color = "grey40", inherit.aes = FALSE) +
+  geom_segment(aes(x = tau_star, xend = tau_star, y = pdc_b, yend = pdc_a),
+               arrow = arrow(length = unit(0.15, "inches")),
+               color = "#E66100", linewidth = 1, inherit.aes = FALSE) +
+  geom_point(data = data.frame(quantile = c(tau_star, tau_star),
+                                adherence = c(pdc_b, pdc_a),
+                                Drug = c("Drug B", "Drug A")),
+             size = 4) +
+  annotate("text", x = tau_star + 0.05, y = (pdc_b + pdc_a) / 2,
+           label = "shift", color = "#E66100", fontface = "bold", size = 4) +
+  scale_color_manual(values = c("Drug A" = "#2166AC", "Drug B" = "#B2182B")) +
+  scale_x_continuous(labels = scales::percent, name = "Conditional quantile (τ)") +
+  scale_y_continuous(labels = scales::percent, name = "Adherence (PDC)") +
+  labs(title = "Conditional Quantile Mapping: Drug B → Drug A") +
+  theme(legend.position = "bottom")
+```
+
+
+## Implementation
+
+### Step 1: Fit conditional quantile regressions
+
+```{r fit-cqr}
+#| label: fit-cqr
+#| cache: true
+
+tau_grid <- seq(0.05, 0.95, by = 0.05)
+
+# Covariates available for the quantile models
+baseline_cov <- c("age_at_index", "sex", "msm", "cci",
+                   "race_black", "race_hispanic")
+
+cqr_models <- list()
+
+for (k in 0:(K_blocks - 1)) {
+  pdc_col <- paste0("PDC_", k)
+
+  # Build covariate list: baseline + lagged time-varying
+  if (k == 0) {
+    cov_cols <- baseline_cov
+  } else {
+    cov_cols <- c(baseline_cov,
+                  paste0("VL_log10_locf_", k),
+                  paste0("CD4_locf_", k),
+                  paste0("PDC_", k - 1))
+  }
+
+  fmla <- as.formula(paste(pdc_col, "~", paste(cov_cols, collapse = " + ")))
+
+  # Drug A patients
+  dat_A <- wide[wide$A0 == 1 & !is.na(wide[[pdc_col]]), ]
+  dat_B <- wide[wide$A0 == 0 & !is.na(wide[[pdc_col]]), ]
+
+  fits_A <- lapply(tau_grid, function(tau) {
+    suppressWarnings(rq(fmla, tau = tau, data = dat_A))
+  })
+  fits_B <- lapply(tau_grid, function(tau) {
+    suppressWarnings(rq(fmla, tau = tau, data = dat_B))
+  })
+
+  cqr_models[[k + 1]] <- list(fits_A = fits_A, fits_B = fits_B,
+                                cov_cols = cov_cols)
+}
+
+cat(sprintf("Fitted %d quantile regressions per drug per block\n", length(tau_grid)))
+cat(sprintf("Total models: %d\n", 2 * K_blocks * length(tau_grid)))
+```
+
+### Step 2: Build the shift function
+
+```{r shift-function}
+#| label: build-shift-fn
+
+# Helper: find percentile rank via interpolation
+find_tau <- function(a_obs, qmat, tau_grid) {
+  n <- length(a_obs)
+  tau_out <- numeric(n)
+  for (i in seq_len(n)) {
+    qs <- qmat[i, ]
+    if (a_obs[i] <= qs[1]) {
+      tau_out[i] <- tau_grid[1]
+    } else if (a_obs[i] >= qs[length(qs)]) {
+      tau_out[i] <- tau_grid[length(tau_grid)]
+    } else {
+      tau_out[i] <- approx(qs, tau_grid, xout = a_obs[i], rule = 2)$y
+    }
+  }
+  tau_out
+}
+
+# Helper: map tau values to Drug A quantiles
+map_to_A <- function(tau_vals, qmat_A, tau_grid) {
+  n <- length(tau_vals)
+  a_out <- numeric(n)
+  for (i in seq_len(n)) {
+    a_out[i] <- approx(tau_grid, qmat_A[i, ], xout = tau_vals[i], rule = 2)$y
+  }
+  a_out
+}
+
+# The LMTP shift function: map Drug B adherence to Drug A distribution
+shift_qmap_B_to_A <- function(data, trt) {
+  k <- as.integer(gsub("PDC_", "", trt))
+  a_obs <- data[[trt]]
+  a_shifted <- a_obs
+
+  is_b <- data$A0 == 0
+  if (any(is_b)) {
+    mods <- cqr_models[[k + 1]]
+
+    # Predict conditional quantiles for Drug B patients under both models
+    qmat_B <- sapply(mods$fits_B, function(fit) {
+      suppressWarnings(predict(fit, newdata = data[is_b, ]))
+    })
+    qmat_A <- sapply(mods$fits_A, function(fit) {
+      suppressWarnings(predict(fit, newdata = data[is_b, ]))
+    })
+
+    # Ensure quantiles are monotone (fix crossing)
+    for (i in seq_len(nrow(qmat_B))) {
+      qmat_B[i, ] <- sort(qmat_B[i, ])
+      qmat_A[i, ] <- sort(qmat_A[i, ])
+    }
+
+    # Find Drug B percentile rank, map to Drug A
+    tau_star <- find_tau(a_obs[is_b], qmat_B, tau_grid)
+    a_shifted[is_b] <- map_to_A(tau_star, qmat_A, tau_grid)
+
+    # Bound to [0.01, 0.99]
+    a_shifted[is_b] <- pmax(0.01, pmin(0.99, a_shifted[is_b]))
+  }
+  a_shifted
+}
+```
+
+### Step 3: Visualize the shift
+
+Before running the LMTP estimator, we check what the shift actually does to the adherence distribution.
+
+```{r fig-shift-visualization}
+#| label: fig-shift-viz
+#| fig-cap: "Observed Drug B adherence (red) vs shifted adherence using the conditional quantile map (orange) vs observed Drug A adherence (blue), at each block."
+#| fig-height: 6
+
+K_max <- max(panel$block)
+shift_viz <- list()
+for (k in 0:K_max) {
+  pdc_col <- paste0("PDC_", k)
+  dat_k <- as.data.frame(wide[!is.na(wide[[pdc_col]]), ])
+
+  # Apply shift to see what it produces
+  shifted <- shift_qmap_B_to_A(dat_k, pdc_col)
+
+  shift_viz[[length(shift_viz) + 1]] <- data.table(
+    block = k,
+    group = c(rep("Drug A (observed)", sum(dat_k$A0 == 1)),
+              rep("Drug B (observed)", sum(dat_k$A0 == 0)),
+              rep("Drug B → A (shifted)", sum(dat_k$A0 == 0))),
+    PDC = c(dat_k[[pdc_col]][dat_k$A0 == 1],
+            dat_k[[pdc_col]][dat_k$A0 == 0],
+            shifted[dat_k$A0 == 0])
+  )
+}
+
+shift_viz_dt <- rbindlist(shift_viz)
+
+ggplot(shift_viz_dt, aes(x = PDC, fill = group, color = group)) +
+  geom_density(alpha = 0.3, linewidth = 0.8) +
+  facet_wrap(~paste("Block", block), nrow = 2) +
+  scale_fill_manual(values = c("Drug A (observed)" = "#2166AC",
+                                "Drug B (observed)" = "#B2182B",
+                                "Drug B → A (shifted)" = "#E66100")) +
+  scale_color_manual(values = c("Drug A (observed)" = "#2166AC",
+                                 "Drug B (observed)" = "#B2182B",
+                                 "Drug B → A (shifted)" = "#E66100")) +
+  labs(x = "PDC", y = "Density", fill = NULL, color = NULL,
+       title = "Adherence Distribution: Observed vs Quantile-Mapped") +
+  theme(legend.position = "bottom")
+```
+
+The orange (shifted) distribution should closely track the blue (Drug A) distribution. If it does, the quantile mapping successfully transforms Drug B adherence to look like Drug A adherence, conditional on patient characteristics.
+
+
+### Step 4: Run LMTP with the quantile-mapping shift
+
+```{r lmtp-qmap}
+#| label: lmtp-qmap
+#| cache: true
+
+dt_qmap <- as.data.frame(copy(wide))
+
+# Observed outcome for Drug B (no shift, for reference)
+fit_B_observed <- lmtp::lmtp_sdr(
+  data             = dt_qmap[dt_qmap$A0 == 0, ],
+  trt              = trt_nodes,
+  outcome          = outcome_nodes,
+  baseline         = baseline_nodrug,
+  time_vary        = time_vary,
+  cens             = cens_nodes,
+  shift            = NULL,
+  mtp              = FALSE,
+  outcome_type     = "survival",
+  learners_outcome = sl_lib,
+  learners_trt     = sl_lib,
+  folds            = 1
+)
+
+# Drug B under Drug A adherence distribution (the quantile-mapped shift)
+fit_B_shifted <- lmtp::lmtp_sdr(
+  data             = dt_qmap[dt_qmap$A0 == 0, ],
+  trt              = trt_nodes,
+  outcome          = outcome_nodes,
+  baseline         = baseline_nodrug,
+  time_vary        = time_vary,
+  cens             = cens_nodes,
+  shift            = shift_qmap_B_to_A,
+  mtp              = TRUE,
+  outcome_type     = "survival",
+  learners_outcome = sl_lib,
+  learners_trt     = sl_lib,
+  folds            = 1
+)
+
+# Drug A under observed (natural) adherence
+fit_A_observed <- lmtp::lmtp_sdr(
+  data             = dt_qmap[dt_qmap$A0 == 1, ],
+  trt              = trt_nodes,
+  outcome          = outcome_nodes,
+  baseline         = baseline_nodrug,
+  time_vary        = time_vary,
+  cens             = cens_nodes,
+  shift            = NULL,
+  mtp              = FALSE,
+  outcome_type     = "survival",
+  learners_outcome = sl_lib,
+  learners_trt     = sl_lib,
+  folds            = 1
+)
+
+# Contrasts
+contrast_shift_vs_obs <- lmtp::lmtp_contrast(fit_B_shifted, ref = fit_B_observed,
+                                               type = "additive")
+
+risk_A_obs <- 1 - lmtp_theta(fit_A_observed)
+risk_B_obs <- 1 - lmtp_theta(fit_B_observed)
+risk_B_shifted <- 1 - lmtp_theta(fit_B_shifted)
+
+ct_qmap <- tidy_contrast(contrast_shift_vs_obs)
+cat("=== Quantile-Mapping Results ===\n")
+cat(sprintf("Drug A observed risk:          %.3f\n", risk_A_obs))
+cat(sprintf("Drug B observed risk:          %.3f\n", risk_B_obs))
+cat(sprintf("Drug B → A adherence risk:     %.3f\n", risk_B_shifted))
+cat(sprintf("Effect of matching adherence:  %.3f (%.3f, %.3f)\n",
+            ct_qmap$estimate, ct_qmap$conf.low, ct_qmap$conf.high))
+```
+
+```{r tbl-qmap-results}
+#| label: tbl-qmap
+
+qmap_results <- data.table(
+  Estimand = c(
+    "Drug A, observed adherence",
+    "Drug B, observed adherence",
+    "Drug B, Drug A adherence (q-map)",
+    "Effect of adherence shift on Drug B",
+    "Residual drug difference (Drug A obs - Drug B shifted)"
+  ),
+  Risk_or_RD = c(
+    risk_A_obs,
+    risk_B_obs,
+    risk_B_shifted,
+    ct_qmap$estimate,
+    risk_A_obs - risk_B_shifted
+  ),
+  Interpretation = c(
+    "Failure risk on Drug A under natural adherence",
+    "Failure risk on Drug B under natural adherence",
+    "Failure risk if Drug B patients had Drug A adherence",
+    "How much of Drug B's disadvantage is explained by adherence",
+    "Drug difference that remains after matching adherence"
+  )
+)
+
+kable(qmap_results, digits = 3,
+      caption = "Decomposing the Drug A vs Drug B comparison using quantile-mapped adherence") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+
+## Interpreting the quantile-mapping results
+
+The quantile-mapping analysis decomposes the observed drug difference into two components:
+
+1. **Adherence-mediated component**: How much of Drug B's higher failure risk is due to its patients having lower adherence? This is the difference between "Drug B observed" and "Drug B under Drug A adherence."
+
+2. **Residual pharmacologic component**: After matching adherence distributions, how much drug difference remains? This reflects true pharmacologic forgiveness differences that are not explained by adherence patterns.
+
+If the residual difference is small, most of the Drug A advantage comes from better adherence (fewer side effects, better tolerability). If it is large, Drug A has genuinely better pharmacologic forgiveness at equal adherence levels.
+
+This is a causal mediation-like decomposition. The quantile mapping intervenes on the adherence process for Drug B patients, asking "what if their adherence looked like Drug A's?" while leaving the Drug B pharmacology in place. The remaining drug difference isolates the pharmacologic channel from the adherence channel.
+
+
+## What question does this answer?
+
+The quantile-mapping shift answers:
+
+> If Drug B patients adhered as well as Drug A patients with similar clinical characteristics, how much of Drug B's higher failure risk would disappear?
+
+This is a **distribution-shift intervention**, not a deterministic static intervention. It does not force all Drug B patients to have PDC = 0.95. Instead, it gives each Drug B patient the adherence level they would most plausibly have had under Drug A, given their age, comorbidities, viral load, and prior adherence. A young, healthy Drug B patient at the 80th percentile of the Drug B distribution gets mapped to the 80th percentile of Drug A --- which might be only slightly higher. An older patient with depression at the 30th percentile of Drug B might get a larger shift, because the Drug A advantage in adherence is larger for patients facing more adherence barriers.
+
+
+```{r fig-decomposition}
+#| label: fig-decomposition
+#| fig-cap: "Decomposition of the observed drug difference into adherence-mediated and residual pharmacologic components."
+#| fig-height: 4
+
+decomp <- data.table(
+  Component = factor(c("Drug A\n(observed)",
+                        "Drug B\n(Drug A adherence)",
+                        "Drug B\n(observed)"),
+                     levels = c("Drug A\n(observed)",
+                                "Drug B\n(Drug A adherence)",
+                                "Drug B\n(observed)")),
+  Risk = c(risk_A_obs, risk_B_shifted, risk_B_obs)
+)
+
+ggplot(decomp, aes(x = Component, y = Risk, fill = Component)) +
+  geom_col(width = 0.6) +
+  geom_segment(aes(x = 1.35, xend = 2.65, y = risk_A_obs, yend = risk_B_shifted),
+               arrow = arrow(length = unit(0.12, "inches"), ends = "both"),
+               color = "#4575B4", linewidth = 0.8) +
+  annotate("text", x = 2, y = (risk_A_obs + risk_B_shifted) / 2 - 0.005,
+           label = "Residual\n(pharmacologic)", color = "#4575B4", size = 3.5,
+           fontface = "bold") +
+  geom_segment(aes(x = 2.35, xend = 3.65, y = risk_B_shifted, yend = risk_B_obs),
+               arrow = arrow(length = unit(0.12, "inches"), ends = "both"),
+               color = "#B2182B", linewidth = 0.8) +
+  annotate("text", x = 3, y = (risk_B_shifted + risk_B_obs) / 2 - 0.005,
+           label = "Adherence-\nmediated", color = "#B2182B", size = 3.5,
+           fontface = "bold") +
+  scale_fill_manual(values = c("#2166AC", "#E66100", "#B2182B"), guide = "none") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(y = "12-Month Virologic Failure Risk", x = NULL,
+       title = "Decomposing the Drug A vs Drug B Difference") +
+  theme(axis.text.x = element_text(size = 10))
+```
+
+
+# Summary: Comparing Approaches
+
+```{r tbl-approach-comparison}
+#| label: tbl-approach-comparison
+
+approaches <- data.table(
+  Approach = c(
+    "Naive stratification",
+    "LMTP +10pp shift (treatment-policy)",
+    "LMTP +10pp shift (censor-at-switch)",
+    "Quantile-mapping (Drug B → Drug A adherence)"
+  ),
+  Question = c(
+    "Descriptive association between observed adherence and outcome",
+    "What if everyone's adherence improved by 10pp, under natural switching/monitoring?",
+    "Same, but censoring patients who switch regimens",
+    "What if Drug B patients had Drug A's covariate-conditional adherence distribution?"
+  ),
+  `Handles censoring` = c("No", "Yes", "Yes (extra)", "Yes"),
+  `Handles monitoring` = c("No", "Yes (L_t)", "Yes (L_t)", "Yes (L_t)"),
+  `Handles switching` = c("No", "Yes (L_t)", "Censors", "Yes (L_t)"),
+  `Positivity` = c("N/A", "Good (small shift)", "Good", "Good (within-support)")
+)
+
+kable(approaches, caption = "Comparison of estimation approaches") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE,
+                font_size = 12) |>
+  column_spec(1, bold = TRUE)
+```
+
+
+The naive analysis ignores all informative processes and produces biased estimates. The additive LMTP shift is a clean, interpretable intervention that answers "what if everyone adhered a bit better?" The quantile-mapping approach answers the more targeted question of whether Drug B's disadvantage is driven by adherence differences or pharmacologic differences. In practice, these are complementary analyses: the additive shift quantifies the benefit of an adherence intervention, while the quantile mapping decomposes the drug comparison.
+
+
+## Consolidated bias summary
+
+We now compare all estimators against oracle truth at available PDC levels to show the magnitude and direction of bias for each approach.
+
+```{r naive-for-bias}
+#| label: naive-bias
+#| cache: true
+
+# Compute naive estimates to compare against oracle
+naive_res <- estimate_naive(panel, K_blocks = K_blocks)
+
+# Map naive adherence categories to approximate PDC values for oracle lookup
+naive_pdc_map <- c(low = 0.35, medium = 0.65, high = 0.90)
+
+naive_bias <- list()
+if (!is.null(naive_res$risks)) {
+  for (i in seq_len(nrow(naive_res$risks))) {
+    row <- naive_res$risks[i, ]
+    cat_label <- as.character(row$adh_cat)
+    approx_pdc <- naive_pdc_map[cat_label]
+    drug_label <- ifelse(row$A0 == 1, "Drug A", "Drug B")
+
+    oracle_val <- oracle[a0 == row$A0 & abs(adh_target - approx_pdc) < 0.06, cum_risk]
+    if (length(oracle_val) > 0) oracle_val <- oracle_val[1] else oracle_val <- NA
+
+    naive_bias[[length(naive_bias) + 1]] <- data.table(
+      Estimator = "Naive",
+      Drug      = drug_label,
+      PDC       = approx_pdc,
+      Estimate  = row$risk,
+      Oracle    = oracle_val,
+      Bias      = row$risk - oracle_val
+    )
+  }
+}
+naive_bias_dt <- rbindlist(naive_bias)
+```
+
+```{r tbl-all-bias}
+#| label: tbl-all-bias
+
+# Combine LMTP-static and naive bias
+all_bias <- rbind(
+  static_bias_dt[, .(Estimator = "LMTP-static", Drug, PDC, Estimate, Oracle, Bias)],
+  naive_bias_dt[, .(Estimator, Drug, PDC, Estimate, Oracle, Bias)],
+  fill = TRUE
+)
+
+kable(all_bias[order(PDC, Drug, Estimator)], digits = 4,
+      caption = "Bias comparison: LMTP-static vs Naive at comparable adherence levels") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r fig-all-bias}
+#| label: fig-all-bias
+#| fig-cap: "Bias of LMTP-static vs Naive estimates across adherence levels. Naive estimates are systematically biased due to treatment-confounder feedback and informative processes."
+#| fig-height: 5
+
+if (nrow(all_bias[!is.na(Bias)]) > 0) {
+  ggplot(all_bias[!is.na(Bias)],
+         aes(x = PDC, y = Bias, color = Estimator, shape = Drug)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+    geom_point(size = 3.5) +
+    geom_line(aes(group = interaction(Estimator, Drug)), linewidth = 0.7, alpha = 0.6) +
+    scale_x_continuous(labels = scales::percent) +
+    scale_color_manual(values = c("LMTP-static" = "#4575B4", "Naive" = "#D73027")) +
+    labs(x = "Target / Approximate PDC", y = "Bias (Estimate − Oracle)",
+         title = "Estimator Bias Relative to Oracle Truth") +
+    theme(legend.position = "bottom")
+}
+```
+
+The figure shows that LMTP-static estimates have substantially lower bias than naive estimates, particularly at lower adherence levels where treatment-confounder feedback is strongest. The naive estimator tends to overestimate the risk at low adherence (patients who sustain low adherence are a selected, sicker group) and underestimate it at high adherence (high adherers are systematically healthier). LMTP corrects this by properly integrating over the time-varying confounders rather than conditioning on them.
+
+
+# Session Info
+
+```{r sessioninfo}
+sessionInfo()
+```

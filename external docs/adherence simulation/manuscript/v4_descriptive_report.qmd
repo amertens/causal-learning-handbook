@@ -1,0 +1,417 @@
+---
+title: "Descriptive Report: V4 Simplified Adherence Simulation"
+subtitle: "Single Dataset Summary — 90-Day Block DGP"
+author: "HIV Adherence Simulation Project"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: true
+    code-summary: "Show code"
+    theme: cosmo
+    self-contained: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+theme_set(theme_minimal(base_size = 13))
+
+drug_pal <- c("Drug A" = "#2166AC", "Drug B" = "#B2182B")
+
+proj_root <- normalizePath(file.path(getwd(), ".."), winslash = "/")
+source(file.path(proj_root, "R", "sim_v4_dgp.R"))
+
+N_SIM <- 5000
+K     <- 4
+SEED  <- 2024
+
+set.seed(SEED)
+dat <- simulate_v4_data(n = N_SIM, K = K, seed = SEED,
+                        include_censoring = TRUE, return_long = TRUE)
+long <- attr(dat, "long")
+p    <- attr(dat, "dgp_params")
+
+# Convenience labels
+dat$drug <- factor(ifelse(dat$A0 == 1, "Drug A", "Drug B"),
+                   levels = c("Drug A", "Drug B"))
+long$drug <- factor(ifelse(long$A0 == 1, "Drug A", "Drug B"),
+                    levels = c("Drug A", "Drug B"))
+long$block_label <- paste0("Q", long$block)
+```
+
+
+# Cohort Overview
+
+This report describes a single simulated dataset from the V4 data-generating process. The cohort represents patients initiating antiretroviral therapy, randomised 1:1 to Drug A or Drug B, and followed for `r K` quarterly (90-day) blocks.
+
+```{r tbl-overview}
+overview <- data.frame(
+  Characteristic = c("Patients", "Follow-up", "Block length",
+                      "Number of blocks", "Baseline covariate",
+                      "Time-varying covariate"),
+  Value = c(
+    format(nrow(dat), big.mark = ","),
+    paste0(K * 3, " months"),
+    "90 days (1 quarter)",
+    K,
+    "W0 ~ N(0,1) (clinical severity)",
+    "L_t (health status, continuous)"
+  )
+)
+
+kable(overview, col.names = c("Characteristic", "Value"),
+      caption = "Cohort structure") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r tbl-drug-assignment}
+drug_tab <- as.data.frame(table(Drug = dat$drug))
+drug_tab$Pct <- sprintf("%.1f%%", drug_tab$Freq / sum(drug_tab$Freq) * 100)
+
+kable(drug_tab, col.names = c("Initial Regimen", "N", "%"),
+      caption = "Initial drug assignment (randomised 1:1)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+
+# Baseline Covariate
+
+The single baseline covariate $W_0 \sim N(0,1)$ represents underlying clinical severity. Higher values indicate worse health at baseline. Drug assignment ($A_0$) is randomised and independent of $W_0$.
+
+```{r fig-W0, fig.width=7, fig.height=4, fig.cap="Distribution of baseline severity (W0) by drug. Distributions are similar, confirming balanced randomisation."}
+ggplot(dat, aes(x = W0, fill = drug, colour = drug)) +
+  geom_density(alpha = 0.3, linewidth = 0.6) +
+  scale_fill_manual(values = drug_pal) +
+  scale_colour_manual(values = drug_pal) +
+  labs(x = "Baseline severity (W0)", y = "Density",
+       fill = "Drug", colour = "Drug") +
+  theme(legend.position = "bottom")
+```
+
+```{r tbl-W0}
+w0_tab <- data.frame(
+  Drug = c("Drug A", "Drug B"),
+  Mean = c(sprintf("%.2f", mean(dat$W0[dat$A0 == 1])),
+           sprintf("%.2f", mean(dat$W0[dat$A0 == 0]))),
+  SD   = c(sprintf("%.2f", sd(dat$W0[dat$A0 == 1])),
+           sprintf("%.2f", sd(dat$W0[dat$A0 == 0]))),
+  N    = c(sum(dat$A0 == 1), sum(dat$A0 == 0))
+)
+kable(w0_tab, caption = "Baseline severity by drug") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+
+# Adherence (PDC) Distribution
+
+Adherence is measured as the proportion of days covered (PDC) per 90-day block, taking values in $[0, 1]$. PDC is generated from a logit-normal AR(1) process with a subject-specific random intercept.
+
+```{r fig-pdc-density, fig.width=9, fig.height=5, fig.cap="PDC density by drug and quarter. Drug A has lower mean PDC than Drug B."}
+# Use only uncensored observations
+long_obs <- long[!is.na(long$PDC), ]
+
+ggplot(long_obs, aes(x = PDC, fill = drug, colour = drug)) +
+  geom_density(alpha = 0.3, linewidth = 0.6) +
+  facet_wrap(~ block_label, nrow = 1) +
+  scale_x_continuous(labels = scales::percent_format(1)) +
+  scale_fill_manual(values = drug_pal) +
+  scale_colour_manual(values = drug_pal) +
+  labs(x = "Proportion of Days Covered", y = "Density",
+       fill = "Drug", colour = "Drug") +
+  theme(legend.position = "bottom")
+```
+
+Drug A patients have systematically lower PDC than Drug B patients, reflecting the DGP's regimen effect on adherence ($\alpha_A < 0$).
+
+```{r fig-pdc-trend, fig.width=7, fig.height=4, fig.cap="Mean PDC over time by drug (error bars = 95% CI)."}
+pdc_trend <- aggregate(PDC ~ block + drug, data = long_obs,
+                       FUN = function(x) c(mean = mean(x), se = sd(x)/sqrt(length(x))))
+pdc_trend <- do.call(data.frame, pdc_trend)
+names(pdc_trend) <- c("block", "drug", "mean_pdc", "se_pdc")
+
+ggplot(pdc_trend, aes(x = block, y = mean_pdc, colour = drug)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2.5) +
+  geom_errorbar(aes(ymin = mean_pdc - 1.96 * se_pdc,
+                    ymax = mean_pdc + 1.96 * se_pdc), width = 0.1) +
+  scale_x_continuous(breaks = 1:K, labels = paste0("Q", 1:K)) +
+  scale_y_continuous(labels = scales::percent_format(1)) +
+  scale_colour_manual(values = drug_pal) +
+  labs(x = "Quarter", y = "Mean PDC", colour = "Drug") +
+  theme(legend.position = "bottom")
+```
+
+```{r tbl-pdc-summary}
+pdc_tab <- aggregate(PDC ~ block + drug, data = long_obs,
+                     FUN = function(x) c(mean = mean(x), sd = sd(x), n = length(x)))
+pdc_tab <- do.call(data.frame, pdc_tab)
+names(pdc_tab) <- c("block", "drug", "mean", "sd", "n")
+pdc_tab$Quarter <- paste0("Q", pdc_tab$block)
+pdc_tab$`Mean PDC` <- sprintf("%.3f", pdc_tab$mean)
+pdc_tab$SD <- sprintf("%.3f", pdc_tab$sd)
+pdc_tab$N <- as.integer(pdc_tab$n)
+
+kable(pdc_tab[, c("Quarter", "drug", "Mean PDC", "SD", "N")],
+      col.names = c("Quarter", "Drug", "Mean PDC", "SD", "N"),
+      caption = "Mean (SD) PDC by drug and quarter (among observed)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r fig-pdc-categories, fig.width=9, fig.height=5, fig.cap="Adherence category distribution by drug and quarter."}
+long_obs$adh_cat <- factor(
+  ifelse(long_obs$PDC < p$pdc_cut_low, "Low (<65%)",
+  ifelse(long_obs$PDC < p$pdc_cut_high, "Mid (65-85%)", "High (>=85%)")),
+  levels = c("Low (<65%)", "Mid (65-85%)", "High (>=85%)")
+)
+
+adh_prop <- as.data.frame(table(long_obs$block_label, long_obs$drug, long_obs$adh_cat))
+names(adh_prop) <- c("block_label", "drug", "adh_cat", "n")
+adh_prop <- merge(adh_prop,
+                  aggregate(n ~ block_label + drug, data = adh_prop, sum),
+                  by = c("block_label", "drug"), suffixes = c("", "_total"))
+adh_prop$pct <- adh_prop$n / adh_prop$n_total
+
+ggplot(adh_prop, aes(x = block_label, y = pct, fill = adh_cat)) +
+  geom_col(position = "fill") +
+  facet_wrap(~ drug) +
+  scale_y_continuous(labels = scales::percent_format(1)) +
+  scale_fill_manual(values = c("Low (<65%)" = "#D73027",
+                                "Mid (65-85%)" = "#FEE08B",
+                                "High (>=85%)" = "#1A9850")) +
+  labs(x = "Quarter", y = "Proportion", fill = "Adherence\ncategory") +
+  theme(legend.position = "bottom")
+```
+
+Drug A has a larger proportion of patients in the low-adherence category, while Drug B retains more patients at high adherence. This differential adherence is a key feature of the DGP: comparisons between drugs must account for the fact that Drug A patients are less adherent on average.
+
+
+# Time-Varying Covariate
+
+The single time-varying covariate $L_t$ represents current health status. It is affected by prior adherence (lower PDC worsens health) and baseline severity, and in turn affects both future adherence and failure risk. This creates the **time-dependent confounding** that makes naive analyses biased.
+
+```{r fig-L-trend, fig.width=7, fig.height=4, fig.cap="Mean L_t (health status) over time by drug. Higher values indicate worse health."}
+L_trend <- aggregate(L ~ block + drug, data = long_obs,
+                     FUN = function(x) c(mean = mean(x), se = sd(x)/sqrt(length(x))))
+L_trend <- do.call(data.frame, L_trend)
+names(L_trend) <- c("block", "drug", "mean_L", "se_L")
+
+ggplot(L_trend, aes(x = block, y = mean_L, colour = drug)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2.5) +
+  geom_errorbar(aes(ymin = mean_L - 1.96 * se_L,
+                    ymax = mean_L + 1.96 * se_L), width = 0.1) +
+  scale_x_continuous(breaks = 1:K, labels = paste0("Q", 1:K)) +
+  scale_colour_manual(values = drug_pal) +
+  labs(x = "Quarter", y = "Mean L_t (health status)", colour = "Drug") +
+  theme(legend.position = "bottom")
+```
+
+```{r fig-L-by-adh, fig.width=8, fig.height=5, fig.cap="Mean health status (L_t) at block 2 by prior adherence category (block 1). Poor adherence worsens future health, confirming time-dependent confounding."}
+# L_2 by PDC_cat_1
+if (K >= 2) {
+  sub <- long_obs[long_obs$block == 2 & !is.na(long_obs$L), ]
+  # Get block 1 adherence for same subjects
+  b1 <- long_obs[long_obs$block == 1, c("id", "PDC_cat")]
+  names(b1)[2] <- "PDC_cat_b1"
+  sub <- merge(sub, b1, by = "id")
+  sub$PDC_cat_b1 <- factor(sub$PDC_cat_b1, levels = c("low", "mid", "high"),
+                            labels = c("Low", "Mid", "High"))
+
+  L_by_adh <- aggregate(L ~ PDC_cat_b1 + drug, data = sub,
+                        FUN = function(x) c(mean = mean(x), se = sd(x)/sqrt(length(x))))
+  L_by_adh <- do.call(data.frame, L_by_adh)
+  names(L_by_adh) <- c("prior_adh", "drug", "mean_L", "se_L")
+
+  ggplot(L_by_adh, aes(x = prior_adh, y = mean_L, fill = drug)) +
+    geom_col(position = "dodge") +
+    geom_errorbar(aes(ymin = mean_L - 1.96 * se_L,
+                      ymax = mean_L + 1.96 * se_L),
+                  position = position_dodge(0.9), width = 0.2) +
+    scale_fill_manual(values = drug_pal) +
+    labs(x = "Block 1 adherence category", y = "Mean L_2 (Block 2 health status)",
+         fill = "Drug") +
+    theme(legend.position = "bottom")
+}
+```
+
+Patients with low prior adherence have substantially worse health status ($L_t$) in subsequent blocks, and this worse health status then suppresses future adherence and increases failure risk. This feedback loop is the mechanism through which naive adherence-stratified analyses become biased.
+
+
+# Censoring
+
+Censoring (loss to follow-up) is informative: patients with worse health and higher baseline severity are more likely to be censored.
+
+```{r fig-censoring, fig.width=8, fig.height=5, fig.cap="Cumulative censoring over time by first-block adherence category and drug."}
+# First-block adherence category
+bl_adh <- dat[, c("id", "drug", "PDC_cat_1")]
+bl_adh$bl_adh_cat <- factor(dat$PDC_cat_1, levels = c("low", "mid", "high"),
+                             labels = c("Low (<65%)", "Mid (65-85%)", "High (>=85%)"))
+
+# Time to censoring
+cens_block <- rep(K + 1, nrow(dat))
+for (t in 1:K) {
+  c_col <- paste0("C_", t)
+  if (c_col %in% names(dat)) {
+    newly_censored <- !is.na(dat[[c_col]]) & dat[[c_col]] == 0 & cens_block > K
+    cens_block[newly_censored] <- t
+  }
+}
+dat$cens_block <- cens_block
+dat$ever_censored <- as.integer(cens_block <= K)
+
+cens_data <- merge(
+  data.frame(id = dat$id, cens_block = dat$cens_block, drug = dat$drug),
+  bl_adh[, c("id", "bl_adh_cat")], by = "id"
+)
+
+# Cumulative censoring by group
+cens_curves <- do.call(rbind, lapply(1:K, function(b) {
+  agg <- aggregate(cens_block ~ drug + bl_adh_cat, data = cens_data,
+                   FUN = function(x) mean(x <= b))
+  agg$block <- b
+  names(agg)[3] <- "cum_cens"
+  agg
+}))
+
+ggplot(cens_curves, aes(x = block, y = cum_cens, colour = bl_adh_cat,
+                         linetype = drug)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = 1:K, labels = paste0("Q", 1:K)) +
+  scale_y_continuous(labels = scales::percent_format(1)) +
+  labs(x = "Quarter", y = "Cumulative censoring",
+       colour = "Block 1 adherence", linetype = "Drug") +
+  theme(legend.position = "bottom")
+```
+
+```{r tbl-censoring}
+cens_tab <- aggregate(ever_censored ~ drug, data = dat,
+                      FUN = function(x) c(n = length(x),
+                                           censored = sum(x),
+                                           pct = sprintf("%.1f%%", mean(x) * 100)))
+cens_tab <- do.call(data.frame, cens_tab)
+names(cens_tab) <- c("Drug", "N", "Censored", "Rate")
+
+kable(cens_tab, caption = "Cumulative censoring by end of follow-up") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Censoring is modest overall but informative: patients with poorer baseline adherence are lost to follow-up at higher rates, biasing the observed population toward more adherent patients at later time points.
+
+
+# Outcome (Virologic Failure)
+
+Virologic failure is an absorbing event: once a patient fails, they remain failed at all subsequent blocks. The failure hazard depends on current adherence, health status, baseline severity, and a drug-by-adherence interaction (Drug A is more forgiving at low PDC).
+
+```{r fig-failure-time, fig.width=7, fig.height=4.5, fig.cap="Cumulative virologic failure over time by drug."}
+fail_cum <- data.frame(block = integer(), drug = character(), cum_fail = numeric())
+for (t in 1:K) {
+  y_col <- paste0("Y_", t)
+  for (d in c("Drug A", "Drug B")) {
+    idx <- dat$drug == d
+    cum_f <- mean(dat[[y_col]][idx] == 1, na.rm = TRUE)
+    fail_cum <- rbind(fail_cum, data.frame(block = t, drug = d, cum_fail = cum_f))
+  }
+}
+
+ggplot(fail_cum, aes(x = block, y = cum_fail, colour = drug)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2.5) +
+  scale_x_continuous(breaks = 1:K, labels = paste0("Q", 1:K)) +
+  scale_y_continuous(labels = scales::percent_format(1)) +
+  scale_colour_manual(values = drug_pal) +
+  labs(x = "Quarter", y = "Cumulative failure proportion", colour = "Drug") +
+  theme(legend.position = "bottom")
+```
+
+```{r fig-failure-adh, fig.width=8, fig.height=5, fig.cap="Cumulative failure by mean adherence stratum and drug. The forgiveness pattern is visible: Drug A has lower failure at low adherence."}
+# Mean PDC across blocks
+pdc_cols <- paste0("PDC_", 1:K)
+dat$mean_pdc <- rowMeans(dat[, pdc_cols], na.rm = TRUE)
+dat$pdc_strat <- cut(dat$mean_pdc,
+                     breaks = c(0, p$pdc_cut_low, p$pdc_cut_high, 1),
+                     labels = c("Low (<65%)", "Mid (65-85%)", "High (>=85%)"),
+                     include.lowest = TRUE)
+
+fail_by_adh <- aggregate(Y_final ~ drug + pdc_strat, data = dat, FUN = mean)
+
+ggplot(fail_by_adh, aes(x = pdc_strat, y = Y_final, fill = drug)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent_format(1)) +
+  scale_fill_manual(values = drug_pal) +
+  labs(x = "Mean adherence stratum", y = "Cumulative failure at end of follow-up",
+       fill = "Drug") +
+  theme(legend.position = "bottom")
+```
+
+```{r tbl-failure}
+fail_tab <- aggregate(Y_final ~ pdc_strat + drug, data = dat,
+                      FUN = function(x) c(n = length(x), fails = sum(x),
+                                           rate = sprintf("%.1f%%", mean(x)*100)))
+fail_tab <- do.call(data.frame, fail_tab)
+names(fail_tab) <- c("Adherence stratum", "Drug", "N", "Failures", "Rate")
+
+kable(fail_tab,
+      caption = "Crude observed failure rates by mean adherence stratum and drug") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+These are **crude** (observed) failure rates stratified by mean observed adherence. They are biased due to time-dependent confounding: patients who maintain low adherence tend to have worse underlying health (higher $L_t$), inflating the apparent risk in the low-adherence stratum. The drug-by-adherence interaction (forgiveness) is visible --- Drug A has lower failure at low adherence --- but the magnitude of the difference is confounded.
+
+
+# Positivity Diagnostics
+
+Static adherence interventions (e.g., "always maintain high adherence for all 4 blocks") require that some subjects naturally follow the regime at every time point. When this proportion becomes very small, the intervention is poorly supported and LTMLE estimates become unstable.
+
+```{r tbl-positivity}
+pos_tab <- data.frame(Drug = character(), Regime = character(),
+                      N_following = integer(), N_total = integer(),
+                      Pct = character(), stringsAsFactors = FALSE)
+
+for (d in c("Drug A", "Drug B")) {
+  idx <- dat$drug == d
+  n_d <- sum(idx)
+  for (tgt in c("high", "mid", "low")) {
+    label <- paste0("Always ", tgt)
+    follows <- rep(TRUE, n_d)
+    for (t in 1:K) {
+      cat_col <- paste0("PDC_cat_", t)
+      vals <- as.character(dat[[cat_col]][idx])
+      follows <- follows & !is.na(vals) & vals == tgt
+    }
+    n_f <- sum(follows)
+    pos_tab <- rbind(pos_tab, data.frame(
+      Drug = d, Regime = label, N_following = n_f, N_total = n_d,
+      Pct = sprintf("%.1f%%", 100 * n_f / n_d), stringsAsFactors = FALSE
+    ))
+  }
+}
+
+kable(pos_tab, caption = "Proportion of subjects naturally following each static regime for all blocks") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  row_spec(which(as.numeric(gsub("%", "", pos_tab$Pct)) < 5), bold = TRUE, color = "#D73027")
+```
+
+Regimes with very few followers (< 5%, highlighted in red) indicate emerging positivity problems. LTMLE estimates for these regimes should be interpreted with caution. This motivates the use of LMTP, which defines interventions relative to each patient's natural adherence and avoids forcing implausible static regimes.
+
+
+# Summary
+
+Key features of this simulated cohort:
+
+- **Balanced drug assignment.** Patients are randomised 1:1 to Drug A and Drug B, so baseline severity is balanced between treatment groups.
+- **Differential adherence by drug.** Drug A patients have lower mean PDC than Drug B patients. Naive drug comparisons must account for this.
+- **Time-dependent confounding.** Poor adherence worsens health ($L_t$), which then suppresses future adherence and increases failure risk. Stratifying by observed adherence conflates the adherence effect with the confounding path through health status.
+- **Drug forgiveness.** Drug A shows lower failure rates at low adherence compared to Drug B. At high adherence, both drugs perform similarly.
+- **Informative censoring.** Loss to follow-up is higher among patients with worse adherence and health, enriching the observed population for more adherent patients.
+- **Positivity concerns for static regimes.** Maintaining extreme adherence patterns (always high or always low) across all 4 blocks is uncommon, especially for certain drug-adherence combinations. Static interventions in these regions are poorly supported.
+
+These features motivate the use of LTMLE (for well-supported categorical regimes) and LMTP (for feasible shifts and matched-adherence comparisons) to recover causal effects while properly handling time-dependent confounding.

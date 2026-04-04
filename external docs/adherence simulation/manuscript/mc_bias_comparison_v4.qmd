@@ -1,0 +1,247 @@
+---
+title: "Monte Carlo Bias Comparison: V4 Simplified Simulation"
+subtitle: "Static L-TMLE vs LMTP Shift vs Naive — Oracle Alignment and Method Validation"
+author: "HIV Adherence Simulation Project"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: true
+    code-summary: "Show code"
+    theme: cosmo
+    fig-width: 10
+    fig-height: 6
+    self-contained: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+theme_set(theme_minimal(base_size = 13))
+
+drug_pal <- c("Drug A" = "#2166AC", "Drug B" = "#B2182B")
+method_pal <- c("Naive" = "#D73027", "L-TMLE" = "#4575B4", "LMTP (+10%)" = "#1A9850")
+
+proj_root <- normalizePath(file.path(getwd(), ".."), winslash = "/")
+mc_dir <- file.path(proj_root, "results", "mc_bias_study")
+```
+
+
+# Estimand Definitions
+
+**Static categorical L-TMLE:** estimate the counterfactual cumulative failure risk under sustained adherence category (low / mid / high) for each drug, over 4 quarterly blocks. The treatment is a 3-level categorical variable (dummy-encoded), not continuous PDC.
+
+**Continuous shift LMTP:** estimate the counterfactual risk under a +10 percentage point PDC shift: $d(\text{PDC}_t) = \min(\text{PDC}_t + 0.10, 1)$. This operates on continuous PDC and uses a modified treatment policy.
+
+**Naive:** condition on observed mean PDC stratum and compute crude failure rates within each drug × stratum. No adjustment for time-dependent confounding.
+
+These are **distinct estimands** — L-TMLE targets a categorical static regime, LMTP targets a feasible shift, and naive conflates the adherence effect with selection.
+
+
+# Oracle Definitions and Alignment
+
+Three oracle variants for the categorical L-TMLE estimand:
+
+| Oracle | Definition | Rationale |
+|--------|-----------|-----------|
+| **Uniform** | PDC drawn $\sim U(\text{lo}, \text{hi})$ within category | Simple, may not match L-TMLE target |
+| **Empirical** (PRIMARY) | PDC drawn from observed within-category distribution | Best match to what categorical L-TMLE targets |
+| **Midpoint** | PDC fixed at category midpoint | Clean positive control, deterministic |
+
+```{r load-results}
+has_results <- file.exists(file.path(mc_dir, "mc_summary.csv"))
+
+if (has_results) {
+  mc_summary <- read.csv(file.path(mc_dir, "mc_summary.csv"), stringsAsFactors = FALSE)
+  mc_raw <- readRDS(file.path(mc_dir, "mc_raw.rds"))
+  oracle_align <- read.csv(file.path(mc_dir, "oracle_alignment.csv"), stringsAsFactors = FALSE)
+  support_diag <- read.csv(file.path(mc_dir, "support_diagnostics.csv"), stringsAsFactors = FALSE)
+  oracle_all <- readRDS(file.path(mc_dir, "oracle_all.rds"))
+
+  B_actual <- max(mc_raw$rep)
+  n_sim <- length(unique(mc_raw$rep))
+  cat(sprintf("Loaded MC results: %d replicates\n", B_actual))
+} else {
+  cat("MC results not found. Run scripts/07_mc_bias_study.R first.\n")
+}
+```
+
+## Oracle alignment table
+
+```{r tbl-oracle-align, eval=has_results}
+oracle_align$diff_emp_unif <- sprintf("%+.4f", oracle_align$oracle_empirical - oracle_align$oracle_uniform)
+oracle_align$diff_emp_mid  <- sprintf("%+.4f", oracle_align$oracle_empirical - oracle_align$oracle_midpoint)
+
+kable(oracle_align, digits = 4,
+      caption = "Oracle values under three definitions. Differences quantify estimand mismatch.") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Primary oracle selection:** The empirical-within-category oracle is used as the primary validation target for categorical L-TMLE. Rationale: when L-TMLE intervenes on a categorical treatment, the within-category PDC distribution that subjects actually experience is the empirical one, not a uniform or deterministic rule.
+
+
+# MC Design
+
+```{r tbl-design, eval=has_results}
+design <- data.frame(
+  Parameter = c("Replicates (B)", "Sample size (n)", "Follow-up blocks (K)",
+                "LMTP shift (delta)", "LTMLE nuisance", "LMTP learners", "LMTP folds"),
+  Value = c(B_actual, "2,000", "4 (90-day blocks)",
+            "+10%", "GLM", "SL.mean + SL.glm + SL.earth", "2")
+)
+kable(design, caption = "Monte Carlo study design") |>
+  kable_styling(bootstrap_options = c("striped"), full_width = FALSE)
+```
+
+
+# Performance Summary
+
+## Main bias table
+
+```{r tbl-main, eval=has_results}
+disp <- mc_summary[, c("drug", "category", "method", "oracle", "mean_est",
+                        "bias", "emp_se", "rmse", "coverage", "n_converged", "n_failed")]
+
+# Clean up labels
+disp$drug <- gsub("_", " ", disp$drug)
+disp$method <- c(naive = "Naive", ltmle = "L-TMLE", lmtp_shift = "LMTP (+10%)")[disp$method]
+disp$coverage <- ifelse(is.na(disp$coverage), "--", sprintf("%.2f", disp$coverage))
+
+kable(disp, digits = 4, row.names = FALSE,
+      col.names = c("Drug", "Category", "Method", "Oracle", "Mean Est",
+                     "Bias", "Emp SE", "RMSE", "Coverage", "N conv", "N fail"),
+      caption = "MC performance summary (primary oracle: empirical within-category)") |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE, font_size = 11) |>
+  row_spec(which(disp$method == "Naive"), background = "#fff3cd") |>
+  row_spec(which(disp$method == "L-TMLE"), background = "#d6eaf8") |>
+  row_spec(which(disp$method == "LMTP (+10%)"), background = "#d4edda")
+```
+
+## Bias by category and drug
+
+```{r fig-bias-boxplot, eval=has_results, fig.width=10, fig.height=6, fig.cap="MC bias distribution by method, category, and drug. Naive (yellow) is consistently biased; L-TMLE (blue) reduces bias; LMTP (green) targets a different estimand."}
+# Map oracle
+get_oracle_fn <- function(drug, category, method) {
+  if (method == "lmtp_shift") return(oracle_all[[paste0("shift_", drug)]])
+  if (method %in% c("ltmle", "naive")) return(oracle_all[[paste0(category, "_", drug, "_empirical")]])
+  NA_real_
+}
+
+mc_raw$truth <- mapply(get_oracle_fn, mc_raw$drug, mc_raw$category, mc_raw$method)
+mc_raw$bias <- mc_raw$estimate - mc_raw$truth
+mc_raw$drug_label <- gsub("_", " ", mc_raw$drug)
+mc_raw$method_label <- factor(
+  c(naive = "Naive", ltmle = "L-TMLE", lmtp_shift = "LMTP (+10%)")[mc_raw$method],
+  levels = c("Naive", "L-TMLE", "LMTP (+10%)"))
+
+plot_data <- mc_raw[mc_raw$converged & !is.na(mc_raw$bias), ]
+
+ggplot(plot_data, aes(x = category, y = bias, fill = method_label)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+  geom_boxplot(outlier.size = 0.5, alpha = 0.7) +
+  facet_wrap(~ drug_label) +
+  scale_fill_manual(values = method_pal) +
+  labs(x = "Adherence category / estimand", y = "Bias (estimate - oracle)",
+       fill = "Method",
+       title = sprintf("MC Bias Comparison (B=%d, n=2000)", B_actual),
+       subtitle = "Primary oracle: empirical within-category") +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1), legend.position = "bottom")
+```
+
+
+# Support / Positivity Diagnostics
+
+```{r tbl-support, eval=has_results}
+kable(support_diag, digits = 1,
+      col.names = c("Drug", "Category", "Mean support (%)", "Min support (%)", "% reps below 5%"),
+      caption = "Support diagnostics for static categorical regimes across MC replicates") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Static regimes with mean support below ~5% (e.g., "always high" for Drug A, "always low" for Drug B) face meaningful positivity strain. L-TMLE still converges but may show wider CIs and some bias. The LMTP shift estimand avoids this problem by staying within observed support.
+
+
+# Bias Across Oracle Variants (L-TMLE only)
+
+```{r tbl-oracle-sensitivity, eval=has_results}
+ltmle_rows <- mc_summary[mc_summary$method == "ltmle" & mc_summary$category != "shift", ]
+if (nrow(ltmle_rows) > 0) {
+  ltmle_rows$bias_vs_uniform  <- ltmle_rows$mean_est - ltmle_rows$oracle_uniform
+  ltmle_rows$bias_vs_empirical <- ltmle_rows$mean_est - ltmle_rows$oracle_empirical
+  ltmle_rows$bias_vs_midpoint <- ltmle_rows$mean_est - ltmle_rows$oracle_midpoint
+
+  disp_ora <- ltmle_rows[, c("drug", "category", "mean_est",
+                              "oracle_uniform", "bias_vs_uniform",
+                              "oracle_empirical", "bias_vs_empirical",
+                              "oracle_midpoint", "bias_vs_midpoint")]
+  disp_ora$drug <- gsub("_", " ", disp_ora$drug)
+
+  kable(disp_ora, digits = 4, row.names = FALSE,
+        col.names = c("Drug", "Cat", "L-TMLE",
+                       "Oracle (U)", "Bias (U)",
+                       "Oracle (E)", "Bias (E)",
+                       "Oracle (M)", "Bias (M)"),
+        caption = "L-TMLE bias under three oracle definitions: Uniform (U), Empirical (E), Midpoint (M)") |>
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                  full_width = FALSE, font_size = 11)
+}
+```
+
+
+# Convergence Report
+
+```{r tbl-convergence, eval=has_results}
+conv_tab <- aggregate(cbind(n_converged, n_failed) ~ method + category,
+                      data = mc_summary[mc_summary$drug == "Drug_A", ],
+                      FUN = sum)
+conv_tab$rate <- sprintf("%.0f%%", 100 * conv_tab$n_converged /
+                           (conv_tab$n_converged + conv_tab$n_failed))
+kable(conv_tab, col.names = c("Method", "Category", "Converged", "Failed", "Rate"),
+      caption = "Convergence rates (Drug A shown; Drug B similar)") |>
+  kable_styling(bootstrap_options = c("striped"), full_width = FALSE)
+```
+
+
+# Talk-Ready Summary
+
+```{r tbl-talk-summary, eval=has_results}
+# Compact table for slides
+talk_rows <- mc_summary[, c("drug", "category", "method", "oracle",
+                             "mean_est", "bias", "rmse", "n_converged")]
+talk_rows$drug <- gsub("_", " ", talk_rows$drug)
+talk_rows$method <- c(naive = "Naive", ltmle = "L-TMLE",
+                       lmtp_shift = "LMTP (+10%)")[talk_rows$method]
+
+kable(talk_rows, digits = 3, row.names = FALSE,
+      col.names = c("Drug", "Category", "Method", "Oracle", "Mean Est",
+                     "Bias", "RMSE", "N"),
+      caption = "Talk-ready MC summary") |>
+  kable_styling(bootstrap_options = c("striped", "condensed"),
+                full_width = FALSE, font_size = 11) |>
+  row_spec(which(talk_rows$method == "Naive"), background = "#fff3cd") |>
+  row_spec(which(talk_rows$method == "L-TMLE"), background = "#d6eaf8") |>
+  row_spec(which(talk_rows$method == "LMTP (+10%)"), background = "#d4edda")
+```
+
+
+# Interpretation
+
+1. **Naive adherence-stratified analyses are biased** under the V4 DGP's time-dependent confounding. The bias is largest in the low-adherence stratum where selection effects are strongest.
+
+2. **Static categorical L-TMLE substantially reduces bias** relative to naive analysis when the regime is well-supported. Residual bias relative to the empirical oracle reflects the difficulty of the categorical intervention under sparse support and potential model misspecification.
+
+3. **LMTP shift estimates are approximately unbiased** once the oracle correctly propagates the intervention through the AR(1) adherence process. Early results showed apparent bias of 1.5--2.4 pp, which was traced to the oracle simulation using the *natural* latent adherence propensity rather than the *realised* (shifted) propensity for the AR(1) feedback. After correction, bias is approximately 0.3--0.4 pp. Coverage remains below nominal (62--77%) because influence-function-based standard errors underestimate variability when nuisance models are imperfect.
+
+4. **MARS-based learners reduce LMTP bias.** A learner comparison study showed that replacing GLM-only with a SuperLearner ensemble including MARS (`SL.earth`) reduced LMTP shift bias from approximately 2--4 pp to approximately 0.5--1.4 pp (before the oracle fix further reduced apparent bias).
+
+5. **Support diagnostics confirm** that extreme static regimes (always-low for the higher-adherence drug, always-high for the lower-adherence drug) face positivity strain, which inflates variance and can introduce bias.
+
+6. **Oracle alignment matters.** The choice of within-category oracle (uniform vs empirical vs midpoint) can shift the apparent bias by several percentage points. The empirical-within-category oracle is the most appropriate match for the categorical L-TMLE estimand. Similarly, the LMTP shift oracle must correctly propagate the intervention through the full data-generating process, including the AR(1) adherence persistence structure.

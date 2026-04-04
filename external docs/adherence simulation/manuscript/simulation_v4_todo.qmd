@@ -1,0 +1,256 @@
+---
+title: "Simulation V4 — Improvement To-Do List"
+subtitle: "Planned changes to the DGP, estimation, and extensions"
+author: "HIV Adherence Simulation Project"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    theme: cosmo
+    self-contained: true
+---
+
+# Priority 1: Make virologic failure non-absorbing (Y1 -> PDC2 feedback) {#sec-nonabsorbing}
+
+## Current behaviour
+
+In `sim_v4_dgp.R`, virologic failure `Y_t` is **absorbing**: once `Y_t = 1`, the `failed` flag is set, all subsequent `L`, `PDC`, and `Y` nodes are either `NA` or carried forward as `1`. The ltmle call uses `survivalOutcome = TRUE`.
+
+This means `Y1 -> PDC2` exists in the DAG only through survival selection (patients who failed are removed from future blocks), not as a genuine causal feedback path.
+
+## What to change
+
+Make `Y_t` a **repeated binary outcome** (virologic failure = VL > threshold at block t). A patient who fails at block 1 can re-suppress at block 2 if adherence improves. This allows:
+
+- `Y_{t-1} -> L_t`: prior failure worsens health status
+- `Y_{t-1} -> PDC_t`: prior failure changes adherence (could go either way — disengagement vs. renewed effort)
+- `Y_{t-1} -> Y_t`: persistence of failure (but not deterministic)
+
+### DGP changes (`sim_v4_dgp.R`)
+
+1. **Remove the `failed` absorbing flag.** Delete lines that set `failed[...] <- TRUE` and all `if (!failed)` guards. Every patient contributes data at every block (unless censored).
+
+2. **Add `Y_{t-1}` feedback into `L_t` generation.** Currently:
+   ```r
+   # Line 125-127
+   L_mat[, t] <- p$beta0 + p$betaW * W0 + p$betaA * A0 +
+     p$betaLag * L_mat[, t - 1] +
+     p$betaP * (1 - PDC_mat[, t - 1]) + noise_L
+   ```
+   Add a new parameter `betaY` and include `Y_{t-1}`:
+   ```r
+   L_mat[, t] <- p$beta0 + p$betaW * W0 + p$betaA * A0 +
+     p$betaLag * L_mat[, t - 1] +
+     p$betaP * (1 - PDC_mat[, t - 1]) +
+     p$betaY * Y_mat[, t - 1] +    # NEW: prior failure worsens health
+     noise_L
+   ```
+   Suggested default: `betaY = 0.50` (prior failure substantially worsens health).
+
+3. **Add `Y_{t-1}` feedback into `PDC_t` generation.** Currently the adherence latent propensity uses `L_{t-1}` but not `Y_{t-1}`. Add a new parameter `alphaY`:
+   ```r
+   eta_mat[, t] <- (1 - p$rho) * mu_i +
+     p$rho * eta_mat[, t - 1] +
+     p$alphaL * L_mat[, t - 1] +
+     p$alphaY * Y_mat[, t - 1] +   # NEW: prior failure affects adherence
+     noise_e
+   ```
+   Suggested default: `alphaY = -0.40` (prior failure reduces adherence — disengagement). Could also test positive values (renewed effort after failure).
+
+4. **Change `Y_t` generation to be non-absorbing.** Remove the "carry forward failure" block (lines 199-202). Every block independently generates `Y_t` based on current `L_t`, `PDC_t`, and prior `Y_{t-1}`:
+   ```r
+   lp_fail <- p$gamma0 +
+     p$gammaL * L_mat[, t] +
+     p$gammaW * W0 +
+     p$gammaP * (1 - PDC_mat[, t]) +
+     p$gammaA * A0 +
+     p$gammaAP * A0 * (1 - PDC_mat[, t]) +
+     p$gammaY * Y_mat[, t - 1]     # NEW: persistence of failure
+   ```
+   Suggested default: `gammaY = 1.50` (strong persistence — prior failure raises current failure risk, but recovery is possible).
+
+5. **Redefine `Y_final`.** Currently `Y_final = 1` if any `Y_t = 1`. Options:
+   - `Y_final = Y_K` (failure status at last block)
+   - `Y_final = mean(Y_1, ..., Y_K) > 0.5` (majority of blocks in failure)
+   - `Y_final = any(Y_t == 1)` (ever failed — cumulative incidence, same as now)
+
+   **Recommendation:** Use `Y_final = Y_K` (point prevalence at end of follow-up) as the primary estimand. Add `Y_ever = max(Y_1, ..., Y_K)` as a secondary.
+
+### Estimation changes
+
+6. **LTMLE (`prepare_ltmle_v4.R`)**: Set `survivalOutcome = FALSE`. The Q-model for `Y_t` should now also condition on `Y_{t-1}`. Update `make_ltmle_formulas_v4()`:
+   ```r
+   # Q-model: Y_t ~ W0 + L_t + Acat2_t + Acat3_t + Y_{t-1}
+   q_list[Y_t] <- sprintf("Q.kplus1 ~ W0 + %s + %s + %s + %s",
+                           L_t, A2_t, A3_t, Y_prev)
+   ```
+
+7. **LMTP (`prepare_lmtp_v4.R`)**: The lmtp package handles repeated outcomes naturally. Verify that `Y_{t-1}` is included as a time-varying covariate in the node list, not as an outcome node.
+
+8. **Oracle functions (`oracle_v4.R`)**: All oracle functions that simulate interventional data need to use the non-absorbing DGP. The `simulate_v4_interventional()` helper needs the same changes as above.
+
+### Validation
+
+9. Run the full MC study with the non-absorbing DGP and verify:
+   - LTMLE bias is still small under GLM nuisance
+   - LMTP shift estimates remain approximately unbiased
+   - Naive bias is still present (and may be larger due to additional confounding through `Y_{t-1}`)
+
+10. Compare results between absorbing and non-absorbing to see how much it matters empirically.
+
+
+# Priority 2: Temporal ordering within blocks {#sec-temporal}
+
+## Current issue
+
+The current DGP generates `L_t` first, then `PDC_t`, but the adherence model uses `L_{t-1}` (not `L_t`) to affect `PDC_t`. This means within a block, `L_t` does **not** cause `PDC_t` — they are conditionally independent given `L_{t-1}`. The only within-block path is `L_t -> Y_t` and `PDC_t -> Y_t`.
+
+This is noted in the code comments (lines 142-155) but is **inconsistent with the DAG shown in the presentation**, which has `L_t -> PDC_t` within each period.
+
+## Options
+
+a. **Make the DAG match the code** — update the DAG to show `L_{t-1} -> PDC_t` (cross-period) instead of `L_t -> PDC_t` (within-period). Simpler, no code change needed.
+
+b. **Make the code match the DAG** — change the adherence model to use `L_t` instead of `L_{t-1}`:
+   ```r
+   eta_mat[, t] <- (1 - p$rho) * mu_i +
+     p$rho * eta_mat[, t - 1] +
+     p$alphaL * L_mat[, t] +    # CHANGED: use current L_t
+     noise_e
+   ```
+   This creates a within-block `L_t -> PDC_t` path. Requires ensuring `L_t` is generated before `PDC_t` (already the case). But changes the confounding structure — the g-model for LTMLE must then condition on `L_t`, not just `L_{t-1}`.
+
+## Recommendation
+
+Option (b) is more realistic (current health affects current adherence) and matches the presentation DAG. The code already generates `L_t` before `PDC_t`, so the temporal ordering is correct. The LTMLE node structure already has `L_t` as a confounder before `Acat_t`, which is consistent.
+
+
+# Priority 3: Add drug effect on adherence to the DGP {#sec-drug-adherence}
+
+## Current issue
+
+The presentation (Slide 8) mentions "add plausible pathway through which treatment changes adherence" — but the current DGP already has `alphaA = -0.35` (Drug A lowers adherence). However, this is a **baseline** effect only; it doesn't vary over time.
+
+## Suggested improvement
+
+Add a time-varying drug-adherence interaction that depends on health status:
+```r
+# Patients on Drug A who get sicker disengage faster
+p$alphaAL <- -0.15  # Drug A x L interaction on adherence
+# In the adherence model:
+eta_mat[, t] <- ... + p$alphaAL * A0 * L_mat[, t - 1]
+```
+
+This creates a pathway `A0 -> PDC_t` that is **moderated by health** — making the mediation analysis (Slide 17) more interesting.
+
+
+# Priority 4: Informative monitoring {#sec-monitoring}
+
+## Current gap
+
+The presentation (Slide 16) mentions informative monitoring as an intercurrent event, but the DGP does not simulate monitoring intensity. In real EHR data, sicker patients are monitored more often, which creates ascertainment bias.
+
+## Suggested implementation
+
+Add a monitoring indicator `M_t` per block:
+```r
+# Monitoring intensity (binary: 1 = monitored this block)
+lp_monitor <- p$mon0 + p$monL * L_mat[, t] + p$monPDC * (1 - PDC_mat[, t])
+M_mat[, t] <- rbinom(n, 1, plogis(lp_monitor))
+```
+
+- `Y_t` is only **observed** when `M_t = 1`; otherwise `Y_t = NA`
+- This creates informative observation: sicker patients are more likely to be monitored and to have failure detected
+- L-TMLE can handle this via IPCW (inverse probability of monitoring weighting)
+
+Suggested defaults: `mon0 = 1.0` (most patients monitored), `monL = 0.50` (sicker -> more monitoring), `monPDC = 0.30` (lower adherence -> more monitoring).
+
+
+# Priority 5: Treatment switching {#sec-switching}
+
+## Current gap
+
+The DGP has a fixed treatment assignment `A0` for the entire follow-up. In real data, patients switch regimens based on failure, side effects, or clinical decisions.
+
+## Suggested implementation
+
+Add a switching indicator `S_t` per block (after `Y_t`):
+```r
+# Switching probability (only if on current regimen)
+lp_switch <- p$sw0 + p$swY * Y_mat[, t] + p$swL * L_mat[, t]
+S_mat[, t] <- rbinom(n, 1, plogis(lp_switch))
+# After switching, drug assignment changes for subsequent blocks
+A_mat[, t + 1] <- ifelse(S_mat[, t] == 1, 1 - A_mat[, t], A_mat[, t])
+```
+
+This makes `A_t` time-varying (not just baseline `A0`), which substantially complicates estimation but is more realistic.
+
+**Note:** This is a major extension. Consider implementing as a separate V5 or as an optional flag in the DGP.
+
+
+# Priority 6: Competing risks {#sec-competing}
+
+## Current gap
+
+The presentation mentions competing risks (death precludes failure observation). The current DGP has no death/competing event.
+
+## Suggested implementation
+
+Add a death indicator `D_t` per block:
+```r
+lp_death <- p$death0 + p$deathL * L_mat[, t] + p$deathW * W0
+D_mat[, t] <- rbinom(n, 1, plogis(lp_death))
+```
+
+- Death is truly absorbing (unlike non-absorbing VF)
+- After `D_t = 1`, all subsequent nodes are `NA`
+- L-TMLE treats death as a censoring event or estimates cause-specific risks
+
+Suggested defaults: `death0 = -5.0` (very rare), `deathL = 0.40`, `deathW = 0.20`.
+
+
+# Priority 7: Longer follow-up and more realistic timeline {#sec-timeline}
+
+## Current limitation
+
+K = 4 blocks (12 months). Real HIV studies often follow patients for 2-5 years. Consider:
+
+- K = 8 (24 months) as the default
+- K = 12 (36 months) as a longer-term analysis
+- Monthly blocks instead of quarterly (K = 36 for 3 years) — but this increases computational cost substantially
+
+## Trade-off
+
+More blocks = more positivity strain for static regimes, more computation for LTMLE/LMTP. Start with K = 8 and benchmark runtime.
+
+
+# Priority 8: Plasmode simulation from real data {#sec-plasmode}
+
+## Purpose
+
+The presentation (Slide 19) mentions "outcome-blind plasmode simulation in the real data." This is a bridge between the fully synthetic DGP and real-data analysis.
+
+## Implementation sketch
+
+1. Take the real EHR dataset (covariate and treatment process)
+2. Simulate outcomes under a known DGP using the real covariates
+3. Apply LTMLE/LMTP to the plasmode data
+4. Compare estimates to the known truth
+
+This requires access to the real dataset. Create a `simulate_plasmode_v4()` function that takes a real data frame and overlays synthetic outcomes.
+
+
+# Summary table
+
+| Priority | Task | Complexity | Impact |
+|----------|------|-----------|--------|
+| 1 | Non-absorbing Y (Y1 -> PDC2 feedback) | Medium | High — changes estimand and enables richer confounding |
+| 2 | Fix temporal ordering (L_t -> PDC_t within block) | Low | Medium — aligns code with DAG |
+| 3 | Drug x health interaction on adherence | Low | Medium — enriches mediation pathway |
+| 4 | Informative monitoring | Medium | High — realistic EHR feature |
+| 5 | Treatment switching | High | High — major extension, time-varying treatment |
+| 6 | Competing risks (death) | Low | Medium — straightforward addition |
+| 7 | Longer follow-up (K = 8+) | Low | Low — parameter change only |
+| 8 | Plasmode simulation | Medium | High — bridge to real data |
