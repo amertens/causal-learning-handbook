@@ -9,24 +9,26 @@ format: html
 
 ## Abstract
 
-Interactions are among the most clinically interesting and methodologically
-treacherous quantities in real-world evidence (RWE) research. Clinicians want
-to know whether a drug works equally well across patient subgroups; public
-health planners want to know whether two exposures combine to produce more
-harm than the sum of their parts. Yet the literature is full of analyses that
-report a single product-term coefficient from a logistic or Cox model and
-treat it as the answer. This chapter argues for a different starting point.
-Interaction analyses should begin with a precisely defined causal estimand
-on a meaningful scale, anchored in a target trial protocol, and estimated
-with methods that respect the complexity of observational data. Targeted
-learning---combining flexible nuisance estimation through Super Learner
-[@vanderLaan2007superlearner] with the targeting and influence-function inference
-of TMLE [@vanderLaan2006tmle]---is particularly well suited to this task.
-We work through one binary point-treatment example with TMLE plus Super
-Learner, scaffold a CTMLE sensitivity analysis, sketch a longitudinal
-extension with LTMLE, and close with a checklist that aligns with current
-best-practice recommendations [@talbot2025tmle; @vanderweele2014tutorial;
-@basten2025additive].
+Interactions are among the most clinically interesting and the most
+methodologically demanding quantities in real-world evidence research.
+Clinicians want to know whether a drug works equally well across patient
+subgroups. Public-health planners want to know whether two exposures
+combine to produce more harm than the sum of their parts. Many published
+analyses answer these questions by reporting a single product-term
+coefficient from a logistic or Cox model. This chapter argues for a
+different starting point. Interaction analyses should begin with a
+clearly defined causal estimand on a meaningful scale, anchored in a
+target trial protocol, and should be estimated with methods that respect
+the complexity of observational data. Targeted learning — flexible
+nuisance estimation through Super Learner [@vanderLaan2007superlearner]
+combined with the targeting step and influence-function inference of
+TMLE [@vanderLaan2006tmle] — is particularly well suited to this task.
+The chapter walks through a binary point-treatment example with TMLE and
+Super Learner, scaffolds a collaborative TMLE sensitivity analysis,
+sketches a longitudinal extension using LTMLE and TMLE for marginal
+structural models, and closes with a reporting checklist that aligns
+with current best-practice recommendations
+[@talbot2025tmle; @vanderweele2014tutorial; @basten2025additive].
 
 ::: {.callout-tip}
 ## Key takeaways
@@ -71,11 +73,32 @@ knitr::opts_chunk$set(
 ## 1. Why interaction matters in epidemiology and real-world evidence
 
 A single average treatment effect is rarely the end of a clinically useful
-analysis. Two questions almost always follow. *Does the effect differ across
-patient groups?* And *do two exposures combine in ways that one alone would
-not predict?* Both questions are about interaction in a broad sense, but
-they are not the same question, and the methods that answer them are not
-identical.
+analysis. Two follow-up questions almost always arise. *Does the effect
+differ across patient groups?* And *do two exposures combine in ways that
+one alone would not predict?* Both questions are about interaction in a
+broad sense, but they are not the same question, and the methods that
+answer them are not identical.
+
+::: {.callout-note}
+## Scope of this chapter
+This chapter focuses on **causal interaction**: the joint effect of two
+manipulable exposures, and the contrast of subgroup-specific effects when
+that contrast is itself the scientific target. The companion chapter,
+[Effect Modification and Heterogeneous Treatment Effects](03-04-effect-modification.qmd),
+covers the closely related but distinct question of how the effect of a
+single treatment varies across baseline covariates (the CATE), with tools
+including TMLE for prespecified subgroups, causal forests, and treatment-effect
+variable importance.
+
+The two chapters are designed to be read together. Effect modification
+asks *who benefits more from one treatment*; interaction asks *how two
+exposures combine*.
+
+**Single time-point analyses** occupy Sections 1 through 10. **Time-varying
+treatment, longitudinal interactions, and marginal structural models** are
+concentrated in Section 11, and should be read after the single time-point
+material is comfortable. Section 12 closes the chapter.
+:::
 
 Several closely related ideas are routinely conflated in published work.
 Disentangling them is the first task of any chapter on interactions.
@@ -99,11 +122,12 @@ Disentangling them is the first task of any chapter on interactions.
   prespecified strata. It is the *vehicle* for studying effect modification,
   but a list of subgroup point estimates is not by itself a heterogeneity
   test.
-- **Predictive heterogeneity** or **individualized treatment effects** refer
-  to algorithms that learn high-dimensional functions of covariates to
-  predict who benefits. These are useful for treatment-rule discovery but
-  should not be confused with the inferential, low-dimensional questions
-  most epidemiologic interaction analyses address.
+- **Predictive heterogeneity** refers to algorithms that learn high-dimensional
+  functions of covariates to predict who benefits — for example, the conditional
+  average treatment effect surface produced by a causal forest. These tools are
+  covered in the companion [Effect Modification](03-04-effect-modification.qmd)
+  chapter and should not be confused with the inferential, low-dimensional
+  interaction parameters that are the focus of this chapter.
 
 A second motivation for taking interaction seriously is **scale dependence**.
 A cohort study may find that an antihypertensive halves stroke risk in
@@ -122,35 +146,35 @@ work---exactly the settings where interaction questions are most common.
 
 ### Why interaction matters in practice
 
-Interaction is not an academic embellishment of an average effect; it is
-the analytic foundation for several of the most important applied
+Interaction is not an academic embellishment of an average effect. It
+is the analytic foundation for several of the most important applied
 questions in modern epidemiology and clinical practice.
 
 - **Treatment targeting.** When the absolute benefit of a treatment is
   much larger in one subgroup than another, fixed budgets and finite
-  clinic time make subgroup-aware deployment a matter of efficiency,
-  not of precision medicine ideology. Statins offered to high-risk
-  patients prevent more events per prescription than the same drug
-  offered uniformly. The interaction analysis that quantifies "much
-  larger" is what turns "treatment works on average" into "treat these
-  patients first."
-- **Policy heterogeneity.** Public-health interventions almost never
-  have uniform effects across regions, age groups, or baseline-risk
-  strata. A vaccination campaign that reduces hospitalization by 10
-  percentage points among the elderly and 1 percentage point among the
-  young calls for a different roll-out plan than one with uniform 5.5
+  clinic time turn subgroup-aware deployment into a matter of
+  efficiency. Statins offered to high-risk patients prevent more events
+  per prescription than the same drug offered uniformly. Interaction
+  estimates are what turn "treatment works on average" into "treat
+  these patients first."
+- **Policy heterogeneity.** Public-health interventions rarely have
+  uniform effects across regions, age groups, or baseline-risk strata.
+  A vaccination campaign that reduces hospitalisation by 10 percentage
+  points among the elderly and 1 percentage point among the young
+  calls for a different roll-out plan than one with uniform 5.5
   percentage-point effects. Interaction estimates inform where to
-  invest the next dollar.
-- **Personalized medicine.** Conditional treatment effect estimates,
-  built from interaction analyses, are the input to optimal individual
-  treatment rules: assign treatment $A$ to person $i$ if and only if the
-  estimated benefit at $W_i$ exceeds the cost. This is the formal
-  bridge from interaction analysis to the optimal-regime literature
-  covered later in the handbook.
+  invest the next public-health dollar.
+- **Joint-exposure aetiology.** When two exposures may share a
+  biological pathway — environmental tobacco smoke and occupational
+  asbestos, for example — interaction analyses on the additive scale
+  carry information about whether the combined exposure produces
+  excess events beyond what either alone predicts. That information
+  matters for screening, regulation, and aetiologic theory.
 
-The common thread is that *interaction estimates produce decisions, not
-just descriptions*. That is why the rest of this chapter spends so much
-energy on getting the estimand, the scale, and the uncertainty right.
+The common thread is that interaction estimates inform decisions and
+explanations, not just summaries. That is why the rest of this chapter
+spends so much energy on getting the estimand, the scale, and the
+uncertainty right.
 
 ### Interaction vs. effect modification
 
@@ -502,75 +526,78 @@ manufacture identifiability that the data do not support.
 
 ## 4. Why targeted learning is useful for interaction estimation
 
-Targeted learning is the combination of (a) flexible, data-adaptive
-nuisance estimation through Super Learner and (b) targeted maximum
+Targeted learning combines two ideas. The first is flexible, data-adaptive
+nuisance estimation through Super Learner. The second is targeted maximum
 likelihood estimation (TMLE), which adjusts the nuisance estimates so that
-the resulting plug-in estimate is unbiased for the causal parameter of
-interest [@vanderLaan2006tmle; @vanderLaan2007superlearner]. Three features make
-it especially well suited to interaction analyses.
+the resulting plug-in is approximately unbiased for the causal parameter
+of interest [@vanderLaan2006tmle; @vanderLaan2007superlearner]. Three
+features of this combination make it especially well suited to
+interaction analyses.
 
 ### Super Learner in plain English
 
-Super Learner is a stacked ensemble. You provide a *library* of candidate
-algorithms---perhaps a logistic regression, a penalized regression, a
-random forest, gradient boosting, and a simple intercept-only baseline---
-and Super Learner uses cross-validation to compute a weighted combination
-that minimizes prediction risk. The learner is guaranteed (in large
-samples) to perform at least as well as the best single algorithm in the
-library [@vanderLaan2007superlearner]. For interaction analyses, this matters
-because nuisance functions inside subgroups can have very different
-shapes; an ensemble accommodates that heterogeneity without forcing the
-analyst to commit to one functional form.
+Super Learner is a stacked ensemble. The analyst supplies a *library* of
+candidate algorithms — for example a logistic regression, a penalised
+regression, a random forest, gradient boosting, and a simple
+intercept-only baseline — and Super Learner uses cross-validation to
+compute a weighted combination that minimises prediction risk. In large
+samples, this combination is guaranteed to perform at least as well as
+the best single algorithm in the library [@vanderLaan2007superlearner].
+For interaction analyses this property matters because the shape of the
+outcome regression can be very different inside different subgroups, and
+an ensemble accommodates that heterogeneity without forcing the analyst
+to commit to one functional form.
 
 ### TMLE in plain English
 
-TMLE has two stages.
+TMLE proceeds in two stages.
 
 1. **Estimate the nuisance functions flexibly.** Fit an outcome regression
-   $\bar{Q}(A,W) = E[Y \mid A,W]$ and a propensity score $g(W) = P(A=1 \mid W)$,
-   typically using Super Learner.
+   $\bar{Q}(A,W) = E[Y \mid A,W]$ and a propensity score
+   $g(W) = P(A=1 \mid W)$, typically using Super Learner.
 2. **Target the estimate.** Update the outcome regression using a small
-   parametric correction (often called the *clever covariate* or *targeting
-   step*) so that the resulting plug-in estimate solves the efficient
-   influence function equation for your target parameter.
+   parametric correction (often called the *clever covariate* or
+   *targeting step*) so that the resulting plug-in estimate solves the
+   efficient influence-function equation for the target parameter.
 
-The substitution principle---computing the target as a function of the
-updated regression---means TMLE produces a parameter estimate that lives
-on the natural parameter space (a probability between 0 and 1, a positive
-risk ratio, etc.). That property is particularly attractive for subgroup
-analyses, where unconstrained estimators can occasionally produce
-nonsensical numbers in small strata.
+The substitution principle — computing the target as a function of the
+updated regression — means that TMLE produces a parameter estimate that
+lives on the natural parameter space, such as a probability between 0
+and 1 or a positive risk ratio. That property is particularly attractive
+for subgroup analyses, where unconstrained estimators can occasionally
+produce nonsensical numbers in small strata.
 
 ### Double robustness
 
-TMLE is **doubly robust** in the sense that it remains consistent for the
-target causal parameter as long as *either* the outcome regression *or*
-the propensity score is consistently estimated. In an interaction context,
-that means the analyst gets two independent chances to control confounding
-inside each subgroup---a real safety margin when modifier strata are small
-and either nuisance model can be unstable.
+TMLE is **doubly robust**: it remains consistent for the target causal
+parameter as long as either the outcome regression or the propensity
+score is consistently estimated. In an interaction analysis, this means
+that the analyst has two independent chances to control confounding
+inside each subgroup. That safety margin is real, because modifier
+strata are often small and either nuisance model can be unstable inside
+them.
 
 ### Influence-function-based inference
 
 Once the targeting step is complete, the variance of the TMLE can be
-estimated from the empirical influence function (essentially, the
-contribution of each observation to the parameter estimate). Confidence
-intervals are then standard Wald intervals on the appropriate scale. The
-attractive feature is that the same machinery extends to *contrasts of*
+estimated from the empirical influence function — essentially, the
+contribution of each observation to the parameter estimate. Confidence
+intervals are then standard Wald intervals on the appropriate scale. A
+useful consequence is that the same machinery extends to *contrasts of*
 TMLE estimates across subgroups, because the influence function of a
 contrast is a difference of influence functions.
 
 ### When to escalate: cross-fitting, CV-TMLE, drtmle
 
-When learner libraries become aggressive (deep ensembles, many tree-based
-learners, high-dimensional features), the regularity conditions that
-underpin standard influence-function inference can become hard to verify.
-**Cross-fitting** estimates each nuisance function on data that excludes
-the observation being predicted; **CV-TMLE** integrates that splitting
-into the targeting step; and `drtmle` provides additional robustness
-properties under adaptive nuisance estimation. These tools should be on
-the analyst's radar but are not essential for a first interaction
-analysis.
+When the Super Learner library becomes aggressive — deep ensembles, many
+tree-based learners, or high-dimensional features — the regularity
+conditions that underpin standard influence-function inference can be
+difficult to verify. **Cross-fitting** estimates each nuisance function
+on data that excludes the observation being predicted, **CV-TMLE**
+integrates that splitting into the targeting step, and `drtmle` provides
+additional robustness properties under adaptive nuisance estimation.
+These tools should be on the analyst's radar but are not essential for
+a first interaction analysis.
 
 ### From estimand to estimator: practical workflow
 
@@ -669,10 +696,11 @@ the sample is large enough to support data splitting.
 
 ## 5. Additive and multiplicative interaction in practice
 
-The single most important recommendation in the VanderWeele and Knol
-tutorial [-@vanderweele2014tutorial] is to report both scales whenever the
-outcome and data permit. Scale dependence is not a methodological detail;
-it is a substantive claim about how the world is supposed to combine.
+The most important recommendation in the VanderWeele and Knol tutorial
+[-@vanderweele2014tutorial] is to report both scales whenever the
+outcome and data permit. Scale dependence is not a methodological
+detail. It is a substantive claim about how two exposures combine to
+produce risk.
 
 ### When additive interaction is preferable for public-health decisions
 
@@ -1268,117 +1296,7 @@ estimator.
 
 ---
 
-## 8. Time-varying treatment and longitudinal extensions
-
-The point-treatment example assumes a single treatment decision at
-baseline. Many real-world questions involve treatment regimens that
-evolve over time, with intermediate covariates that are simultaneously
-confounders and consequences of earlier treatment. In that setting,
-baseline-only TMLE is no longer sufficient.
-
-### When you need longitudinal methods
-
-You need longitudinal targeted learning when at least one of the
-following is true:
-
-- Treatment can change after baseline (initiation, discontinuation,
-  switching).
-- Censoring is informative and is influenced by time-varying covariates.
-- Time-varying confounders are themselves affected by past treatment
-  (e.g., blood pressure during a hypertension trial).
-
-For interactions specifically, the question now becomes: *Does the effect
-of a sustained treatment strategy differ across baseline strata?* The
-modifier $M$ should still be **baseline**, well-measured, and adequately
-supported across treatment histories.
-
-### LTMLE skeleton
-
-`ltmle` implements longitudinal TMLE for sequential treatment and
-censoring nodes. It accepts a Super Learner library and supports both
-static and dynamic intervention rules.
-
-```{r}
-#| label: ltmle-sketch
-#| eval: false
-
-library(ltmle)
-
-# Sketch only: the data 'long_dat' is in wide format with
-# baseline covariates, time-varying covariates L1..L3,
-# treatments A1..A3, and outcome Y at the final time
-
-fit_ltmle <- ltmle(
-  data       = long_dat,
-  Anodes     = c("A1", "A2", "A3"),
-  Lnodes     = c("L1", "L2", "L3"),
-  Ynodes     = "Y",
-  abar       = list(c(1, 1, 1), c(0, 0, 0)),
-  SL.library = c("SL.mean", "SL.glm", "SL.glmnet", "SL.ranger")
-)
-
-summary(fit_ltmle)
-```
-
-To estimate baseline-modifier-specific effects, fit `ltmle` separately
-within each level of $M$ and contrast the resulting counterfactual means.
-Alternatively, use a TMLE for a marginal structural model (MSM) with $M$
-entering as an effect modifier in the MSM. Either approach respects the
-time-varying confounding while preserving the subgroup structure.
-
-::: {.callout-tip}
-## How to explain this to a non-methodologist
-"When treatment can change month to month and intermediate health
-markers both depend on past treatment and predict future treatment, a
-single baseline analysis is no longer enough. The longitudinal version
-of TMLE walks through the data one time step at a time, adjusting at
-each step for what changed before."
-:::
-
-::: {.callout-note}
-## What this means in practice
-For sustained-treatment questions with subgroup contrasts, fit LTMLE
-within each modifier stratum and report the cell-specific
-counterfactual outcomes (e.g., one-year survival under "always treat"
-versus "never treat" within each subgroup). Subgroup-specific dynamic
-strategies require careful positivity diagnostics across treatment
-histories.
-:::
-
-### Flexible estimands beyond binary $A$ and $E$
-
-The estimands defined in Section 2 assume binary exposures. In real-world
-evidence, exposures are often continuous (dose, duration, intensity), and
-joint positivity for any single value of a continuous exposure is
-typically zero. The remedy is to redefine the estimand in terms of
-**modified treatment policies** (MTPs): hypothetical interventions that
-*shift* observed exposure rather than fix it at a value
-[@diaz2021lmtp]. The interaction question then becomes:
-
-> *Does the effect of shifting $A$ depend on the level (or shift) of $E$?*
-
-An MTP-based interaction parameter contrasts the counterfactual mean
-under a paired shift in $(A, E)$ against the counterfactual mean under
-shifting only $A$, only $E$, or neither. The `lmtp` package implements
-TMLE and sequentially doubly robust estimators for these parameters, with
-support for time-varying treatments, censoring, and Super Learner nuisance
-estimation. For continuous-exposure interaction problems---common in
-nutritional epidemiology, environmental health, and dose-response
-pharmacoepidemiology---MTPs are the appropriate generalization of the
-binary joint-intervention framework.
-
-::: {.callout-tip}
-## How to explain this to a non-methodologist
-"When exposures are continuous, asking 'what if everyone had exactly this
-dose' is unrealistic and unsupported by the data. Instead we ask 'what
-if everyone shifted their exposure a bit?'---and the interaction question
-becomes whether the benefit of shifting one exposure depends on the
-shift in the other."
-:::
-
----
-
-## 9. Multiplicity, reporting, and interpretation
+## 8. Multiplicity, reporting, and interpretation
 
 Interaction analyses are uniquely vulnerable to multiplicity. The risk
 is not theoretical: many published claims of subgroup heterogeneity have
@@ -1499,7 +1417,7 @@ primary analysis rather than as an afterthought.
 
 ---
 
-## 10. Software ecosystem and reproducible workflows
+## 9. Software ecosystem and reproducible workflows
 
 The R ecosystem for targeted learning is mature and well documented. For
 an MPH chapter, the recommended core stack is `SuperLearner` for nuisance
@@ -1546,7 +1464,7 @@ every chapter of the analysis.
 
 ---
 
-## 11. Practical checklist for analysts
+## 10. Practical checklist for analysts
 
 The checklist below summarizes the chapter into a single artifact. It can
 be copied into a project's pre-analysis plan or a reviewer's referee
@@ -1567,6 +1485,142 @@ form.
 | Reporting | Cell-specific risks; both scales; common reference category; coding decisions; sensitivity analyses | Only a p-value for the product term |
 | Interpretation | Lead with absolute risks; sense-check against background incidence | Headline-only relative-risk language |
 : Table 5. Practical checklist for interaction analyses in RWE. {.striped}
+
+---
+
+## 11. Time-varying interactions and marginal structural models
+
+Sections 1 through 10 dealt with single time-point analyses: a baseline
+treatment, a baseline modifier or second exposure, a single outcome
+measurement. Many real-world questions involve treatment regimens that
+evolve over time, with intermediate covariates that are simultaneously
+confounders of later treatment and consequences of earlier treatment.
+In that setting, baseline-only TMLE is no longer sufficient, and the
+interaction question must be reframed in terms of sustained or dynamic
+treatment strategies.
+
+### When you need longitudinal methods
+
+Longitudinal targeted learning becomes necessary when at least one of
+the following is true:
+
+- Treatment can change after baseline through initiation,
+  discontinuation, or switching.
+- Censoring is informative and is itself influenced by time-varying
+  covariates.
+- Time-varying confounders are themselves affected by past treatment,
+  for example blood pressure during a hypertension trial.
+
+For interaction analyses specifically, the question becomes: *does the
+effect of a sustained treatment strategy differ across baseline
+strata?* The modifier $M$ should still be a baseline variable, well
+measured, and adequately supported across the relevant treatment
+histories. Time-varying modifiers can also be of interest, but they
+introduce additional positivity and identification challenges and are
+typically handled inside a marginal structural model rather than by
+stratification.
+
+### LTMLE for sustained-treatment interactions
+
+The `ltmle` package implements longitudinal TMLE for sequential
+treatment and censoring nodes. It accepts a Super Learner library and
+supports both static and dynamic intervention rules.
+
+```{r}
+#| label: ltmle-sketch
+#| eval: false
+
+library(ltmle)
+
+# Sketch only: the data 'long_dat' is in wide format with
+# baseline covariates, time-varying covariates L1..L3,
+# treatments A1..A3, and outcome Y at the final time
+fit_ltmle <- ltmle(
+  data       = long_dat,
+  Anodes     = c("A1", "A2", "A3"),
+  Lnodes     = c("L1", "L2", "L3"),
+  Ynodes     = "Y",
+  abar       = list(c(1, 1, 1), c(0, 0, 0)),
+  SL.library = c("SL.mean", "SL.glm", "SL.glmnet", "SL.ranger")
+)
+
+summary(fit_ltmle)
+```
+
+To estimate baseline-modifier-specific effects, fit `ltmle` separately
+within each level of $M$ and contrast the resulting counterfactual means.
+The output is an estimate of, for example, the one-year survival
+probability under "always treat" versus "never treat" within each
+subgroup, along with the contrast across subgroups.
+
+::: {.callout-tip}
+## How to explain this to a non-methodologist
+When treatment can change month to month and intermediate health
+markers both depend on past treatment and predict future treatment, a
+single baseline analysis is no longer enough. The longitudinal version
+of TMLE walks through the data one time step at a time, adjusting at
+each step for what has already changed.
+:::
+
+### Marginal structural models for interaction
+
+An alternative is to fit a marginal structural model (MSM) with the
+modifier $M$ entering as an interaction term. The MSM specifies how the
+counterfactual mean depends on the treatment regime and on $M$, and the
+interaction coefficient in the MSM is a parameter of the marginal
+counterfactual distribution rather than of any conditional outcome
+model. TMLE for MSMs estimates this coefficient by fitting nuisance
+regressions, computing counterfactual outcomes under the regimes
+indexed by the MSM, and then targeting the MSM coefficient directly.
+The `tmleMSM` framework and the corresponding `ltmle` MSM facilities
+support this workflow.
+
+In an MSM-based interaction analysis the analyst should be explicit
+about: which regimes the MSM indexes, whether $M$ is baseline or
+time-varying, and how the MSM is parameterised on the additive or
+multiplicative scale. The same scale considerations from Section 5
+apply: pre-specify the scale, use a common reference, and report the
+cell-specific counterfactual means whenever possible.
+
+::: {.callout-note}
+## What this means in practice
+For sustained-treatment interaction questions, fit LTMLE within each
+modifier stratum or fit a TMLE-MSM with the modifier as an interaction
+term. Report the cell-specific counterfactual outcomes — for example,
+one-year survival under "always treat" versus "never treat" within
+each subgroup — and the across-subgroup contrast. Diagnose positivity
+across treatment histories, not only at baseline.
+:::
+
+### Flexible estimands beyond binary exposures
+
+The estimands defined in Section 2 assume binary exposures. In
+real-world evidence, exposures are often continuous (dose, duration,
+intensity), and joint positivity for any single value of a continuous
+exposure is typically zero. The remedy is to redefine the estimand in
+terms of **modified treatment policies** (MTPs): hypothetical
+interventions that shift observed exposure rather than fix it at a
+value [@diaz2021lmtp]. The interaction question then becomes: *does
+the effect of shifting $A$ depend on the level or shift of $E$?*
+
+An MTP-based interaction parameter contrasts the counterfactual mean
+under a paired shift in $(A, E)$ against the counterfactual mean under
+shifting only $A$, only $E$, or neither. The `lmtp` package implements
+TMLE and sequentially doubly robust estimators for these parameters,
+with support for time-varying treatments, censoring, and Super Learner
+nuisance estimation. For continuous-exposure interaction problems —
+common in nutritional epidemiology, environmental health, and
+dose-response pharmacoepidemiology — MTPs are the appropriate
+generalisation of the binary joint-intervention framework.
+
+::: {.callout-tip}
+## How to explain this to a non-methodologist
+When exposures are continuous, asking "what if everyone had exactly
+this dose?" is unrealistic and unsupported by the data. Instead, ask
+"what if everyone shifted their exposure a bit?" The interaction
+question becomes whether the benefit of shifting one exposure depends
+on the shift in the other.
+:::
 
 ---
 
@@ -1603,37 +1657,20 @@ absolute-risk language. With these elements in place, a reader can
 reconstruct the estimand, judge the design, and assess the credibility
 of the heterogeneity claim.
 
-### Looking ahead: from interactions to treatment rules
+### What comes next
 
-Heterogeneity in treatment effect is also the raw material for
-*personalization* and for *adaptive treatment*. The conceptual chain
-runs: **interaction → heterogeneity → optimal rules → dynamic treatment
-regimes**. Once an interaction analysis has identified subgroups in
-which treatment is more or less beneficial, the natural next questions
-are (a) whether a static rule assigning treatment as a function of
-baseline characteristics improves population-level outcomes, and (b)
-whether a regime that *adapts* treatment to evolving patient state
-improves outcomes further. This connects the present chapter to several
-downstream topics covered elsewhere in the handbook:
-
-- **Optimal individualized treatment rules** ([Chapter 4.1](04-01-optimal-regimes.qmd)),
-  which use targeted learning (e.g., `tmle3mopttx`) to estimate the
-  baseline-covariate rule that maximizes expected outcome under
-  intervention.
-- **Dynamic treatment regimes**, in which the treatment assigned at
-  each follow-up time depends on the patient's history. Interaction
-  estimates are the diagnostic input that justifies a non-trivial
-  dynamic regime: if there is no meaningful heterogeneity, a static
-  "always treat" or "never treat" policy is optimal.
-- **Policy learning**, which extends the same logic to constrained,
-  cost-aware, or fairness-aware decision rules deployed at scale.
-
-Heterogeneous effects motivate treatment rules; treatment rules
-operationalize the heterogeneity; dynamic regimes extend the
-operationalization across time. Readers who finish this chapter and
-want to see how subgroup contrasts translate into actionable static or
-adaptive policies should read the optimal-regimes chapter next, then
-the longitudinal LTMLE material for the time-varying generalization.
+Two natural follow-up questions arise after a careful interaction
+analysis. The first is *how do we know the analysis is trustworthy?*
+That question is the focus of the chapter on diagnostics and
+sensitivity analysis ([Chapter 3.12](03-12-sensitivity-analysis.qmd)),
+which covers identifiability checks, nuisance-model assessment,
+positivity diagnostics, and quantitative bias analysis for unmeasured
+confounding. The second is *which covariates contribute most to the
+heterogeneity we found?* That question is the focus of the companion
+chapter on effect modification
+([Chapter 3.4](03-04-effect-modification.qmd)), which introduces
+treatment-effect variable importance measures and causal forests as
+tools for ranking and visualising the modifiers behind a contrast.
 
 ---
 
