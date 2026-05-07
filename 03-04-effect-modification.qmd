@@ -98,13 +98,11 @@ The estimand should match the scientific question:
 
 ## 3. Identification assumptions
 
-:::{.callout-warning}
-## Assumptions Still Apply and Get Harder in Subgroups
+The standard identification assumptions — consistency, exchangeability given measured confounders, and positivity — are introduced in [Chapter 1.2](01-02-causal-roadmap.qmd). Two issues become more important when the target is a CATE rather than the average treatment effect.
 
-Effect modification estimands inherit the same identification assumptions as the overall ATE: exchangeability, positivity, and consistency (see [Chapter 1.2](01-02-causal-roadmap.qmd)). Additionally, moderator variables must be **measured before treatment**, and you should avoid conditioning on post-treatment variables.
+First, the moderator $V$ must be measured before treatment, and the analyst must avoid conditioning on post-treatment variables. Conditioning on a downstream variable can induce collider bias that makes the CATE non-identifiable.
 
-**Pitfall.** Positivity is especially fragile in subgroup analyses. When you slice the data into smaller groups, some subgroups may have very few treated or untreated individuals. Always check that both treatment arms are adequately represented in every subgroup you analyze.
-:::
+Second, positivity fragility is amplified in subgroups. Slicing the data into smaller groups makes it increasingly likely that some confounder-by-treatment combinations have zero or near-zero representation. Diagnostics from [Chapter 3.2](03-02-positivity-overlap.qmd) should be applied within every subgroup of interest, not only at the cohort level.
 
 ---
 
@@ -127,11 +125,7 @@ The next sections walk through TMLE for prespecified subgroups (Sections 5 and 6
 
 ## 5. TMLE for subgroup-specific effects
 
-:::{.callout-important}
-## TMLE for subgroup effects
-
-To estimate the causal effect within a prespecified subgroup, restrict the data to that subgroup and run TMLE inside it. The estimand is the subgroup-specific ATE, $E[Y(1) - Y(0) \mid X_g = 1]$. Because TMLE is doubly robust and uses Super Learner for nuisance estimation, the estimate is reliable as long as the subgroup is large enough and positivity holds within it.
-:::
+To estimate the causal effect within a prespecified subgroup, restrict the data to that subgroup and run TMLE inside it. The estimand is the subgroup-specific ATE, $E[Y(1) - Y(0) \mid X_g = 1]$. The double-robustness and Super Learner machinery covered in [Chapter 2.3](02-03-doubly-robust-tmle.qmd) and [Chapter 2.4](02-04-superlearner.qmd) carries over directly; the only change is that the analytic dataset is the subgroup, not the full cohort.
 
 Worked example: the ATE among patients younger than 75.
 
@@ -343,12 +337,14 @@ The two approaches answer related but distinct questions and are complementary i
 |---|---|---|---|
 | **Causal forest** (`grf`) | Individual-level $\widehat\tau(x)$ for every patient | Approximate pointwise CIs from the forest | Visualising heterogeneity; forming high-benefit subgroups; prediction-style summaries |
 | **te-VIM** ([te_vim](https://github.com/herbps10/te_vim)) | One importance score $\widehat\Theta_s$ per candidate modifier | Influence-function-based CIs from TMLE / one-step | Ranking which modifiers matter; producing inferential evidence that a covariate contributes to heterogeneity |
+| **EffectXshift** ([blind-contours/EffectXshift](https://github.com/blind-contours/EffectXshift)) | Data-adaptively learned subgroups in which a continuous-exposure shift has the largest effect | CV-TMLE-based CIs valid under data-adaptive subgroup learning | Effect modification in continuous-exposure mixtures; environmental epidemiology |
+| **SuperNOVA** ([blind-contours/SuperNOVA](https://github.com/blind-contours/SuperNOVA)) | Ranked importance of variables, exposure pairs, and exposure-covariate combinations under stochastic intervention | TMLE on a held-out estimation sample after basis-function discovery | Combined effect-modification and interaction discovery in mixed-exposure settings |
 
-In a typical workflow, an analyst might first run te-VIM to identify which covariates contribute most to heterogeneity, then run a causal forest restricted to those covariates to visualise the CATE surface, and finally run TMLE within prespecified subgroups defined by the most important modifier for confirmatory inference.
+In a typical workflow, an analyst might first run te-VIM (or SuperNOVA, when exposures are continuous mixtures) to identify which covariates contribute most to heterogeneity, then run a causal forest restricted to those covariates to visualise the CATE surface, and finally run TMLE within prespecified subgroups defined by the most important modifier for confirmatory inference.
 
 :::{.callout-warning}
 ## Same caveats apply
-te-VIM is a heterogeneity-discovery tool. The subgroups it suggests are exploratory and should be validated, prespecified in a follow-up study, or accompanied by appropriate multiplicity control before being treated as confirmatory.
+te-VIM, EffectXshift, and SuperNOVA are all heterogeneity-discovery tools. The subgroups and importance rankings they produce are exploratory and should be validated, prespecified in a follow-up study, or accompanied by appropriate multiplicity control before being treated as confirmatory.
 :::
 
 ---
@@ -386,12 +382,12 @@ It can inform:
 
 ---
 
-## 11. Choosing among TMLE, causal forests, and te-VIM
+## 11. Choosing among the discovery tools
 
 :::{.callout-tip}
 ## Choosing the right tool for the job
 
-Use **TMLE in prespecified subgroups** when you already know which subgroups to interrogate; the estimator is doubly robust, targets a clearly defined parameter, and supports valid confidence intervals. Use **causal forests** when you want the data to show you where heterogeneity sits, particularly to visualise an individual-level CATE surface. Use **treatment-effect variable importance (te-VIM)** when you want a ranked, inferentially principled answer to *which covariates drive heterogeneity*. The strongest analyses combine all three: te-VIM to rank candidate modifiers, causal forests to visualise heterogeneity along the leading modifiers, and TMLE for confirmatory subgroup-specific effects.
+Use **TMLE in prespecified subgroups** when you already know which subgroups to interrogate; the estimator is doubly robust, targets a clearly defined parameter, and supports valid confidence intervals. Use **causal forests** when you want the data to show you where heterogeneity sits, particularly to visualise an individual-level CATE surface. Use **te-VIM** when you want a ranked, inferentially principled answer to *which covariates drive heterogeneity* for a binary or modest-cardinality treatment. Use **EffectXshift** or **SuperNOVA** when the exposure of interest is continuous (a dose, a pollutant concentration, a mixture component) and the natural causal estimand is a stochastic-intervention shift rather than a fixed binary contrast. The strongest analyses combine these: a discovery tool to rank candidate modifiers, a causal forest or visualisation step to inspect the leading modifiers, and TMLE within prespecified subgroups for confirmatory inference.
 :::
 
 ---
@@ -477,6 +473,8 @@ Before estimating subgroup-specific effects, verify that positivity holds within
 - Wager S, Athey S (2018). Estimation and inference of heterogeneous treatment effects using random forests. *JASA* 113(523):1228-1242.
 - Hines O, Diaz-Ordaz K, Vansteelandt S (2023). Variable importance measures for heterogeneous causal effects. arXiv:2309.13324. <https://arxiv.org/abs/2309.13324>
 - Susmann H et al. The `te_vim` repository (TMLE, EE, and SS estimators for treatment-effect variable importance). <https://github.com/herbps10/te_vim>
+- McCoy DB et al. (2023). Semi-parametric identification and estimation of interaction and effect modification in mixed exposures using stochastic interventions. arXiv:2305.01849. <https://arxiv.org/abs/2305.01849>
+- The `Xshift` family of R packages by McCoy et al. for stochastic-intervention TL of interaction and effect modification: [`InterXshift`](https://github.com/blind-contours/InterXshift), [`EffectXshift`](https://github.com/blind-contours/EffectXshift), [`IsoXshift`](https://github.com/blind-contours/IsoXshift), [`JointXshift`](https://github.com/blind-contours/JointXshift), [`SuperNOVA`](https://github.com/blind-contours/SuperNOVA), [`CVtreeMLE`](https://github.com/blind-contours/CVtreeMLE).
 - Hernan MA, Robins JM (2020). *Causal Inference: What If*. Chapter 4 (Effect modification). <https://www.hsph.harvard.edu/miguel-hernan/causal-inference-book/>
 - VanderWeele TJ (2009). On the distinction between interaction and effect modification. *Epidemiology* 20(6):863-871.
 - `grf` R package (causal forests): <https://cran.r-project.org/package=grf>
