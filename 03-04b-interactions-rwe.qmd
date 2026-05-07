@@ -170,6 +170,20 @@ questions in modern epidemiology and clinical practice.
   carry information about whether the combined exposure produces
   excess events beyond what either alone predicts. That information
   matters for screening, regulation, and aetiologic theory.
+- **Comorbidity-by-treatment interaction in pharmacoepidemiology.**
+  Whether a drug's safety profile depends on a baseline comorbidity —
+  for example, whether the cardiovascular risk associated with a
+  glucose-lowering agent differs in patients with versus without prior
+  heart failure — is a recurrent question in comparative-safety
+  studies. The same machinery applies here, with the comorbidity
+  playing the role of the second exposure $E$.
+- **Biomarker-by-biomarker interaction.** When two continuous clinical
+  measurements (blood pressure and HbA1c, for example) jointly index
+  cardiometabolic risk, the interaction question is whether their
+  effects on the outcome compound beyond what either alone predicts.
+  These analyses typically need the modified-treatment-policy
+  framework introduced in Section 11 rather than binary-cell
+  contrasts.
 
 The common thread is that interaction estimates inform decisions and
 explanations, not just summaries. That is why the rest of this chapter
@@ -278,10 +292,20 @@ percentage points).
 - **RERI** (taking $A=0, E=0$ as the doubly unexposed reference):
   $RR_{11} = 4.0$, $RR_{10} = 1.6$, $RR_{01} = 2.0$, so
   $\text{RERI} = 4.0 - 1.6 - 2.0 + 1 = 1.4$.
+- **Attributable proportion due to interaction**: $\text{AP} = \text{RERI}/RR_{11} = 1.4/4.0 = 0.35$.
+  About 35% of the risk in the doubly exposed group is attributable to
+  the interaction beyond the sum of the individual effects.
+- **Synergy index**: $S = (RR_{11} - 1)\big/[(RR_{10} - 1) + (RR_{01} - 1)] = 3.0 / 1.6 = 1.88$.
+  The joint excess risk is 1.88 times the sum of the separate excess
+  risks; values $> 1$ indicate super-additivity.
 
-The same four numbers produce three different interaction summaries.
-TMLE's role is to estimate those four numbers from observational data
-under confounding; once they are in hand, the contrasts are arithmetic.
+The same four numbers produce five different interaction summaries.
+TMLE's role is to estimate those four counterfactual risks from
+observational data under confounding; once they are in hand, all of
+RERI, AP, $S$, and $\psi_{\text{add}}$ are arithmetic. RERI, AP, and
+$S$ are the standard additive-interaction trio in epidemiology
+[@vanderweele2014tutorial]; reporting all three is uncommon but
+inexpensive once the joint counterfactual means are estimated.
 :::
 
 ### Subgroup-specific estimands
@@ -393,6 +417,43 @@ heterogeneity. Before any modeling decision, the analyst should write down:
 If any of these are decided after looking at the outcome, you risk
 manufacturing apparent heterogeneity through differential immortal time,
 selection bias, or post-hoc subgroup tuning.
+
+### Interaction must be estimated on a common target population
+
+A recurring failure mode in applied work is to compute an interaction
+contrast from *separately matched or stratified subgroup analyses*. A
+typical version of this looks like the following: the analyst matches
+$E=1$ patients to $E=0$ patients on baseline covariates, estimates the
+treatment effect within each matched set, and then computes an
+"interaction" as the difference of those two subgroup-specific
+effects. The result is not generally an interpretable causal interaction
+parameter, for three reasons.
+
+- **The matched samples differ from each other.** Each match is built
+  to balance covariates *within its own subgroup*. The two resulting
+  populations do not overlap on the same target, so the contrast is
+  not estimating a single counterfactual quantity defined on one
+  population.
+- **The contrast is not anchored to a counterfactual estimand.** $\psi_{\text{add}} = E[Y^{1,1}] - E[Y^{0,1}] - E[Y^{1,0}] + E[Y^{0,0}]$
+  averages each potential outcome over the *same* covariate distribution
+  — typically the full study cohort. A difference of two separately
+  matched effects does not.
+- **Confounding control is uneven across exposure cells.** Patterns of
+  confounding can differ by $E$, so subgroup-specific matching may
+  succeed in one stratum and fail in another. The interaction estimate
+  inherits the worst of those failures.
+
+The remedy is to estimate the interaction parameter directly on the
+full cohort, with a single adjustment specification (regression,
+Super Learner, or a TMLE plug-in) that targets all four counterfactual
+means jointly. Section 6 implements exactly this workflow. When
+inverse-probability weights or matching are used as part of the
+adjustment, they should be constructed on the full cohort with treatment
+defined as the *joint* exposure $(A, E)$, not on each subgroup
+separately. If the only data available are pre-aggregated
+subgroup-specific estimates, the most defensible approach is to report
+each subgroup's effect with its own confidence interval and explicitly
+flag that no formal interaction parameter has been identified.
 
 ### Why positivity is the silent killer of interaction analyses
 
@@ -672,6 +733,66 @@ exposures (or under treatment vs. control within each modifier stratum),
 plus the contrasts of interest. Readers can then reconstruct any other
 contrast they care about and assess whether the differences are large
 enough to matter clinically.
+
+### Time-to-event outcomes: choose a risk-scale estimand
+
+Many real-world evidence analyses have time-to-event outcomes, and the
+default model in that setting is the Cox proportional-hazards
+regression. The default temptation, then, is to introduce an interaction
+term in the linear predictor and report a hazard-ratio interaction. For
+interaction analyses specifically, **this is the wrong default**.
+Hazard-ratio interactions are problematic for three connected reasons.
+
+- **Hazards are non-collapsible.** The marginal hazard ratio is not in
+  general a weighted average of conditional hazard ratios over baseline
+  covariates, so even an unconfounded marginal hazard-ratio interaction
+  is not a clean function of the underlying counterfactual hazards
+  [@martinussen2018hazardratios; @aalen2015cox].
+- **Hazards condition on survival.** $\lambda(t \mid A, E)$ is the
+  instantaneous risk *given* survival to time $t$, and the survivors at
+  $t$ are themselves a selected subset of the original cohort. Even if
+  treatment is randomly assigned at baseline, the survivors under
+  $A=1, E=1$ and the survivors under $A=0, E=0$ at time $t$ are
+  comparable populations only at $t = 0$. A hazard-ratio interaction
+  therefore mixes a true treatment-by-covariate effect with a
+  time-varying selection effect.
+- **Additive interaction on hazards is not additive interaction on
+  cumulative incidence.** A model that is multiplicative on hazards is
+  highly nonlinear on the cumulative incidence scale, and the
+  interaction parameter on the hazard scale does not generally map
+  onto $\psi_{\text{add}}$, RERI, AP, or $S$.
+
+The recommendation that follows is straightforward. **Define and target
+an interaction parameter on the cumulative-risk scale at a clinically
+meaningful time horizon $t^*$**, not on the hazard scale. Useful
+risk-scale estimands include:
+
+- **Cumulative incidence at $t^*$**: $F^{a,e}(t^*) = P(T^{a,e} \le t^*)$. The four counterfactual cumulative incidences populate exactly the same 2$\times$2 table as the binary-outcome example in Section 2, and RERI / AP / $S$ are computed directly from them.
+- **Restricted mean survival time (RMST) at $t^*$**: $\mu^{a,e}(t^*) = E[\min(T^{a,e}, t^*)]$. RMST contrasts have a natural decision-theoretic interpretation (expected event-free time gained) and an additive scale that is straightforward to interpret.
+- **Risk difference at $t^*$**: $F^{1,1}(t^*) - F^{0,0}(t^*)$ and the corresponding interaction contrast $F^{1,1}(t^*) - F^{0,1}(t^*) - F^{1,0}(t^*) + F^{0,0}(t^*)$.
+
+Each of these can be estimated with a TMLE that targets the
+counterfactual survival or cumulative-incidence function directly,
+using `survtmle`, `concrete`, `ltmle`, or `lmtp` (with survival outcome
+nodes). The point-treatment chapter on time-to-event outcomes
+([Chapter 3.11](03-11-time-to-event-competing-risks.qmd)) walks through
+the survival-TMLE machinery; combining it with the joint-intervention
+workflow of Section 6 — by replacing $Q(A, E, W) = E[Y \mid A, E, W]$
+with $\hat F^{a,e}(t^*; W)$ and contrasting four counterfactual
+cumulative incidences — yields an interaction estimate that is free of
+hazard-scale interpretive problems.
+
+::: {.callout-warning}
+## Avoid: hazard-ratio interaction terms as the headline
+A Cox model with a $A \times E$ product term is fine as a sensitivity
+analysis or as an exploratory description of how hazards differ by
+subgroup, but the headline interaction estimate in a real-world
+evidence paper should be defined and reported on the cumulative-risk
+scale, with an explicit time horizon. The same data analysed at
+$t^* = 1$ year, $t^* = 2$ years, and $t^* = 5$ years can give
+materially different interaction conclusions, and that is information
+the reader needs.
+:::
 
 ### Interaction in real-world evidence
 
