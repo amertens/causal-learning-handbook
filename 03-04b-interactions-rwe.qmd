@@ -19,10 +19,11 @@ coefficient from a logistic or Cox model. This chapter argues for a
 different starting point. Interaction analyses should begin with a
 clearly defined causal estimand on a meaningful scale, anchored in a
 target trial protocol, and should be estimated with methods that respect
-the complexity of observational data. Targeted learning — flexible
-nuisance estimation through Super Learner [@vanderLaan2007superlearner]
-combined with the targeting step and influence-function inference of
-TMLE [@vanderLaan2006tmle] — is particularly well suited to this task.
+the complexity of observational data. Targeted learning, which combines
+flexible nuisance estimation through Super Learner
+[@vanderLaan2007superlearner] with the targeting step and
+influence-function inference of TMLE [@vanderLaan2006tmle], is
+particularly well suited to this task.
 The chapter walks through a binary point-treatment example with TMLE and
 Super Learner, scaffolds a collaborative TMLE sensitivity analysis,
 sketches a longitudinal extension using LTMLE and TMLE for marginal
@@ -79,6 +80,27 @@ one alone would not predict?* Both questions are about interaction in a
 broad sense, but they are not the same question, and the methods that
 answer them are not identical.
 
+In real-world evidence studies, interaction questions arise because
+exposures rarely occur one at a time. A patient with chronic hepatitis B
+infection may also have diabetes, obesity, kidney disease, or a lipid
+disorder. Some conditions may appear harmful when considered alone,
+while others may appear neutral or even protective after adjustment for
+the rest. The scientific question is then not simply whether each
+condition is associated with advanced liver disease, but whether
+combinations of conditions create more excess risk than would be
+expected from considering each condition separately.
+
+The same problem appears in co-medication studies. A drug may have one
+safety profile when used alone and a different profile when taken with
+another medication. Interaction analysis gives us a structured way to
+ask whether the joint exposure pattern matters beyond the marginal
+effects of each component. Under the target trial interpretation
+described in [Chapter 1.2](01-02-causal-roadmap.qmd), the joint
+exposure pattern corresponds to a hypothetical intervention that sets
+both exposures simultaneously, and the interaction parameter is the
+contrast between this joint intervention and the sum of the two
+single-exposure interventions.
+
 ::: {.callout-note}
 ## Scope of this chapter
 This chapter focuses on **causal interaction**: the joint effect of two
@@ -123,7 +145,7 @@ Disentangling them is the first task of any chapter on interactions.
   but a list of subgroup point estimates is not by itself a heterogeneity
   test.
 - **Predictive heterogeneity** refers to algorithms that learn high-dimensional
-  functions of covariates to predict who benefits — for example, the conditional
+  functions of covariates to predict who benefits, for example the conditional
   average treatment effect surface produced by a causal forest. These tools are
   covered in the companion [Effect Modification](03-04-effect-modification.qmd)
   chapter and should not be confused with the inferential, low-dimensional
@@ -165,16 +187,16 @@ questions in modern epidemiology and clinical practice.
   percentage-point effects. Interaction estimates inform where to
   invest the next public-health dollar.
 - **Joint-exposure aetiology.** When two exposures may share a
-  biological pathway — environmental tobacco smoke and occupational
-  asbestos, for example — interaction analyses on the additive scale
+  biological pathway, for example environmental tobacco smoke and
+  occupational asbestos, interaction analyses on the additive scale
   carry information about whether the combined exposure produces
   excess events beyond what either alone predicts. That information
   matters for screening, regulation, and aetiologic theory.
 - **Comorbidity-by-treatment interaction in pharmacoepidemiology.**
-  Whether a drug's safety profile depends on a baseline comorbidity —
-  for example, whether the cardiovascular risk associated with a
+  Whether a drug's safety profile depends on a baseline comorbidity,
+  for example whether the cardiovascular risk associated with a
   glucose-lowering agent differs in patients with versus without prior
-  heart failure — is a recurrent question in comparative-safety
+  heart failure, is a recurrent question in comparative-safety
   studies. The same machinery applies here, with the comorbidity
   playing the role of the second exposure $E$.
 - **Biomarker-by-biomarker interaction.** When two continuous clinical
@@ -388,7 +410,7 @@ outcomes, you are not yet ready to estimate it.
 ## 3. Interaction-specific design and identification
 
 Interaction analyses inherit the standard causal assumptions covered in
-detail in [Chapter 1.2](01-02-causal-roadmap.qmd) — consistency,
+detail in [Chapter 1.2](01-02-causal-roadmap.qmd): consistency,
 exchangeability given measured confounders, positivity, and no
 interference unless explicitly modelled. This section focuses only on
 the issues that get *harder* when interaction is the target.
@@ -435,8 +457,8 @@ parameter, for three reasons.
   not estimating a single counterfactual quantity defined on one
   population.
 - **The contrast is not anchored to a counterfactual estimand.** $\psi_{\text{add}} = E[Y^{1,1}] - E[Y^{0,1}] - E[Y^{1,0}] + E[Y^{0,0}]$
-  averages each potential outcome over the *same* covariate distribution
-  — typically the full study cohort. A difference of two separately
+  averages each potential outcome over the *same* covariate distribution,
+  typically the full study cohort. A difference of two separately
   matched effects does not.
 - **Confounding control is uneven across exposure cells.** Patterns of
   confounding can differ by $E$, so subgroup-specific matching may
@@ -464,11 +486,15 @@ any positivity weakness in the original cohort is amplified.
 
 **Interaction estimation is more sensitive to positivity violations
 than main-effect estimation, because it requires support across joint
-exposure strata.** A main-effect analysis needs both treated and
-untreated patients across the covariate distribution; an interaction
-analysis needs both, *within every level of the second exposure or
-modifier*. The number of cells that must be populated grows with the
-product of the exposure cardinalities, while the data per cell shrinks.
+exposure strata.** For a binary $A$ and a binary $E$, the analysis
+must learn about four joint exposure states: $(A=0, E=0)$,
+$(A=1, E=0)$, $(A=0, E=1)$, and $(A=1, E=1)$. If very few patients
+are observed in one of those cells, or if co-exposed patients are
+clinically very different from everyone else in the cohort, the
+estimate for that joint state will rely heavily on extrapolation from
+the outcome regression. The number of cells that must be populated
+grows with the product of the exposure cardinalities, while the data
+per cell shrinks.
 
 A concrete example makes this vivid. Consider a 4,000-patient cohort
 with binary $A$ (statin use), binary $E$ (heavy alcohol use), and
@@ -517,38 +543,38 @@ failure mode: letting a model dictate what counts as interaction.
 ::: {.callout-important}
 ## Interaction through the Targeted Learning roadmap
 
-**Step 0 — Define the question.** State, in clinical or public-health
+**Step 0. Define the question.** State, in clinical or public-health
 language, whether you are asking (i) does the effect of $A$ vary across a
 non-manipulable modifier $M$ (effect modification), or (ii) do two
 manipulable exposures $A$ and $E$ combine in ways that depart from their
 individual effects (interaction).
 
-**Step 1 — Statistical model.** Adopt a *nonparametric* model for the
+**Step 1. Statistical model.** Adopt a *nonparametric* model for the
 joint distribution of $(W, A, E, Y)$ (or $(W, A, M, Y)$). No functional
 form is imposed at this step. The Targeted Learning principle is that
 parametric structure should be a tool, not an assumption baked into the
 estimand.
 
-**Step 2 — Causal estimand.** Write the parameter explicitly as a
+**Step 2. Causal estimand.** Write the parameter explicitly as a
 function of counterfactual outcomes:
 $\psi_{\text{add}} = E[Y^{1,1} - Y^{0,1}] - E[Y^{1,0} - Y^{0,0}]$ for the
 joint-intervention case, or $RD(1) - RD(0)$ for the modifier case. *This
 is what the analysis aims to recover; it is not a regression coefficient.*
 
-**Step 3 — Identification.** State the assumptions under which the causal
+**Step 3. Identification.** State the assumptions under which the causal
 estimand maps to a function of the observed-data distribution:
 exchangeability for $A$ (and $E$) given $W$, joint positivity, consistency,
 and no interference. Identification fails or weakens whenever any of
 these break, and the estimator cannot rescue identification it does not
 have.
 
-**Step 4 — Estimation.** Estimate the nuisance functions
+**Step 4. Estimation.** Estimate the nuisance functions
 ($Q$ for the outcome regression, $g$ for the treatment mechanisms) with
 Super Learner, then apply a TMLE targeting step so that the plug-in
 estimator solves the efficient influence function equation for
 $\psi_{\text{add}}$ or $\psi_{\text{mult}}$.
 
-**Step 5 — Sensitivity analysis.** Vary the learner library, the
+**Step 5. Sensitivity analysis.** Vary the learner library, the
 adjustment set, and the propensity-score selection (e.g., CTMLE) to
 characterize the stability of the interaction estimate. Quantify the
 amount of unmeasured confounding that would be needed to overturn it.
@@ -596,7 +622,7 @@ Two TMLE properties directly address these amplifications. **Flexible
 nuisance estimation through Super Learner** lets the data choose the
 shape of $Q$ rather than imposing a parametric form whose interaction
 term is a model artefact. **Double robustness** means the interaction
-estimate remains consistent if either $Q$ or $g$ is misspecified — a real
+estimate remains consistent if either $Q$ or $g$ is misspecified, a real
 safety margin in joint-cell estimation, where neither model is easy to
 get exactly right. The targeting step also improves efficiency relative
 to plug-in g-computation, which matters when the joint cell is small and
@@ -614,27 +640,27 @@ specified in Section 2.**
 ::: {.callout-important}
 ## From estimand to estimator (5 steps)
 
-**Step 1 — Estimate the outcome regression** $Q(A, E, W) = E[Y \mid A, E, W]$
+**Step 1. Estimate the outcome regression** $Q(A, E, W) = E[Y \mid A, E, W]$
 with Super Learner. This is a single model that uses the *observed* data
 and includes treatment, second exposure, and confounders as predictors.
 
-**Step 2 — Generate counterfactual predictions** under each of the four
+**Step 2. Generate counterfactual predictions** under each of the four
 joint regimes by querying the same fitted model on modified data:
 $Q(1,1,W_i)$, $Q(0,1,W_i)$, $Q(1,0,W_i)$, $Q(0,0,W_i)$ for every patient
 $i$.
 
-**Step 3 — Compute the interaction contrast** by averaging:
+**Step 3. Compute the interaction contrast** by averaging:
 $\widehat{\psi}_{\text{add}} = \frac{1}{n}\sum_i [Q(1,1,W_i) - Q(0,1,W_i)] - \frac{1}{n}\sum_i [Q(1,0,W_i) - Q(0,0,W_i)]$.
 At this point you have a plug-in g-computation estimate.
 
-**Step 4 — Apply the TMLE update.** Estimate the treatment mechanisms
+**Step 4. Apply the TMLE update.** Estimate the treatment mechanisms
 $g_A(A \mid W)$ and $g_E(E \mid W)$ (or their joint $g(A,E \mid W)$) with
 Super Learner. Use these to construct the clever covariate that updates
 $Q$ along the least-favorable submodel for your target parameter. The
 updated $Q^*$ now solves the efficient influence-function equation for
 $\psi_{\text{add}}$ (or $\psi_{\text{mult}}$).
 
-**Step 5 — Inference via the influence curve.** Compute the empirical
+**Step 5. Inference via the influence curve.** Compute the empirical
 influence function of $\widehat{\psi}_{\text{add}}$ using $Q^*$ and $g$,
 then form a Wald confidence interval from its empirical variance. The
 same machinery yields valid CIs for any smooth contrast of the four
@@ -678,16 +704,31 @@ outcome and data permit. Scale dependence is not a methodological
 detail. It is a substantive claim about how two exposures combine to
 produce risk.
 
-### When additive interaction is preferable for public-health decisions
+### Why additive interaction is often the default in RWE
 
-If the question is *who should be prioritized for an intervention?* the
-answer almost always lives on the additive scale. A 2-percentage-point
-absolute risk reduction in a high-incidence subgroup represents a much
-larger public health benefit than the same relative-risk reduction in a
-low-incidence subgroup. Number-needed-to-treat reasoning, resource
-allocation, and ranking of intervention sites are all additive
-operations. Multiplicative measures are useful for etiologic synthesis but
-do not by themselves answer "where should we deploy this drug first?"
+Additive interaction compares **excess risks**, not ratios. It answers
+the question of whether the combined exposure produces more cases than
+would be expected from adding the separate risk differences for each
+exposure. That question is usually the most actionable for public
+health, safety monitoring, and clinical prioritization. It maps
+directly onto the number of cases per population unit, which is what
+policy and resource decisions are made in.
+
+Multiplicative interaction, in contrast, compares ratios of ratios.
+That summary remains useful for etiologic and comparative-effect
+questions, and for putting a finding alongside other ratio-based
+literature. It is rarely the right starting point when the goal is to
+identify where the absolute burden of disease is greatest, or where
+intervention would prevent the most cases.
+
+For most RWE decision problems, the additive scale should be the
+default starting point. If the goal is to identify where the greatest
+excess number of cases may occur, or which co-exposed group may benefit
+most from intervention, risk differences and additive interaction
+contrasts are usually more interpretable than ratios. A
+2-percentage-point absolute risk reduction in a high-incidence
+subgroup represents a much larger public-health benefit than the same
+relative-risk reduction in a low-incidence subgroup
 [@basten2025additive; @vanderweele2014tutorial].
 
 ### Operationalizing the choice of scale
@@ -702,15 +743,44 @@ state which one the analysis is built to answer.
 
 ::: {.callout-tip}
 ## Recommendation
-**For decision-making, prioritize additive interaction unless there is a
-specific scientific reason to use the multiplicative scale.** Report
-the multiplicative contrast alongside it whenever feasible---the two
-scales together leave the reader free to translate the result into
-either decision or etiologic terms, while a single scale forces a
+**For decision-making, prioritize additive interaction unless there is
+a specific scientific reason to use the multiplicative scale.** Report
+the multiplicative contrast alongside it whenever feasible. Reporting
+both scales together leaves the reader free to translate the result
+into either decision or etiologic terms. A single scale forces a
 choice the reader may not share.
 :::
 
-### Coding matters: the lowest-risk reference rule
+### Do not compare interaction estimates across exposure pairs too quickly
+
+When analysts estimate several pairwise interactions in the same study,
+it is tempting to rank them. For example, one might report that the
+diabetes-by-obesity interaction is larger than the kidney-disease-by-
+lipid-disorder interaction, and conclude that the first pair is more
+biologically synergistic, more clinically important, or more
+policy-relevant than the second. That comparison can be misleading,
+for several practical reasons.
+
+Each pairwise estimate is a function of the *target population* over
+which the four counterfactual means are averaged. Different exposure
+pairs can define different observed support, can rest on different
+parts of the data, and can be affected by different positivity and
+sparsity limitations. Baseline risk varies across the strata that one
+pair defines and the strata another pair defines. A larger interaction
+contrast for one pair does not automatically mean that pair is more
+synergistic, more important, or more actionable than another.
+
+Before ranking interaction estimates across pairs, an analyst should
+confirm:
+
+- the same target population was used to standardize each estimate,
+- the same outcome scale was used (additive vs. multiplicative, risk vs. RMST vs. cumulative incidence at the same horizon),
+- the same follow-up period and intervention definitions apply, and
+- all four joint exposure cells are adequately supported for every pair under consideration.
+
+If those conditions do not hold, the pair-by-pair estimates can each
+be reported with their own confidence intervals, but they should not
+be ranked as if they answered the same question.
 
 Standard additive interaction measures, including RERI, assume the doubly
 unexposed group is the reference. When one exposure is *preventive*
@@ -776,10 +846,10 @@ counterfactual survival or cumulative-incidence function directly,
 using `survtmle`, `concrete`, `ltmle`, or `lmtp` (with survival outcome
 nodes). The point-treatment chapter on time-to-event outcomes
 ([Chapter 3.11](03-11-time-to-event-competing-risks.qmd)) walks through
-the survival-TMLE machinery; combining it with the joint-intervention
-workflow of Section 6 — by replacing $Q(A, E, W) = E[Y \mid A, E, W]$
+the survival-TMLE machinery. Combining it with the joint-intervention
+workflow of Section 6 (by replacing $Q(A, E, W) = E[Y \mid A, E, W]$
 with $\hat F^{a,e}(t^*; W)$ and contrasting four counterfactual
-cumulative incidences — yields an interaction estimate that is free of
+cumulative incidences) yields an interaction estimate that is free of
 hazard-scale interpretive problems.
 
 ::: {.callout-warning}
@@ -872,12 +942,11 @@ target the same parameter and should agree up to sampling variability.
 ::: {.callout-tip}
 ## Minimal implementation summary
 
-1. **Estimate the outcome regression** $Q(A, E, W)$ with Super Learner.
-2. **Predict under four interventions**: $(A,E) = (1,1), (0,1), (1,0), (0,0)$.
-3. **Compute the additive interaction contrast**:
-   $\widehat{\psi}_{\text{add}} = \overline{Q(1,1,W)} - \overline{Q(0,1,W)} - \overline{Q(1,0,W)} + \overline{Q(0,0,W)}$.
-4. **Apply the TMLE update** using $g_A(A\mid W)$ and $g_E(E\mid W)$.
-5. **Use the influence curve** for inference (Wald confidence intervals).
+1. **Estimate the outcome regression** $Q(A, E, W) = E[Y \mid A, E, W]$ with Super Learner.
+2. **Predict outcomes under the four joint exposure states** $(A, E) \in \{(0,0), (1,0), (0,1), (1,1)\}$.
+3. **Average each set of predictions over the target population** to get four marginal counterfactual risks.
+4. **Combine the four marginal risks into the additive or multiplicative interaction parameter** ($\psi_{\text{add}}$ or $\psi_{\text{mult}}$, plus RERI, AP, and $S$ if useful).
+5. **Use a TMLE update and the efficient influence curve for inference** when using a targeted estimator. The plug-in version is a g-computation step; the TMLE update adds robustness when the outcome regression is misspecified but the treatment mechanism is consistent.
 :::
 
 ### Simulated data
@@ -929,9 +998,9 @@ the five-step mapping from Section 4:
    efficient influence-function equation, then **use the influence curve**
    for Wald confidence intervals.
 
-In plain English: we predict outcomes under four hypothetical worlds —
-everyone exposed to both, exposed to one, exposed to the other, or
-neither — and compare the differences across those worlds.
+In plain English: we predict outcomes under four hypothetical worlds
+(everyone exposed to both, exposed to one, exposed to the other, or
+neither) and compare the differences across those worlds.
 
 ```{r}
 #| label: sl3-tmle3-joint-intervention
@@ -1105,11 +1174,12 @@ a small number of patients and extreme propensity-score weights driven
 by covariates that are strongly associated with treatment but only
 weakly with the outcome.
 
-Use CTMLE as a sensitivity check when standard TMLE looks fragile —
-typically when fitted propensity scores have heavy tails inside one or
-more joint cells, when the confidence interval is wide and appears
-driven by a handful of high-weight observations, or when the headline
-estimate moves substantially after dropping those observations. If the
+Use CTMLE as a sensitivity check when standard TMLE looks fragile.
+Fragility typically appears as fitted propensity scores with heavy
+tails inside one or more joint cells, a confidence interval that is
+wide and appears driven by a handful of high-weight observations, or a
+headline estimate that moves substantially after dropping those
+observations. If the
 CTMLE estimate agrees with the standard TMLE, the result is more
 credible. If it disagrees, the standard TMLE was probably being pulled
 by a fragile propensity model. See [Chapter 2.5](02-05-advanced-tmle.qmd)
@@ -1141,6 +1211,46 @@ The PATH statement and methodological work on heterogeneity of treatment
 effects converge on this distinction. Recent simultaneous-inference
 methods for multiple subgroup TMLEs make confirmatory analysis with
 several modifiers tractable [@wei2023simultaneous].
+
+### Practical issues when screening many interactions
+
+A growing number of RWE projects involve a high-dimensional screen of
+many candidate pairwise interactions, often as part of a comorbidity
+review or a co-medication safety analysis. The discipline below keeps
+that kind of screen interpretable.
+
+- **Pre-specify biologically or clinically plausible interactions**
+  whenever possible. Treat the prespecified set as confirmatory and
+  the rest as exploratory.
+- **Avoid treating all pairwise combinations as confirmatory.** A 20
+  by 20 comorbidity matrix produces 190 pairs; an unreflective screen
+  guarantees several "significant" findings by chance.
+- **Label high-dimensional screens as exploratory** in the manuscript.
+  Report the number of interaction contrasts examined.
+- **Report sparsity diagnostics** (counts and proportions in each
+  joint exposure cell, across all pairs screened) and any practical
+  positivity violations.
+- **Use Super Learner or other flexible nuisance estimation** to
+  reduce the bias contribution of misspecified outcome and treatment
+  models, but do not imply that machine learning resolves
+  non-positivity or unmeasured confounding. It does not.
+- **Consider outcome-blind simulations or design-stage diagnostics**
+  for major interaction analyses, so that estimator behavior is
+  understood before the outcome is unblinded.
+
+::: {.callout-tip}
+## Checklist for a multi-interaction screen
+- Is each interaction hypothesis pre-specified, or is the screen
+  explicitly exploratory?
+- Are all four joint exposure groups represented for every pair?
+- Is the additive or multiplicative scale chosen *before* looking at
+  the results, with a clear scientific justification?
+- Are estimates standardized to the same target population?
+- Are sparse cells, extreme propensity-score weights, or unstable
+  fold-specific estimates reported?
+- Are exploratory findings clearly labeled as hypothesis-generating
+  rather than confirmatory?
+:::
 
 ### Multiplicity adjustment
 
@@ -1243,8 +1353,8 @@ primary analysis rather than as an afterthought.
 
 ## 9. Software for interaction analyses
 
-The general R targeted-learning stack — `SuperLearner`, `tmle`, `tmle3`,
-`sl3`, `ltmle`, `drtmle`, `ctmle` — is introduced in
+The general R targeted-learning stack (`SuperLearner`, `tmle`, `tmle3`,
+`sl3`, `ltmle`, `drtmle`, `ctmle`) is introduced in
 [Chapter 2.3](02-03-doubly-robust-tmle.qmd),
 [Chapter 2.4](02-04-superlearner.qmd), and
 [Chapter 2.5](02-05-advanced-tmle.qmd). The table below highlights only
@@ -1262,8 +1372,8 @@ the packages that earn special mention for interaction work.
 | `drtmle` | Aggressive Super Learner libraries combined with sparse joint cells push beyond the regularity conditions of standard TMLE; `drtmle` provides additional robustness. |
 | `ctmle` | Sensitivity analysis when joint-cell propensity scores are fragile (Section 7). |
 
-The standard reproducibility scaffolding — fixed seed, scripted
-pipeline, documented analytic dataset, `sessionInfo()` — applies as in
+The standard reproducibility scaffolding (fixed seed, scripted
+pipeline, documented analytic dataset, `sessionInfo()`) applies as in
 every other chapter of this handbook.
 
 ---
@@ -1390,9 +1500,9 @@ cell-specific counterfactual means whenever possible.
 ## What this means in practice
 For sustained-treatment interaction questions, fit LTMLE within each
 modifier stratum or fit a TMLE-MSM with the modifier as an interaction
-term. Report the cell-specific counterfactual outcomes — for example,
+term. Report the cell-specific counterfactual outcomes, for example
 one-year survival under "always treat" versus "never treat" within
-each subgroup — and the across-subgroup contrast. Diagnose positivity
+each subgroup, and the across-subgroup contrast. Diagnose positivity
 across treatment histories, not only at baseline.
 :::
 
@@ -1413,9 +1523,9 @@ shifting only $A$, only $E$, or neither. The general-purpose `lmtp`
 package implements TMLE and sequentially doubly robust estimators for
 arbitrary MTPs, with support for time-varying treatments, censoring,
 and Super Learner nuisance estimation [@diaz2021lmtp]. For
-continuous-exposure interaction problems — common in nutritional
+continuous-exposure interaction problems, common in nutritional
 epidemiology, environmental health, and dose-response
-pharmacoepidemiology — MTPs are the appropriate generalisation of the
+pharmacoepidemiology, MTPs are the appropriate generalisation of the
 binary joint-intervention framework.
 
 ::: {.callout-tip}
@@ -1430,7 +1540,7 @@ on the shift in the other.
 ### The `Xshift` family: TMLE for interactions in mixed exposures
 
 A focused toolkit for stochastic-intervention interaction analysis
-under mixed exposures — typical of environmental epidemiology — is the
+under mixed exposures, typical of environmental epidemiology, is the
 `Xshift` family of R packages developed by McCoy and colleagues
 [@mccoy2023interaction]. The packages share a common philosophy: define
 the interaction parameter directly in terms of *contrasts of
@@ -1484,7 +1594,7 @@ and $p$-value for each pair.
 
 The single-time-point worked example in Section 6 assumes the analyst
 already knows which two exposures to interrogate. When the candidate
-pool is larger — a typical mixture has 5 to 20 exposures — the
+pool is larger (a typical mixture has 5 to 20 exposures), the
 question shifts to *which pairs interact at all*, with valid inference
 on the answer. Two TL-based discovery tools complement the
 hypothesis-driven framework:
@@ -1548,18 +1658,32 @@ of the heterogeneity claim.
 
 ### What comes next
 
-Two natural follow-up questions arise after a careful interaction
-analysis. The first is *how do we know the analysis is trustworthy?*
-That question is the focus of the chapter on diagnostics and
-sensitivity analysis ([Chapter 3.12](03-12-sensitivity-analysis.qmd)),
-which covers identifiability checks, nuisance-model assessment,
-positivity diagnostics, and quantitative bias analysis for unmeasured
-confounding. The second is *which covariates contribute most to the
-heterogeneity we found?* That question is the focus of the companion
-chapter on effect modification
-([Chapter 3.4](03-04-effect-modification.qmd)), which introduces
-treatment-effect variable importance measures and causal forests as
-tools for ranking and visualising the modifiers behind a contrast.
+Three natural follow-up questions arise after a careful interaction
+analysis.
+
+The first is *how do we know the analysis is trustworthy?* That
+question is the focus of the chapter on diagnostics and sensitivity
+analysis ([Chapter 3.12](03-12-sensitivity-analysis.qmd)), which
+covers identifiability checks, nuisance-model assessment, positivity
+diagnostics, and quantitative bias analysis for unmeasured
+confounding.
+
+The second is *which covariates contribute most to the heterogeneity
+we found?* That question is the focus of the companion chapter on
+effect modification ([Chapter 3.4](03-04-effect-modification.qmd)),
+which introduces treatment-effect variable importance measures and
+causal forests as tools for ranking and visualising the modifiers
+behind a contrast.
+
+The third is *what should we do with the heterogeneity?* Interaction
+analysis is often a first step toward more individualized
+decision-making. If treatment benefit or harm differs across
+clinically meaningful combinations of covariates, the natural next
+step is to construct a treatment rule that assigns therapy as a
+function of those covariates. The chapters on optimal treatment rules
+and policy learning provide a more formal framework for translating
+the heterogeneity that interaction analysis surfaces into a decision
+rule with quantifiable expected value.
 
 ---
 

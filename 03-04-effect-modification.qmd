@@ -18,16 +18,18 @@ This chapter provides that framework. You will learn to:
 
 1. Define subgroup-specific causal estimands (the CATE).
 2. Use TMLE to estimate prespecified subgroup effects with double robustness.
-3. Use modern data-adaptive tools — causal forests and treatment-effect variable importance measures — to discover heterogeneity.
+3. Use modern data-adaptive tools (causal forests and treatment-effect variable importance measures) to discover heterogeneity.
 4. Recognize the key pitfalls: positivity fragility in small subgroups, multiple comparisons, and the distinction between confirmatory and exploratory findings.
 
-The chapter proceeds from estimands (Section 2) through identification (Section 3), to estimation with TMLE (Sections 5–6), then to two complementary heterogeneity-discovery tools — causal forests (Sections 7–8) and treatment-effect variable importance (Section 9) — and closes with interpretation guidance.
+The chapter proceeds from estimands (Section 2) through identification (Section 3), to estimation with TMLE (Sections 5 and 6), then to two complementary heterogeneity-discovery tools (causal forests in Sections 7 and 8, and treatment-effect variable importance in Section 9), and closes with interpretation guidance.
 
 ::: {.callout-note}
 ## Scope: effect modification vs. interaction
-This chapter is about **effect modification**: how the causal effect of a single treatment $A$ varies across levels of a baseline covariate $V$. The estimands are the conditional average treatment effect, $\text{CATE}(v) = E[Y^1 - Y^0 \mid V = v]$, and contrasts of subgroup-specific effects.
+This chapter is about **effect modification**: how the causal effect of a single treatment $A$ varies across levels of a baseline covariate $V$. Effect modification describes variation in the effect of $A$ across levels of $V$. It does not require that $V$ itself be intervened on. A variable can be a useful effect modifier even if it is not a plausible target of intervention; sex, age group, baseline biomarker, or stage of disease are all common examples. The estimands are the conditional average treatment effect, $\text{CATE}(v) = E[Y^1 - Y^0 \mid V = v]$, and contrasts of subgroup-specific effects.
 
-**Causal interaction** is a different, though related, scientific question: whether two distinct exposures $A$ and $E$ produce a joint effect that departs from what their individual effects predict. That topic — including additive and multiplicative interaction parameters, RERI, and joint-intervention TMLE — is covered in [Chapter: Estimating Interactions in Real-World Evidence Research](03-04b-interactions-rwe.qmd). The two chapters are designed to be read together: effect modification asks *who benefits more from one treatment*; interaction asks *how two exposures combine*.
+**Causal interaction**, in contrast, usually refers to joint interventions on two distinct exposures or treatments. The question is whether the joint effect of $A$ and $E$ departs from what their individual effects predict, on either the additive or the multiplicative scale. That topic, including additive and multiplicative interaction parameters, RERI, and joint-intervention TMLE, is covered in [Chapter: Estimating Interactions in Real-World Evidence Research](03-04b-interactions-rwe.qmd).
+
+The two chapters are designed to be read together. Effect modification asks *who benefits more from one treatment*. Interaction asks *how two exposures combine*. The two questions can both be relevant in the same applied study, but they require different estimands.
 :::
 
 ::: {.callout-note}
@@ -56,7 +58,9 @@ knitr::opts_chunk$set(
 
 ## 1. Why study effect modification?
 
-The average treatment effect summarises what happens in the population on average, but patients differ in age, comorbidities, biomarkers, baseline risk, and genetics. Clinically relevant questions — *Does this drug work better in high-risk patients? Are cardiovascular risks higher with CKD? Does benefit differ by frailty?* — require studying who benefits most, and who benefits least. Effect modification is the analytic foundation for translating population-level evidence into individualised clinical and policy recommendations.
+The average treatment effect summarises what happens in the population on average, but patients differ in age, comorbidities, biomarkers, baseline risk, and genetics. Clinically relevant questions, such as *does this drug work better in high-risk patients*, *are cardiovascular risks higher with CKD*, or *does benefit differ by frailty*, require studying who benefits most and who benefits least. Effect modification is the analytic foundation for translating population-level evidence into individualised clinical and policy recommendations.
+
+In RWE applications, effect modification questions often arise when clinicians suspect that treatment benefit or harm differs across clinically meaningful patient groups. These groups may be defined by comorbidities, co-medications, disease severity, age, prior treatment history, or biomarker status. The goal is usually practical: identify whether an intervention has a larger absolute benefit, a smaller benefit, or greater harm in a subgroup that could be recognised in everyday clinical practice. Comparative-safety studies in pharmacoepidemiology routinely raise this question, particularly when a drug's safety profile may differ between patients with and without a baseline comorbidity. When the second variable is itself a manipulable exposure rather than a non-modifiable patient characteristic, the question shifts to causal interaction, which is covered in [Chapter: Estimating Interactions in Real-World Evidence Research](03-04b-interactions-rwe.qmd).
 
 ---
 
@@ -98,7 +102,7 @@ The estimand should match the scientific question:
 
 ## 3. Identification assumptions
 
-The standard identification assumptions — consistency, exchangeability given measured confounders, and positivity — are introduced in [Chapter 1.2](01-02-causal-roadmap.qmd). Two issues become more important when the target is a CATE rather than the average treatment effect.
+The standard identification assumptions (consistency, exchangeability given measured confounders, and positivity) are introduced in [Chapter 1.2](01-02-causal-roadmap.qmd). Two issues become more important when the target is a CATE rather than the average treatment effect.
 
 First, the moderator $V$ must be measured before treatment, and the analyst must avoid conditioning on post-treatment variables. Conditioning on a downstream variable can induce collider bias that makes the CATE non-identifiable.
 
@@ -110,8 +114,8 @@ Second, positivity fragility is amplified in subgroups. Slicing the data into sm
 
 A practical workflow for investigating effect modification has six steps:
 
-1. **Define causal estimands** — subgroup-specific ATE or CATE(x).
-2. **Choose moderators** — prespecified for confirmatory work, exploratory for hypothesis generation.
+1. **Define causal estimands**: subgroup-specific ATE or CATE(x).
+2. **Choose moderators**: prespecified for confirmatory work, exploratory for hypothesis generation.
 3. **Estimate nuisance functions** with Super Learner.
 4. **Estimate heterogeneous effects** using TMLE for prespecified subgroups, causal forests or treatment-effect variable importance for exploratory discovery.
 5. **Quantify uncertainty** using the influence function, sample splitting, or the bootstrap.
@@ -403,6 +407,10 @@ Use **TMLE in prespecified subgroups** when you already know which subgroups to 
 Testing 20 subgroups at $\alpha = 0.05$ produces one apparently significant finding by chance alone. The defences are: prespecify the main effect modifiers, correct for multiplicity (false-discovery rate or family-wise error rate), emphasise uncertainty, treat causal-forest and te-VIM findings as exploratory, and always present the overall ATE alongside any heterogeneity results.
 :::
 
+### Do not rank subgroup effects mechanically
+
+Subgroup effects should not be ranked mechanically unless they are estimated on the same scale, for the same target population, over the same follow-up period, and with comparable support. A larger effect estimate in one subgroup may reflect a higher baseline risk, a different covariate distribution, or poorer support in that subgroup rather than a more important biological mechanism. The same caveat applies to comparisons across studies and across analyses that use different adjustment sets. Before headlining one subgroup as "where the drug works best," confirm that the comparison is anchored to a single estimand and a single target population.
+
 ---
 
 ## 13. Example: combining TMLE and causal forests
@@ -468,6 +476,10 @@ Before estimating subgroup-specific effects, verify that positivity holds within
 - Effect modification (this chapter) and causal interaction ([Chapter on Interactions in RWE](03-04b-interactions-rwe.qmd)) answer related but distinct scientific questions; the two chapters are complementary.
 :::
 
+### Bridge to optimal treatment rules
+
+Effect modification is also the conceptual bridge to optimal treatment rules. Once we move from asking *whether the average effect differs across one subgroup variable* to asking *which treatment rule, applied as a function of many baseline covariates, would maximise expected outcomes in the population*, we have moved into the setting of individualised treatment rules and policy learning. The CATE machinery in this chapter (TMLE for prespecified subgroups, causal forests, treatment-effect variable importance) is the input to that next step. Chapters on optimal regimes and policy learning develop the formal estimators and decision-theoretic framing.
+
 ---
 
 ## Sources and further reading
@@ -501,7 +513,7 @@ Positivity requires that both treated and untreated individuals exist within eve
 <details>
 <summary><strong>Q3. What is the key difference between TMLE, causal forests, and te-VIM for studying effect modification?</strong></summary>
 
-TMLE is designed for confirmatory inference on prespecified subgroups or estimands. It is doubly robust (consistent if either the outcome model or the propensity model is correct), provides valid confidence intervals grounded in semiparametric efficiency theory, and targets a clearly defined causal parameter. Causal forests are designed for exploratory heterogeneity discovery: they search data-adaptively across covariates to find where treatment effects vary, but they are not doubly robust, are more susceptible to overfitting, and their output should be treated as hypothesis-generating. te-VIM provides an inferential bridge between the two: it targets a specific causal parameter — the contribution of each candidate modifier to the variance of the CATE — and estimates it with TMLE or a one-step estimator that supplies valid confidence intervals. The strongest analyses use all three: te-VIM to rank candidate modifiers, causal forests to visualise heterogeneity along the leading modifiers, and TMLE for confirmatory subgroup-specific effects.
+TMLE is designed for confirmatory inference on prespecified subgroups or estimands. It is doubly robust (consistent if either the outcome model or the propensity model is correct), provides valid confidence intervals grounded in semiparametric efficiency theory, and targets a clearly defined causal parameter. Causal forests are designed for exploratory heterogeneity discovery: they search data-adaptively across covariates to find where treatment effects vary, but they are not doubly robust, are more susceptible to overfitting, and their output should be treated as hypothesis-generating. te-VIM provides an inferential bridge between the two: it targets a specific causal parameter (the contribution of each candidate modifier to the variance of the CATE) and estimates it with TMLE or a one-step estimator that supplies valid confidence intervals. The strongest analyses use all three: te-VIM to rank candidate modifiers, causal forests to visualise heterogeneity along the leading modifiers, and TMLE for confirmatory subgroup-specific effects.
 
 </details>
 
