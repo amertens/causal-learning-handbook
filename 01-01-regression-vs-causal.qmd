@@ -13,7 +13,7 @@ Recognizing this gap is not a criticism of regression itself; regression remains
 
 This chapter uses a concrete clinical example to illustrate where the standard regression-only approach falls short, introduces the counterfactual framework that makes causal questions precise, and demonstrates g-computation as a first step toward targeted estimation. Later chapters build on these ideas with inverse probability weighting (IPTW), targeted minimum loss-based estimation (TMLE), and the full Causal Roadmap. The chapter proceeds as follows:
 
-1. A motivating example comparing osteoporosis treatments
+1. A motivating example: HAART and HIV mortality
 2. What adjusted regression does and does not give you
 3. The counterfactual (potential outcomes) framework
 4. G-computation as a bridge from association to causation
@@ -49,42 +49,31 @@ Multivariable regression has long been the standard tool in observational resear
 
 The **table-2 fallacy** [@westreich2013table2] occurs when analysts interpret multiple coefficients from a single regression as if each one estimates a separate causal effect. Each coefficient in a multivariable regression has a different set of confounders, mediators, and colliders. A model that is correctly specified for the causal effect of treatment on the outcome may simultaneously produce a biased coefficient for a covariate in the same model. Treating all coefficients as causal is a common and consequential error in applied work.
 
-### Motivating Example: Comparing Osteoporosis Treatments
+### Motivating Example: HAART and HIV Mortality
 
-Suppose we have a large claims database and want to know whether patients who initiate **denosumab** (Prolia) have a higher 3-year risk of myocardial infarction (MI) compared to those initiating **zoledronic acid**. Both are common osteoporosis treatments, and the causal question is straightforward: if we could assign everyone to denosumab versus zoledronic acid, would the 3-year MI risk differ?
+Suppose we have an observational HIV cohort and want to know whether patients who ever initiated **highly active antiretroviral therapy (HAART)** had a different risk of death than patients who never initiated it. The causal question is straightforward: if we could assign everyone in this population to HAART versus to no HAART, would the mortality risk differ, and by how much?
 
-The standard approach is to fit a **Cox proportional hazards model**, adjust for confounders like age and cardiovascular disease history, and report the adjusted hazard ratio. Let's see what that looks like.
-
+The standard approach is to fit a **Cox proportional hazards model**, adjust for confounders like age, sex, and baseline CD4 count, and report the adjusted hazard ratio. Let's see what that looks like on the running HAART cohort (introduced in the [Running Case Study](00-case-study.qmd) and used as a point-treatment baseline snapshot here).
 
 ```{r, include=FALSE}
 #| code-fold: true
 library(broom)
 library(knitr)
 library(survival)
+library(dplyr)
 
-# Simulate time-to-event data
-set.seed(123)
-n <- 2000
-treatment <- rbinom(n, 1, 0.5) # 1 = denosumab, 0 = zoledronic acid
-age <- rnorm(n, 75, 6)
-cvd_history <- rbinom(n, 1, plogis(0.1 * (age - 70)))
-
-# Simulate event times from an exponential model
-baseline_hazard <- 0.05
-log_hr <- 0.4 * treatment + 0.05 * (age - 70) + 1 * cvd_history
-event_time <- rexp(n, rate = baseline_hazard * exp(log_hr))
-
-# Administrative censoring at 3 years
-censor_time <- 3
-time <- pmin(event_time, censor_time)
-event <- as.integer(event_time <= censor_time)
+source("_data/load-haart-cohort.R")
+dat <- haart_baseline
 ```
 
-We adjust for age and cardiovascular disease history using a Cox model:
+We adjust for age, sex, and baseline (square-root) CD4 count using a Cox model:
 
 ```{r}
 #| code-fold: true
-cox_model <- coxph(Surv(time, event) ~ treatment + age + cvd_history)
+cox_model <- coxph(
+  Surv(total_fup_days, died) ~ ever_haart + age + sex + cd4_sqrt_baseline,
+  data = dat
+)
 tidy(cox_model, conf.int = TRUE, exponentiate = TRUE) |>
   kable(digits = 3, caption = "Adjusted Cox proportional hazards model (hazard ratios)")
 ```
@@ -92,13 +81,14 @@ tidy(cox_model, conf.int = TRUE, exponentiate = TRUE) |>
 :::{.callout-warning}
 ## The Hazard Ratio Is NOT the Causal Effect You Want
 
-The adjusted hazard ratio for `treatment` is around 1.5. But what does a clinician or policymaker actually need to know? They need to know: **if we switched the entire eligible population from zoledronic acid to denosumab, how many additional MIs per 100 patients would we expect over 3 years?** That quantity, the **marginal risk difference** at 3 years, is the natural scale for comparing treatments and making decisions.
+The adjusted hazard ratio for `ever_haart` quantifies an instantaneous rate ratio for death within strata of age, sex, and baseline CD4. But what does a clinician or policymaker actually need to know? They need to know: **if we initiated HAART in everyone eligible compared with no one, how would the cumulative mortality risk over follow-up change?** That quantity, the **marginal risk difference** in mortality, is the natural scale for comparing treatments and making decisions.
 
 The Cox hazard ratio does not answer that question. It is a **conditional, instantaneous rate ratio** that:
 
 - Assumes **proportional hazards** (that the treatment effect is constant over time), which is often violated in practice.
 - Is **non-collapsible**: the conditional HR and marginal HR differ even without confounding, so the coefficient does not have a straightforward population-level interpretation.
 - Does not directly translate to a risk difference or survival probability contrast without additional computation.
+- Is also confounded by indication in observational HIV data: sicker patients (lower CD4) were more likely to start HAART, so the unadjusted association conflates the drug's benefit with baseline severity. We will return to this in the longitudinal section below.
 
 In later chapters, we introduce **longitudinal TMLE (L-TMLE)**, which directly estimates causal survival curves and risk differences at specific time points without relying on the proportional hazards assumption.
 :::
@@ -106,15 +96,11 @@ In later chapters, we introduce **longitudinal TMLE (L-TMLE)**, which directly e
 
 ## Enter the Counterfactual Framework
 
-:::{.callout-note}
-## Defining Causal Effects with Potential Outcomes
-
-For each person we imagine two hypothetical worlds: **Y(1)** (outcome under denosumab) and **Y(0)** (outcome under zoledronic acid) [@hernan2025whatif]. The **average treatment effect (ATE)** is:
+For each person we imagine two hypothetical worlds: **Y(1)** (outcome if they had initiated HAART) and **Y(0)** (outcome if they had not) [@hernan2025whatif]. The **average treatment effect (ATE)** is:
 
 $$
 ATE = E[Y(1) - Y(0)]
 $$
-:::
 
 The fundamental problem of causal inference is that each person only receives one treatment. We observe Y(1) or Y(0), never both. Under three key identification assumptions, **exchangeability** (no unmeasured confounding), **consistency** (the observed outcome under the treatment actually received equals the potential outcome), and **positivity** (every individual has a nonzero probability of receiving either treatment given their covariates), we can identify the causal ATE from observed data using the **g-computation formula**:
 
@@ -133,74 +119,41 @@ where W represents the measured confounders and A is the treatment. This express
 Misspecification bias is **silent**. A regression with the wrong functional form still produces coefficients and p-values with no warning. This motivates semiparametric estimators (like TMLE with machine learning) that relax parametric assumptions.
 :::
 
-Let's compare the Cox approach to g-computation, which directly targets the 3-year risk difference:
+Let's compare the Cox approach to g-computation, which directly targets the marginal risk difference for mortality over follow-up:
 
 ```{r}
-# Fit a logistic model for 3-year risk (binary: event by year 3)
-outcome_3yr <- as.integer(event_time <= 3)
-gcomp_model <- glm(outcome_3yr ~ treatment + age + cvd_history, family = binomial)
+# Fit a logistic model for cumulative mortality risk
+gcomp_model <- glm(
+  died ~ ever_haart + age + sex + cd4_sqrt_baseline,
+  family = binomial, data = dat
+)
 
-# Predict counterfactual 3-year risks
-newdata1 <- data.frame(treatment = 1, age = age, cvd_history = cvd_history)
-p1 <- predict(gcomp_model, newdata = newdata1, type = "response")
+# Predict counterfactual mortality risks under each treatment
+p1 <- predict(gcomp_model, newdata = mutate(dat, ever_haart = 1), type = "response")
+p0 <- predict(gcomp_model, newdata = mutate(dat, ever_haart = 0), type = "response")
 
-newdata0 <- data.frame(treatment = 0, age = age, cvd_history = cvd_history)
-p0 <- predict(gcomp_model, newdata = newdata0, type = "response")
-
-# Marginal risk difference at 3 years
+# Marginal risk difference
 cat("G-computation risk difference:", round(mean(p1 - p0), 4), "\n")
 ```
 
-:::{.callout-tip}
-## Why G-Computation Gives You a Population-Level Causal Effect
-
 G-computation **predicts** counterfactual outcomes for every person under treatment and under control, then **averages** the difference. The result is a **marginal risk difference**, a population-level quantity directly relevant to decision-making, unlike the conditional hazard ratio from the Cox model.
-:::
 
 Compare this to the Cox hazard ratio:
 
 ```{r}
 # The Cox HR (exponentiating the coefficient)
-exp(coef(cox_model)["treatment"])
+exp(coef(cox_model)["ever_haart"])
 ```
 
-The Cox model correctly recovers the hazard ratio from the data-generating process. The issue is not that the model is wrong, but that the hazard ratio is not the estimand we want. A conditional hazard ratio does not directly tell us how many events would be prevented by treatment, and it is non-collapsible: the conditional HR differs from the marginal HR even without confounding.
-
-The hazard ratio tells you about instantaneous rate differences, but the g-computation risk difference tells you: "X more people per 100 would have an MI within 3 years under denosumab compared to zoledronic acid." The latter is what patients and clinicians need to make decisions.
-
-## Running Example: Antiretroviral Therapy Cohort
-
-Let us connect the ideas in this chapter to the longitudinal HIV antiretroviral therapy cohort example used in the marginal structural model literature (see [Running Case Study](00-case-study.qmd) for the full introduction). The causal question is: **does initiating HAART reduce mortality among HIV-positive patients?**
-
-A researcher might try a Cox model, adjusting for baseline CD4 count, age, and sex:
-
-```{r}
-#| code-fold: true
-source("_data/load-haart-cohort.R")
-
-# Naive baseline-only Cox model
-cox_haart <- coxph(
-  Surv(total_fup_days, died) ~ ever_haart + cd4_sqrt_baseline + age + sex,
-  data = haart_baseline
-)
-tidy(cox_haart, conf.int = TRUE, exponentiate = TRUE) |>
-  kable(digits = 3, caption = "Naive Cox model: HAART and mortality (baseline adjustment only)")
-```
-
-The hazard ratio for `ever_haart` from this model suffers from at least two problems:
-
-1. **Confounding by indication.** Patients who started HAART had lower CD4 counts (sicker), so the coefficient conflates the treatment benefit with the fact that treated patients were at higher baseline risk.
-2. **The estimand mismatch.** Even if confounding were resolved, the conditional hazard ratio is not a marginal risk difference. It does not tell us how many deaths per 100 patients would be prevented by HAART.
-
-The situation gets even worse when we consider time-varying confounding, which introduces a third, distinct failure mode beyond estimand mismatch and model misspecification.
+The Cox model and the logistic g-computation are fitted on the same data, but they answer different questions. The hazard ratio is a conditional, instantaneous rate ratio that does not directly tell us how many deaths would be averted by HAART, and it is non-collapsible: the conditional HR differs from the marginal HR even without confounding. The g-computation risk difference tells you: "X more people per 100 would have died over follow-up if no one had been initiated on HAART compared to if everyone had been." That is the kind of number patients and clinicians need to make decisions.
 
 ### Longitudinal failure: treatment-confounder feedback
 
-In the HAART cohort, CD4 count is measured at each visit and used to guide treatment decisions. But CD4 is also affected by prior treatment: HAART improves CD4 counts. This creates treatment-confounder feedback, a structure where the same variable (CD4) is simultaneously a confounder of future treatment and a consequence of past treatment.
+The point-treatment analysis above already shows that the *estimand* matters. The HAART setting also illustrates a deeper, structural problem that no choice of point-treatment estimator can fix. In the longitudinal HAART data, CD4 count is measured at each visit and used to guide treatment decisions. But CD4 is also affected by prior treatment: HAART improves CD4 counts. This creates **treatment–confounder feedback**, a structure where the same variable (CD4) is simultaneously a confounder of future treatment and a consequence of past treatment.
 
 Standard regression faces an impossible choice in this setting. If you do not adjust for time-varying CD4, you leave confounding of future treatment decisions unaddressed. If you do adjust for it, you block part of the causal pathway from HAART through improved CD4 to reduced mortality. Neither approach produces a consistent estimate of the total treatment effect. This is not a matter of choosing the right covariates or the right functional form. It is a structural limitation of the regression framework when applied to longitudinal data with feedback.
 
-The g-methods developed in this handbook, including g-computation, IPTW with marginal structural models, and longitudinal TMLE, were designed for exactly this structure. We return to the HAART example throughout, beginning with the data structure and DAGs in the [Running Case Study](00-case-study.qmd).
+The g-methods developed in this handbook — g-computation, IPTW with marginal structural models, and longitudinal TMLE — were designed for exactly this structure. We return to the longitudinal HAART data in the [Running Case Study](00-case-study.qmd) and develop the necessary methods in Part III.
 
 ## Summary
 

@@ -33,7 +33,7 @@ library(ggplot2)
 
 Readers who have worked through the [LMTP adherence-shift methods chapter](03-03b-adherence-shift-methods.qmd) will recognize the idea of decomposing drug effects into adherence-mediated and pharmacological components. That decomposition was *informal*: it used distribution shifts to approximate a controlled direct effect. This chapter provides the formal mediation framework that places those intuitions on rigorous causal footing, with proper identification conditions and semiparametric efficient estimation [@vanderLaan2011targeted].
 
-In pharmacoepidemiology, we often want to know not just **whether** a drug works, but **how** it works. Does dapagliflozin reduce cardiovascular events because it lowers blood pressure (indirect effect through the mediator), because it improves glucose control, or through some other pathway (direct effect)?
+In pharmacoepidemiology, we often want to know not just **whether** a drug works, but **how** it works. Does HAART reduce mortality because it raises CD4 cell counts (indirect effect through the mediator), because of viral suppression at sites that act on mortality risk independently of CD4 (direct effect), or both?
 
 Mediation analysis decomposes a total causal effect into the part that operates through a specified intermediate variable (the indirect effect) and the part that does not (the direct effect). Getting this decomposition right requires careful attention to the estimand, the causal model, and the assumptions that connect the two. This chapter walks through the logic and implementation of TMLE-based mediation using the `crumble` R package.
 
@@ -58,19 +58,19 @@ Key references: Zheng & van der Laan (2012), VanderWeele (2015), Díaz & Hejazi 
 
 ## The Pharmacoepidemiologic Question
 
-SGLT2 inhibitors (like dapagliflozin) have shown surprising cardiovascular benefits in type 2 diabetes trials. A natural follow-up question:
+HAART has dramatically reduced mortality in HIV cohorts. A natural follow-up question:
 
-> **How much of dapagliflozin's effect on reducing MACE operates through HbA1c reduction (the glycemic pathway), and how much operates through other mechanisms (blood pressure, weight loss, direct cardiac effects)?**
+> **How much of HAART's effect on mortality operates through CD4 recovery (the immunologic pathway), and how much operates through other mechanisms (direct viral suppression, prevention of specific opportunistic infections, reduced systemic inflammation)?**
 
-This matters for labeling, for understanding whether other glucose-lowering drugs should have similar benefits, and for guiding future drug development.
+This matters for understanding immune reconstitution as a treatment target, for evaluating treatment monitoring strategies that emphasise CD4 trajectories, and for interpreting trial results when surrogate endpoints (CD4 change) are used in place of mortality.
 
 ::: {.callout-note}
 ## The Setup
 
-- **Treatment (A):** Dapagliflozin vs. sulfonylurea
-- **Mediator (M):** 6-month HbA1c change (glycemic improvement)
-- **Outcome (Y):** 1-year MACE (binary)
-- **Baseline confounders (W):** Age, BMI, baseline HbA1c, prior CVD, eGFR, statin use
+- **Treatment (A):** HAART initiation vs. deferred initiation
+- **Mediator (M):** 6-month CD4 change (immune reconstitution)
+- **Outcome (Y):** 1-year mortality (binary)
+- **Baseline confounders (W):** Age, BMI, baseline CD4, prior AIDS-defining illness, eGFR, ART-naive status
 - **Question:** How much of the $A \to Y$ effect goes through $A \to M \to Y$?
 :::
 
@@ -153,7 +153,7 @@ The NDE asks: what is the effect of treatment if we could hold the mediator at t
 
 The trouble is that $Y(1, M(0))$ is a **cross-world** quantity that combines treatment from one "world" ($A=1$) with a mediator value from another ($A=0$). This requires a strong, untestable assumption (no treatment-induced mediator-outcome confounding).
 
-The natural indirect effect answers: how much of the total effect operates through the mediator? In the dapagliflozin example, the NIE quantifies how much of the cardiovascular benefit is attributable to HbA1c reduction specifically.
+The natural indirect effect answers: how much of the total effect operates through the mediator? In the HAART example, the NIE quantifies how much of the mortality benefit is attributable to CD4 recovery specifically.
 
 **Randomized interventional effects (RIE).** Instead of setting $M$ to a specific counterfactual value, we draw $M$ from its distribution under control. Think of this as asking: "What would the outcome look like if we kept the treatment on, but randomly reassigned each patient's mediator value from the pool of mediator values seen under the control condition?" This avoids the cross-world problem by using distributions rather than fixed individual values.
 
@@ -196,9 +196,9 @@ dag_simple <- dagify(
 ggdag(dag_simple) + theme_dag()
 ```
 
-The time ordering must be: $W$ (baseline) $\to$ $A$ (treatment assignment) $\to$ $M$ (6-month HbA1c) $\to$ $Y$ (1-year MACE). This ordering is not negotiable. If $M$ is measured after $Y$, or if $A$ and $M$ are measured simultaneously, the decomposition is not credible.
+The time ordering must be: $W$ (baseline) $\to$ $A$ (HAART initiation) $\to$ $M$ (6-month CD4 change) $\to$ $Y$ (1-year mortality). This ordering is not negotiable. If $M$ is measured after $Y$, or if $A$ and $M$ are measured simultaneously, the decomposition is not credible.
 
-When we add an intermediate confounder $Z$ (e.g., blood pressure change caused by treatment, affecting both mediator trajectory and outcome):
+When we add an intermediate confounder $Z$ (e.g., 6-week weight change caused by treatment, affecting both CD4 trajectory and mortality):
 
 ```{r}
 #| label: fig-mediation-dag-z
@@ -226,17 +226,17 @@ To identify mediation effects, we need the standard causal assumptions from Chap
 
 1. **Consistency:** as in Chapter 1.2.
 
-2. **No unmeasured treatment-outcome confounding:** $Y(a, m) \perp\!\!\!\perp A \mid W$. In the dapagliflozin example, this means that, conditional on baseline covariates, treatment choice is unrelated to potential MACE outcomes. This is the standard assumption from any observational ATE analysis.
+2. **No unmeasured treatment-outcome confounding:** $Y(a, m) \perp\!\!\!\perp A \mid W$. In the HAART example, this means that, conditional on baseline covariates, treatment initiation is unrelated to potential mortality outcomes. This is the standard assumption from any observational ATE analysis.
 
-3. **No unmeasured treatment-mediator confounding:** $M(a) \perp\!\!\!\perp A \mid W$. The mediator (HbA1c change) must be independent of treatment assignment given $W$. If physicians choose dapagliflozin for patients they expect will respond well on HbA1c, and that expectation is based on unmeasured factors, this assumption fails.
+3. **No unmeasured treatment-mediator confounding:** $M(a) \perp\!\!\!\perp A \mid W$. The mediator (CD4 change) must be independent of treatment assignment given $W$. If physicians initiate HAART preferentially in patients they expect will mount a good immune response, and that expectation is based on unmeasured factors, this assumption fails.
 
-4. **No unmeasured mediator-outcome confounding:** $Y(a, m) \perp\!\!\!\perp M \mid A, W$ (or $A, W, Z$ if intermediate confounders exist). This fails, for example, if patient adherence patterns independently affect both HbA1c change and cardiovascular risk, and adherence is not measured.
+4. **No unmeasured mediator-outcome confounding:** $Y(a, m) \perp\!\!\!\perp M \mid A, W$ (or $A, W, Z$ if intermediate confounders exist). This fails, for example, if unmeasured adherence patterns independently affect both CD4 change and mortality.
 
-5. **Positivity:** For all strata of $W$, both treatment values have positive probability, and all mediator values observed under one treatment could also occur under the other. If dapagliflozin always produces HbA1c reductions larger than any observed under sulfonylurea, the density ratios needed for estimation become extreme.
+5. **Positivity:** For all strata of $W$, both treatment values have positive probability, and all mediator values observed under one treatment could also occur under the other. If HAART always produces CD4 increases larger than any observed under deferred initiation, the density ratios needed for estimation become extreme.
 
 For **natural effects** only, add:
 
-6. **Cross-world independence:** No confounder of $M \to Y$ is affected by $A$. This is the assumption that fails when an intermediate confounder $Z$ exists. It fails, for example, if the treatment changes a patient's blood pressure, which independently affects both HbA1c trajectory and cardiovascular risk.
+6. **Cross-world independence:** No confounder of $M \to Y$ is affected by $A$. This is the assumption that fails when an intermediate confounder $Z$ exists. It fails, for example, if HAART changes a patient's weight trajectory, which independently affects both CD4 dynamics and mortality risk.
 
 For **randomized interventional** and **recanting twins** effects, assumption 6 is replaced by the weaker requirement that intermediate confounders are measured and adjusted for.
 
@@ -297,7 +297,7 @@ We demonstrate diagnostics in the worked example below.
 
 # Data Simulation
 
-We simulate a dataset where dapagliflozin reduces MACE both directly and through HbA1c improvement. The data-generating process is simple enough to compute ground-truth effects for comparison.
+We simulate an HIV cohort dataset where HAART initiation reduces mortality both directly and through CD4 recovery. The data-generating process is simple enough to compute ground-truth effects for comparison.
 
 ```{r}
 #| code-fold: true
@@ -309,61 +309,65 @@ n <- 2000
 **Baseline confounders**
 
 ```{r}
-age      <- rnorm(n, mean = 62, sd = 10)
-bmi      <- rnorm(n, mean = 31, sd = 5)
-hba1c_bl <- rnorm(n, mean = 8.2, sd = 1.3)
-cvd      <- rbinom(n, 1, plogis(-3.5 + 0.04 * age + 0.03 * bmi))
-egfr     <- pmax(15, rnorm(n, mean = 95 - 0.5 * (age - 60), sd = 15))
-statin   <- rbinom(n, 1, plogis(-1.5 + 1.8 * cvd + 0.02 * age))
+age        <- rnorm(n, mean = 38, sd = 10)
+bmi        <- rnorm(n, mean = 24, sd = 4)
+cd4_bl     <- pmax(20, rnorm(n, mean = 280, sd = 120))                # baseline CD4 cells/uL
+prior_aids <- rbinom(n, 1, plogis(-3.5 - 0.01 * (cd4_bl - 200) + 0.02 * age))
+egfr       <- pmax(15, rnorm(n, mean = 95 - 0.3 * (age - 38), sd = 15))
+art_naive  <- rbinom(n, 1, plogis(0.8 - 0.02 * age))
 ```
 
-**Treatment assignment (A)**
+**Treatment assignment (A): HAART initiation**
+
+Sicker patients (lower CD4, prior AIDS) are more likely to be initiated on HAART under treat-when-eligible guidelines, creating confounding by indication.
 
 ```{r}
 lp_trt <- -0.5 +
-  -0.02 * (age - 62) +
-   0.03 * (bmi - 31) +
-  -0.10 * (hba1c_bl - 8.2) +
-  -0.50 * cvd +
-   0.015 * (egfr - 80)
+  -0.02 * (age - 38) +
+   0.03 * (bmi - 24) +
+  -0.005 * (cd4_bl - 280) +     # lower CD4 -> more likely to initiate
+   0.80 * prior_aids +           # prior AIDS -> more likely to initiate
+   0.30 * art_naive
 
 A <- rbinom(n, 1, plogis(lp_trt))
 ```
 
-**Intermediate confounder (Z): blood pressure change**
+**Intermediate confounder (Z): 6-week weight change (kg)**
 
-This is a variable affected by treatment that confounds the mediator-outcome relationship. Including $Z$ lets us demonstrate recanting-twins estimation.
+This is a variable affected by treatment that confounds the mediator-outcome relationship. HAART can produce early weight gain (or, less commonly, weight loss with certain regimens), and weight trajectory predicts both immune recovery and mortality. Including $Z$ lets us demonstrate recanting-twins estimation.
 
 ```{r}
 Z <- rnorm(n,
-  mean = -2 * A + 0.3 * (bmi - 31) + 0.02 * (age - 62),
-  sd = 4
+  mean = 1.5 * A + 0.05 * (bmi - 24) - 0.02 * (age - 38),
+  sd = 2
 )
 ```
 
-**Mediator (M): 6-month HbA1c change**
+**Mediator (M): 6-month CD4 change (cells/uL)**
 
 ```{r}
 M <- rnorm(n,
-  mean = -0.3 - 0.5 * A + 0.1 * (hba1c_bl - 8.2) -
-         0.005 * egfr + 0.01 * (age - 62) + 0.02 * Z,
-  sd = 0.6
+  mean = 20 + 80 * A - 0.20 * (cd4_bl - 280) +
+         0.5 * egfr - 0.5 * (age - 38) + 4 * Z,
+  sd = 35
 )
 ```
 
-**Outcome (Y): 1-year MACE**
+**Outcome (Y): 1-year mortality**
+
+Higher CD4 change reduces mortality (negative coefficient on `M`). HAART reduces mortality directly and via CD4. Larger weight loss (negative `Z`) increases mortality.
 
 ```{r}
 lp_out <- -3.5 +
   -0.25 * A +
-   0.40 * M +
-   0.05 * Z +
-   0.04 * (age - 62) +
-   0.02 * (bmi - 31) +
-   0.90 * cvd +
+  -0.004 * M +                   # CD4 increase reduces mortality
+  -0.05 * Z +                    # weight gain reduces mortality
+   0.03 * (age - 38) +
+   0.02 * (bmi - 24) +
+   0.90 * prior_aids +
   -0.01 * (egfr - 80) +
-   0.25 * statin +
-   0.15 * A * cvd
+   0.25 * art_naive +
+   0.15 * A * prior_aids
 
 Y <- rbinom(n, 1, plogis(lp_out))
 ```
@@ -371,7 +375,7 @@ Y <- rbinom(n, 1, plogis(lp_out))
 **Assemble dataset**
 
 ```{r}
-dat <- tibble(age, bmi, hba1c_bl, cvd, egfr, statin, A, Z, M, Y)
+dat <- tibble(age, bmi, cd4_bl, prior_aids, egfr, art_naive, A, Z, M, Y)
 ```
 
 Quick sanity check:
@@ -399,7 +403,7 @@ The DAG for this simulation:
 dag_sim <- dagify(
   A ~ W, Z ~ A + W, M ~ A + Z + W, Y ~ A + M + Z + W,
   exposure = "A", outcome = "Y",
-  labels = c(W = "W\n(age, bmi, hba1c_bl,\ncvd, egfr, statin)",
+  labels = c(W = "W\n(age, bmi, cd4_bl,\nprior_aids, egfr, art_naive)",
              A = "A", Z = "Z", M = "M", Y = "Y"),
   coords = list(
     x = c(W = 1.5, A = 0, Z = 1, M = 2, Y = 3),
@@ -423,20 +427,20 @@ set.seed(999)
 n_mc <- 50
 
 # Mediator and Z means under each treatment
-Z_mean_A0 <- -2 * 0 + 0.3 * (bmi - 31) + 0.02 * (age - 62)
-Z_mean_A1 <- -2 * 1 + 0.3 * (bmi - 31) + 0.02 * (age - 62)
+Z_mean_A0 <- 1.5 * 0 + 0.05 * (bmi - 24) - 0.02 * (age - 38)
+Z_mean_A1 <- 1.5 * 1 + 0.05 * (bmi - 24) - 0.02 * (age - 38)
 
 compute_EY <- function(a_val, m_vals, z_vals, idx) {
   lp <- -3.5 +
     -0.25 * a_val +
-     0.40 * m_vals +
-     0.05 * z_vals +
-     0.04 * (age[idx] - 62) +
-     0.02 * (bmi[idx] - 31) +
-     0.90 * cvd[idx] +
+    -0.004 * m_vals +
+    -0.05 * z_vals +
+     0.03 * (age[idx] - 38) +
+     0.02 * (bmi[idx] - 24) +
+     0.90 * prior_aids[idx] +
     -0.01 * (egfr[idx] - 80) +
-     0.25 * statin[idx] +
-     0.15 * a_val * cvd[idx]
+     0.25 * art_naive[idx] +
+     0.15 * a_val * prior_aids[idx]
   mean(plogis(lp))
 }
 
@@ -445,19 +449,19 @@ true_nie_vals <- numeric(n)
 
 for (i in 1:n) {
   # Draw Z from P(Z | A=0, W) and P(Z | A=1, W)
-  z0 <- rnorm(n_mc, mean = Z_mean_A0[i], sd = 4)
-  z1 <- rnorm(n_mc, mean = Z_mean_A1[i], sd = 4)
+  z0 <- rnorm(n_mc, mean = Z_mean_A0[i], sd = 2)
+  z1 <- rnorm(n_mc, mean = Z_mean_A1[i], sd = 2)
 
   # M means given Z draws
   M_mean_fn <- function(a, z) {
-    -0.3 - 0.5 * a + 0.1 * (hba1c_bl[i] - 8.2) -
-      0.005 * egfr[i] + 0.01 * (age[i] - 62) + 0.02 * z
+    20 + 80 * a - 0.20 * (cd4_bl[i] - 280) +
+      0.5 * egfr[i] - 0.5 * (age[i] - 38) + 4 * z
   }
 
   # Draw M from P(M | A=0, Z(0), W)
-  m_A0_Z0 <- rnorm(n_mc, mean = M_mean_fn(0, z0), sd = 0.6)
+  m_A0_Z0 <- rnorm(n_mc, mean = M_mean_fn(0, z0), sd = 35)
   # Draw M from P(M | A=1, Z(1), W)
-  m_A1_Z1 <- rnorm(n_mc, mean = M_mean_fn(1, z1), sd = 0.6)
+  m_A1_Z1 <- rnorm(n_mc, mean = M_mean_fn(1, z1), sd = 35)
 
   # NDE: E[Y(1, M(0), Z(0))] - E[Y(0, M(0), Z(0))]
   # (holding mediator and Z at control values)
@@ -487,13 +491,13 @@ cat("NDE + NIE:        ", round(true_NDE + true_NIE, 4), "\n")
 The classic Baron-Kenny approach fits regressions for $Y \sim A$ and $Y \sim A + M$, then reads off coefficients. For binary outcomes, this fails for several reasons:
 
 ```{r}
-total_mod <- glm(Y ~ A + age + bmi + hba1c_bl + cvd + egfr + statin,
+total_mod <- glm(Y ~ A + age + bmi + cd4_bl + prior_aids + egfr + art_naive,
                  family = binomial, data = dat)
 
-full_mod  <- glm(Y ~ A + M + age + bmi + hba1c_bl + cvd + egfr + statin,
+full_mod  <- glm(Y ~ A + M + age + bmi + cd4_bl + prior_aids + egfr + art_naive,
                  family = binomial, data = dat)
 
-med_mod   <- lm(M ~ A + age + bmi + hba1c_bl + cvd + egfr + statin,
+med_mod   <- lm(M ~ A + age + bmi + cd4_bl + prior_aids + egfr + art_naive,
                 data = dat)
 
 cat("Total effect (A without M):", round(coef(total_mod)["A"], 3), "(log-OR)\n")
@@ -622,7 +626,7 @@ print(fit_rt)
 ```
 
 
-## Example 2: Simulated Pharmacoepi Data
+## Example 2: Simulated HIV Cohort Data
 
 Now we use the simulated dataset from this chapter. We need to convert treatment to a factor so that `d0` and `d1` return the correct type.
 
@@ -640,7 +644,7 @@ d0_fn <- \(data, trt) factor(rep("0", nrow(data)), levels = c("0", "1"))
 d1_fn <- \(data, trt) factor(rep("1", nrow(data)), levels = c("0", "1"))
 
 # Covariate and mediator names
-covar_names <- c("age", "bmi", "hba1c_bl", "cvd", "egfr", "statin")
+covar_names <- c("age", "bmi", "cd4_bl", "prior_aids", "egfr", "art_naive")
 ```
 
 ### Natural effects (no intermediate confounder adjustment)
@@ -671,7 +675,7 @@ print(fit_sim_N)
 
 ### Recanting twins (with intermediate confounder Z)
 
-Because our DGP includes $Z$ (blood pressure change) as a treatment-induced confounder of $M \to Y$, recanting twins is the more appropriate estimand.
+Because our DGP includes $Z$ (6-week weight change) as a treatment-induced confounder of $M \to Y$, recanting twins is the more appropriate estimand.
 
 ```{r}
 #| eval: false
@@ -690,7 +694,7 @@ fit_sim_RT <- crumble(
   control   = crumble_control(crossfit_folds = 2L, epochs = 5L)
 )
 ```
-1. `moc = "Z"`: specifies the **measured intermediate confounder** (blood pressure change in the pharmacoepi framing), the variable affected by treatment $A$ that confounds the $M \to Y$ path; `crumble` now models $P(Z \mid A, W)$ and uses it in the recanting-twins identification formula
+1. `moc = "Z"`: specifies the **measured intermediate confounder** (6-week weight change in the HIV framing), the variable affected by treatment $A$ that confounds the $M \to Y$ path; `crumble` now models $P(Z \mid A, W)$ and uses it in the recanting-twins identification formula
 2. `effect = "RT"` (recanting twins) is the appropriate estimand when `moc` is present: it correctly handles the $A \to Z \to M$ and $Z \to Y$ paths, producing valid path-specific effect decompositions that the natural effects estimator cannot identify when $Z$ exists
 
 ```{r}
@@ -724,22 +728,18 @@ fit_sim_RI <- crumble(
 print(fit_sim_RI)
 ```
 
-::: {.callout-tip}
-## Faster vs. more accurate settings
-
 The settings above (`crossfit_folds = 2L, epochs = 5L`) are deliberately fast for tutorials. For real analyses, increase to `crossfit_folds = 10L, epochs = 100L` (the defaults) and consider adding more flexible learners (e.g., `"xgboost"`, `"glmnet"`).
-:::
 
 
 # Interpretation
 
 ## What do the effects mean in context?
 
-In the dapagliflozin example:
+In the HAART example:
 
-- The **direct effect** captures the cardiovascular benefit of dapagliflozin that does *not* operate through HbA1c reduction. This includes blood pressure lowering, weight loss, ketone body effects, and direct cardiac remodeling. A large direct effect suggests SGLT2 inhibitors have a unique cardioprotective mechanism beyond glucose lowering.
+- The **direct effect** captures the mortality benefit of HAART that does *not* operate through CD4 recovery. This includes direct viral suppression effects on tissues other than CD4 lymphocytes, prevention of specific opportunistic infections through reduced viral burden, and lowered systemic inflammation independent of CD4 count. A large direct effect suggests that monitoring HAART by CD4 alone misses an important component of the drug's protective action.
 
-- The **indirect effect** (via M) captures how much of the cardiovascular benefit is attributable to the drug's effect on HbA1c. If this is large, other glucose-lowering drugs might produce similar cardiovascular benefits.
+- The **indirect effect** (via M) captures how much of the mortality benefit is attributable to immune reconstitution as measured by CD4 change. If this is large, CD4 trajectory is a strong surrogate for the mortality benefit; if small, CD4 monitoring is not capturing the dominant mechanism.
 
 - The **total effect** is the sum (for additive decompositions). It should be close to what you would estimate from a standard TMLE or IPTW analysis of $A$ on $Y$.
 
@@ -771,12 +771,12 @@ Before interpreting the indirect effect, verify that the estimation is operating
 ```{r}
 #| code-fold: true
 ps <- predict(
-  glm(A ~ age + bmi + hba1c_bl + cvd + egfr + statin,
+  glm(A ~ age + bmi + cd4_bl + prior_aids + egfr + art_naive,
       family = binomial, data = dat),
   type = "response"
 )
 
-ggplot(dat, aes(x = ps, fill = factor(A, labels = c("Sulfonylurea", "Dapagliflozin")))) +
+ggplot(dat, aes(x = ps, fill = factor(A, labels = c("Deferred", "HAART")))) +
   geom_density(alpha = 0.45) +
   labs(x = "P(A=1 | W)", fill = "Treatment",
        title = "Propensity Score Overlap") +
@@ -790,9 +790,9 @@ The indirect effect depends on treatment actually shifting the mediator distribu
 
 ```{r}
 #| code-fold: true
-ggplot(dat, aes(x = M, fill = factor(A, labels = c("Sulfonylurea", "Dapagliflozin")))) +
+ggplot(dat, aes(x = M, fill = factor(A, labels = c("Deferred", "HAART")))) +
   geom_density(alpha = 0.45) +
-  labs(x = "6-month HbA1c change (M)", fill = "Treatment",
+  labs(x = "6-month CD4 change (M)", fill = "Treatment",
        title = "Mediator Distribution by Treatment Group") +
   theme_minimal() +
   scale_fill_manual(values = c("#4477AA", "#EE6677"))
@@ -804,7 +804,7 @@ For TMLE-based mediation, the density ratio $f(M \mid A=0, W) / f(M \mid A=1, W)
 
 ```{r}
 #| code-fold: true
-m_mod <- lm(M ~ A + age + bmi + hba1c_bl + egfr + Z, data = dat)
+m_mod <- lm(M ~ A + age + bmi + cd4_bl + egfr + Z, data = dat)
 sigma_m <- sigma(m_mod)
 
 M_mean_a0 <- predict(m_mod, newdata = dat |> mutate(A = 0))
@@ -831,8 +831,8 @@ cat("Proportion > 3:", mean(density_ratio > 3), "\n")
 #| code-fold: true
 ggplot(dat, aes(x = M, y = Y)) +
   geom_smooth(method = "loess", se = TRUE, color = "#228833") +
-  facet_wrap(~factor(A, labels = c("Sulfonylurea", "Dapagliflozin"))) +
-  labs(x = "6-month HbA1c change (M)", y = "P(MACE)",
+  facet_wrap(~factor(A, labels = c("Deferred", "HAART"))) +
+  labs(x = "6-month CD4 change (M)", y = "P(mortality)",
        title = "Mediator-Outcome Relationship by Treatment") +
   theme_minimal()
 ```

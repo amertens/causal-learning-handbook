@@ -35,39 +35,40 @@ knitr::opts_chunk$set(
 
 Parts I and II dealt with point-treatment settings. In practice, patients start medications, clinicians monitor health, and treatment is adjusted based on that monitoring. This feedback between treatment and health status repeats at every clinical visit and is what makes longitudinal causal inference harder than the point-treatment case. This chapter explains why time-varying confounding affected by prior treatment breaks standard regression, lays out the identification assumptions, and previews the estimation approaches developed in the next two chapters: L-TMLE and LMTP.
 
-## A familiar example first: statins and cholesterol
+## Treatment–confounder feedback in the HIV cohort
 
-Consider estimating the effect of sustained statin use on myocardial infarction over two years using electronic health records. At each annual visit, the clinician measures LDL cholesterol and decides whether to prescribe statins. LDL plays two roles simultaneously: it is a **confounder** for future treatment (high LDL makes prescribing more likely and affects MI risk) and a **mediator** of past treatment (statins lower LDL). The DAG makes this explicit.
+Consider estimating the effect of sustained antiretroviral therapy (ART) on virologic failure over two years in an HIV cohort. At each clinic visit, the clinician measures CD4 cell count and weighs it against adherence support and side-effect tolerance when deciding whether to continue or modify therapy. CD4 plays two roles simultaneously: it is a **confounder** for future treatment (low CD4 prompts more aggressive intervention and predicts virologic failure) and a **mediator** of past treatment (ART raises CD4 by suppressing viral replication). The DAG makes this explicit.
 
 ```{r}
-#| label: fig-statin-dag
-#| fig-cap: "Time-varying confounding in a two-year statin study. LDL at the end of year 1 is both a confounder of year-2 treatment and a mediator of year-1 treatment."
+#| label: fig-hiv-feedback-intro
+#| fig-cap: "Time-varying confounding in a two-year HIV/ART study. CD4 at the end of year 1 is both a confounder of year-2 treatment and a mediator of year-1 treatment."
 #| fig-width: 8
 #| fig-height: 3.5
 #| code-fold: true
-dag_statin <- dagify(
+dag_hiv_intro <- dagify(
   A1 ~ W, L1 ~ A1 + W, A2 ~ L1 + W, Y ~ A1 + A2 + L1 + W,
   exposure = "A1", outcome = "Y",
-  labels = c(W = "Baseline\n(age, smoking)", A1 = "Statin\nyear 1",
-             L1 = "LDL\nend of year 1", A2 = "Statin\nyear 2", Y = "MI by\nyear 2"),
+  labels = c(W = "Baseline\n(age, sex, CD4_0)", A1 = "ART\nyear 1",
+             L1 = "CD4\nend of year 1", A2 = "ART\nyear 2",
+             Y = "Virologic\nfailure by year 2"),
   coords = list(
     x = c(W = 0, A1 = 1, L1 = 2, A2 = 3, Y = 4),
     y = c(W = 0.8, A1 = 0, L1 = 0.8, A2 = 0, Y = 0)
   )
 )
-ggdag(dag_statin, text = FALSE, use_labels = "label", text_size = 2.8) +
+ggdag(dag_hiv_intro, text = FALSE, use_labels = "label", text_size = 2.8) +
   theme_dag()
 ```
 
-Adjusting for LDL in a regression blocks the causal pathway $A_1 \to L_1 \to Y$; leaving it out leaves $A_2$ confounded. A time-varying covariate that is both a confounder for future treatment and a mediator of past treatment cannot be handled by standard regression. The simulation below demonstrates this.
+Adjusting for CD4 in a regression blocks the causal pathway $A_1 \to L_1 \to Y$; leaving it out leaves $A_2$ confounded. A time-varying covariate that is both a confounder for future treatment and a mediator of past treatment cannot be handled by standard regression. The simulation below demonstrates this with a stylised two-period HIV cohort.
 
 ```{r}
 set.seed(2025)
 n <- 5000
-W  <- rnorm(n)
-A1 <- rbinom(n, 1, plogis(0.3 * W))
-L1 <- rnorm(n, 0.5 * A1 + 0.4 * W)
-A2 <- rbinom(n, 1, plogis(0.5 * L1))
+W  <- rnorm(n)                         # baseline severity (e.g., baseline CD4, lower = sicker)
+A1 <- rbinom(n, 1, plogis(0.3 * W))    # ART adherence year 1
+L1 <- rnorm(n, 0.5 * A1 + 0.4 * W)     # CD4 end of year 1: improved by ART
+A2 <- rbinom(n, 1, plogis(0.5 * L1))   # ART adherence year 2 driven by current CD4
 Y  <- rbinom(n, 1, plogis(-1.5 + 0.4 * A1 + 0.4 * A2 + 0.3 * L1 + 0.3 * W))
 
 # Naive regression conditions on L1 (blocks A1 -> L1 -> Y)
@@ -76,14 +77,12 @@ cat("Naive coefficient on A1 (attenuated):", round(coef(naive_mod)["A1"], 3),
     " (true structural coefficient: 0.4)\n")
 ```
 
-The coefficient on $A_1$ is attenuated because conditioning on $L_1$ absorbs the effect of $A_1$ that operates through cholesterol. This structural bias persists at any sample size.
+The coefficient on $A_1$ is attenuated because conditioning on $L_1$ absorbs the effect of $A_1$ that operates through CD4 recovery. This structural bias persists at any sample size.
 
 
 # The HIV Cohort: Our Running Example
 
-The same feedback loop arises in HIV treatment: antiretroviral therapy (ART) raises CD4 cell counts, which in turn influence future treatment decisions and the risk of virologic failure. CD4 count is the canonical time-dependent confounder in this literature [@petersen2007msm].
-
-We use an HIV cohort as the primary example for the rest of this chapter sequence. The clinical question we will build toward is:
+CD4 count is the canonical time-dependent confounder in the HIV literature [@petersen2007msm], and we will return to it throughout the next several chapters. Building on the toy two-period DAG above, the clinical question we will work toward is:
 
 > What is the probability of virologic failure by 12 months under sustained high adherence to ART, compared to observed adherence patterns, adjusting for time-varying CD4 count?
 
@@ -99,12 +98,12 @@ The data structure at each clinic visit looks like this:
 
 At each visit, CD4 is measured first, then adherence is recorded, then we check whether the patient is still under observation. This ordering is not arbitrary; it encodes our causal assumptions about the temporal sequence.
 
-ART adherence at visit $t-1$ improves CD4 at visit $t$; higher CD4 may reduce clinical urgency and affect adherence decisions; CD4 also directly affects virologic failure risk. The same feedback structure as the statin--LDL example, with more time points.
+ART adherence at visit $t-1$ improves CD4 at visit $t$; higher CD4 may reduce clinical urgency and affect adherence decisions; CD4 also directly affects virologic failure risk. This is the same feedback structure as the toy two-period example above, scaled up to many time points.
 
 
 # Why Standard Regression Fails
 
-We have already seen the problem in the statin example, but it is worth stating precisely what goes wrong and why.
+We have already seen the problem in the two-period HIV example, but it is worth stating precisely what goes wrong and why.
 
 ## The treatment--confounder feedback loop
 
