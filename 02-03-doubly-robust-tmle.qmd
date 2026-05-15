@@ -3,7 +3,7 @@ title: "Chapter 2.3: Doubly Robust Estimators and Targeted Learning (AIPW + TMLE
 format: html
 ---
 
-*Estimated reading time: 45 minutes*
+*Estimated reading time: 50 minutes*
 
 # Chapter 2.3: Doubly Robust Estimation and Targeted Learning
 *Bridging outcome modeling and weighting for more robust causal effect estimation*
@@ -19,26 +19,35 @@ G-computation depends entirely on the outcome model; IPTW depends entirely on th
 
 # Why Doubly Robust Estimators?
 
-:::{.callout-tip}
-## Key Idea: Why Doubly Robust Estimators?
-
 A doubly robust estimator provides consistency if **either** the treatment model or the outcome model is correctly specified [@vanderLaan2011targeted]. By combining both sources of information, doubly robust estimators provide two chances to get it right and often outperform g-computation or IPTW used alone. The goal remains the same as in previous chapters: estimate $E[Y(1)] - E[Y(0)]$, the population-level risk difference.
-:::
 
 ---
 
-# AIPW: Augmented Inverse Probability Weighting
+# Two Roads to the Same Destination: AIPW and TMLE
+
+AIPW [@robins1994estimation; @bang2005doubly] and TMLE [@vanderLaan2006tmle] are not competing methods aimed at different problems. They are **two strategies for solving the same problem**: producing an estimator of the ATE that is doubly robust, semiparametrically efficient, and uses both the outcome model $Q(A, W) = E[Y \mid A, W]$ and the propensity score $g(W) = P(A=1 \mid W)$. Both estimators are derived from the **efficient influence function (EIF)** for the ATE, and under regularity conditions both achieve the same asymptotic distribution and the same semiparametric efficiency bound.
+
+What separates them is **how** they incorporate the EIF:
+
+- **AIPW** is a *one-step* estimator. It begins with the G-computation estimate (the mean of $Q(1, W) - Q(0, W)$) and *adds* an explicit correction term derived from the EIF. The sum solves the EIF estimating equation by construction.
+- **TMLE** is a *substitution* (plug-in) estimator. It begins with the same initial $Q$, then *modifies* it (via a small "fluctuation" guided by $g$) until the substitution estimator $\frac{1}{n}\sum_i [Q^*(1, W_i) - Q^*(0, W_i)]$ already solves the EIF equation. No extra correction term is needed because the correction has been absorbed into the updated $Q^*$.
+
+Both routes arrive at an estimator with the same large-sample behaviour. The structural difference (a sum versus a substitution) is what generates the practical differences we will revisit at the end of the chapter: TMLE estimates respect the bounds of the outcome scale (e.g., probabilities stay in $[0, 1]$), are interpretable as means of valid counterfactual predictions, and integrate naturally with cross-validated machine learning. AIPW is simpler to code and equally valid when propensity scores are well-behaved.
+
+---
+
+# AIPW: The One-Step Doubly Robust Estimator
 
 :::{.callout-note}
 ## What Makes AIPW "Doubly Robust"?
 
-AIPW adds a correction term to IPTW using the outcome regression. The key insight is that it is constructed so that:
+AIPW augments the G-computation estimator with an inverse-probability-weighted residual correction. The construction guarantees that:
 
-- If the **treatment model** is correctly specified (and positivity holds), the IPTW component yields a consistent estimate of the causal effect
-- If the **outcome model** is correctly specified, the augmentation (G-computation) component corrects any remaining bias from the weights
-- If **both** are correctly specified, the estimator achieves the **semiparametric efficiency bound**, meaning it has the smallest possible asymptotic variance among all regular asymptotically linear estimators
+- If the **treatment model** is correctly specified (and positivity holds), the IPW correction yields a consistent estimate of the causal effect even when the outcome model is wrong
+- If the **outcome model** is correctly specified, the correction term has mean zero and the G-computation component does the work
+- If **both** are correctly specified (and nuisances converge fast enough), the estimator achieves the **semiparametric efficiency bound**, the smallest possible asymptotic variance among regular asymptotically linear estimators
 
-In other words, AIPW "augments" the weighted estimator with a bias-correction term derived from the outcome model. This makes the estimator consistent under correct specification of either (but not necessarily both) nuisance models, plus positivity; hence the name *doubly robust*.
+This is the *one-step* idea from semiparametric theory: take a plug-in estimator, add the empirical mean of the EIF correction, and the result is a $\sqrt{n}$-consistent estimator that solves the EIF estimating equation [@robins1994estimation; @bang2005doubly].
 
 Note that "doubly robust" is a *consistency* property: it guarantees the estimator converges to the truth as $n \to \infty$ under the stated conditions, not that it is unbiased in finite samples.
 :::
@@ -62,30 +71,23 @@ $$
 
 ATE = $\hat{\mu}_1 - \hat{\mu}_0$
 
-Each formula has the same structure: start with the outcome model prediction $m(a, W_i)$, then add an IPW-weighted residual that corrects for any bias in the outcome model. If $m$ is correct, the residuals average to zero and the correction vanishes. If $m$ is wrong but $g$ is correct, the IPW correction fixes the bias.
+The structure is *G-computation plus an EIF correction*: the first term, $m(a, W_i)$, is the outcome-model prediction (the G-computation ingredient); the second term is an IPW-weighted residual that corrects any bias in the outcome model. If $m$ is correct, the residuals average to zero and the correction vanishes (we recover G-computation). If $m$ is wrong but $g$ is correct, the IPW correction fixes the bias (we recover IPTW-style behaviour). The "augmentation" in AIPW's name refers exactly to adding this correction to the G-computation plug-in.
 
 ---
 
-# Simulated Osteoporosis Dataset
+# HIV Antiretroviral Therapy Cohort
+
+We use the same point-treatment HAART cohort from chapters [2.1](02-01-gcomputation.qmd) and [2.2](02-02-iptw.qmd) so that all three estimators (G-computation, IPTW, AIPW/TMLE) can be compared on identical data. The treatment is `ever_haart` (1 = initiated HAART at any point, 0 = never), the outcome is `died`, and we adjust for baseline age, sex, and baseline square-root CD4 count.
 
 ```{r}
 #| interactive: true
 #| code-fold: true
 library(tidyverse)
 
-set.seed(2026)
-n <- 4000
-
-age <- rnorm(n, 75, 6)
-cvd <- rbinom(n, 1, plogis(0.12 * (age - 70)))
-
-# Treatment model
-A <- rbinom(n, 1, plogis(-1 + 0.08*(age - 70) + 1.4*cvd))
-
-# Outcome model
-Y <- rbinom(n, 1, plogis(-2 + 0.6*A + 0.10*(age - 70) + 1.0*cvd))
-
-dat <- tibble(age, cvd, A, Y)
+download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")
+source("load-haart-cohort.R")
+dat <- as_tibble(haart_baseline)
+n <- nrow(dat)
 ```
 
 ---
@@ -94,14 +96,16 @@ dat <- tibble(age, cvd, A, Y)
 
 ```{r}
 #| interactive: true
-Qmod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
-gmod <- glm(A ~ age + cvd, family = binomial, data = dat)
+Qmod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
+            family = binomial, data = dat)
+gmod <- glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
+            family = binomial, data = dat)
 
 dat <- dat %>%
   mutate(
     ps = predict(gmod, type = "response"),
-    Q1 = predict(Qmod, newdata = mutate(dat, A=1), type = "response"),
-    Q0 = predict(Qmod, newdata = mutate(dat, A=0), type = "response")
+    Q1 = predict(Qmod, newdata = mutate(dat, ever_haart = 1), type = "response"),
+    Q0 = predict(Qmod, newdata = mutate(dat, ever_haart = 0), type = "response")
   )
 ```
 
@@ -111,29 +115,28 @@ dat <- dat %>%
 
 ```{r}
 #| interactive: true
-with(dat, {
-  mu1 <- mean( Q1 + A * (Y - Q1) / ps )
-  mu0 <- mean( Q0 + (1 - A) * (Y - Q0) / (1 - ps) )
+aipw_est <- with(dat, {
+  mu1 <- mean( Q1 + ever_haart * (died - Q1) / ps )
+  mu0 <- mean( Q0 + (1 - ever_haart) * (died - Q0) / (1 - ps) )
   ate <- mu1 - mu0
   c(mu1 = mu1, mu0 = mu0, ate = ate)
 })
+aipw_est
 ```
 
-:::{.callout-tip}
-## Interpreting the AIPW Estimate
-
-Each AIPW component starts with the outcome-model prediction and adds a weighted residual correction. For instance, `Q1 + A * (Y - Q1) / ps` corrects $m(1, W)$ by upweighting the residual $(Y - Q1)$ for treated individuals. This structure gives AIPW its doubly robust property: even if $Q$ is wrong, the IPW correction fixes the bias (and vice versa).
-:::
+Each AIPW component starts with the outcome-model prediction and adds a weighted residual correction. For instance, `Q1 + ever_haart * (died - Q1) / ps` corrects $m(1, W)$ by upweighting the residual $(\text{died} - Q1)$ for treated individuals. This structure gives AIPW its doubly robust property: even if $Q$ is wrong, the IPW correction fixes the bias (and vice versa).
 
 ---
 
-# TMLE: Targeted Maximum Likelihood Estimation
+# TMLE: The Substitution Doubly Robust Estimator
 
-:::{.callout-tip}
-## Key Idea: Why TMLE Over AIPW?
+TMLE solves the same EIF estimating equation as AIPW, but it does so by **modifying $Q$** rather than by adding an external correction. After a small targeted update guided by the propensity score (the "clever covariate"), the substitution estimator $\frac{1}{n}\sum_i [Q^*(1, W_i) - Q^*(0, W_i)]$ already solves the EIF equation by construction.
 
-TMLE [@vanderLaan2006tmle] offers several advantages over AIPW: predicted probabilities always stay in $[0, 1]$ (AIPW can fall outside), it integrates naturally with ensemble machine learning (Super Learner), and the fluctuation step solves the efficient influence curve equation by construction. This provides a foundation for valid inference under regularity conditions: correct specification of at least one nuisance model, positivity, and (when data-adaptive learners are used) cross-fitting or CV-TMLE to avoid Donsker-class requirements (see @zheng2011crossvalidated).
-:::
+This substitution structure has three practical consequences:
+
+1. Predicted probabilities always stay in $[0, 1]$ (the AIPW correction can push the sum outside the parameter space when propensity scores are extreme)
+2. The estimator is a mean of valid counterfactual predictions, so you can stratify, transform, and re-aggregate without re-deriving anything
+3. It integrates naturally with ensemble machine learning (Super Learner), and CV-TMLE provides valid inference under regularity conditions even when nuisances are estimated with flexible learners [@zheng2011crossvalidated]
 
 ---
 
@@ -150,7 +153,7 @@ expit <- function(x) 1/(1+exp(-x))
 Qinit <- predict(Qmod, type="response")
 ```
 
-**Step 2: Estimate the propensity score.** The propensity score $g(W) = P(A = 1 \mid W)$ is needed to construct the clever covariate in the next step. We already fit this model in Section 4.
+**Step 2: Estimate the propensity score.** The propensity score $g(W) = P(A = 1 \mid W)$ is needed to construct the clever covariate in the next step. We already fit this model above.
 
 ```{r}
 #| interactive: true
@@ -161,7 +164,7 @@ ps <- dat$ps
 :::{.callout-note}
 ## Definition: The Clever Covariate
 
-The **clever covariate** $H(A, W)$ is the key ingredient that makes TMLE "targeted." It is derived from the efficient influence curve for the ATE:
+The **clever covariate** $H(A, W)$ is the key ingredient that makes TMLE "targeted." It is derived from the efficient influence function for the ATE:
 
 $$
 H(A, W) = \frac{A}{g(W)} - \frac{1 - A}{1 - g(W)}
@@ -178,31 +181,27 @@ The clever covariate directs the fluctuation to reduce bias for the specific cau
 ```{r}
 #| interactive: true
 # Step 3: Clever covariate at observed treatment
-H <- with(dat, A/ps - (1-A)/(1-ps))  # <1>
+H <- with(dat, ever_haart/ps - (1-ever_haart)/(1-ps))  # <1>
 ```
-1. $H(A,W)$ is derived from the efficient influence curve for the ATE. For treated observations ($A=1$) it equals $1/g(W)$; for controls ($A=0$) it equals $-1/(1-g(W))$. This combined form simultaneously handles both arms and directs the fluctuation step specifically toward the ATE estimand rather than any other parameter.
+1. $H(A,W)$ is derived from the efficient influence function for the ATE. For treated observations ($A=1$) it equals $1/g(W)$; for controls ($A=0$) it equals $-1/(1-g(W))$. This combined form simultaneously handles both arms and directs the fluctuation step specifically toward the ATE estimand rather than any other parameter.
 
-:::{.callout-important}
-## Step 4: Fit the Fluctuation Model and Update Predictions
+**Step 4: Fit the fluctuation model and update predictions.** This is the critical "targeting" step, and it is where TMLE structurally diverges from AIPW. Instead of *adding* the EIF correction to the G-computation estimate (the AIPW recipe), we use the propensity score (via the clever covariate) to *update Q* until the correction term vanishes inside the substitution estimator.
 
-This is the critical "targeting" step. We fit a logistic regression of $Y$ on $H$ with the initial logit-predictions as an offset:
+We fit a logistic regression of $Y$ on $H$ with the initial logit-predictions as an offset:
 
 $$
 \text{logit}(E[Y \mid A, W]) = \text{logit}(Q_n^0(A, W)) + \epsilon \cdot H(A, W)
 $$
 
-The estimated $\hat{\epsilon}$ is then used to **update** (fluctuate) the initial predictions. Crucially, we must apply this fluctuation to the counterfactual predictions $Q_n^0(1, W)$ and $Q_n^0(0, W)$ using their respective clever covariates $H_1$ and $H_0$.
-
-This step ensures the final estimates solve the efficient influence curve equation, which is what gives TMLE its optimal statistical properties.
+The estimated $\hat{\epsilon}$ is then used to **update** (fluctuate) the initial predictions. Crucially, we must apply this fluctuation to the counterfactual predictions $Q_n^0(1, W)$ and $Q_n^0(0, W)$ using their respective clever covariates $H_1$ and $H_0$. This step ensures the final estimates solve the efficient influence function equation, which is what gives TMLE its optimal statistical properties.
 
 The targeting step is not trying to improve prediction in general. It is adjusting the initial outcome predictions specifically to reduce bias for the ATE. A well-calibrated prediction model might predict individual outcomes accurately but still produce a biased ATE when predictions are averaged. The fluctuation step corrects for exactly this discrepancy by incorporating information from the propensity score.
-:::
 
 ```{r}
 #| interactive: true
 # Step 4: Fluctuation model
-epsilon <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H,  # <1>
-               family = binomial)$coef                   # <2>
+epsilon <- glm(dat$died ~ -1 + offset(logit(Qinit)) + H,  # <1>
+               family = binomial)$coef                     # <2>
 ```
 1. The `-1` suppresses the intercept; `offset(logit(Qinit))` fixes the initial Q predictions on the logit scale so only the coefficient on `H` (the fluctuation parameter ε) is estimated
 2. Logistic family keeps the update on the probability scale; `.coef` extracts the single ε; a small number close to zero means the initial Q needed little correction
@@ -214,8 +213,8 @@ epsilon <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H,  # <1>
 ```{r}
 #| interactive: true
 # Get initial (pre-fluctuation) predictions under each treatment
-Q1_init <- predict(Qmod, newdata = mutate(dat, A=1), type="response")
-Q0_init <- predict(Qmod, newdata = mutate(dat, A=0), type="response")
+Q1_init <- predict(Qmod, newdata = mutate(dat, ever_haart = 1), type="response")
+Q0_init <- predict(Qmod, newdata = mutate(dat, ever_haart = 0), type="response")
 
 # Clever covariates for counterfactual treatment values
 H1 <- 1 / ps          # <1>
@@ -239,7 +238,7 @@ The initial outcome and propensity score models do not have to be simple GLMs. T
 
 # TMLE Inference: Standard Errors and Confidence Intervals
 
-A major advantage of TMLE is that inference follows directly from the **efficient influence curve (EIC)**. Using the clever covariate notation from Section 7, where $H(A, W) = A/g(W) - (1-A)/(1-g(W))$, the EIC for the ATE at the TMLE fit can be written in a single unified form:
+A major advantage of TMLE is that inference follows directly from the **efficient influence function (EIF)**. Using the clever covariate notation from Section 7, where $H(A, W) = A/g(W) - (1-A)/(1-g(W))$, the EIF for the ATE at the TMLE fit can be written in a single unified form:
 
 $$
 D_i = H(A_i, W_i)\big(Y_i - Q^*(A_i, W_i)\big) + Q^*(1, W_i) - Q^*(0, W_i) - \hat{\psi}
@@ -251,26 +250,28 @@ $$
 D_i = \frac{A_i}{e(W_i)}\big(Y_i - Q_1^*(W_i)\big) - \frac{1-A_i}{1-e(W_i)}\big(Y_i - Q_0^*(W_i)\big) + Q_1^*(W_i) - Q_0^*(W_i) - \hat{\psi}
 $$
 
-where $\hat{\psi}$ is the TMLE ATE estimate. The variance of the ATE is estimated by the sample variance of the EIC divided by $n$: $\hat{\sigma}^2 = \frac{1}{n}\sum_i D_i^2$.
+where $\hat{\psi}$ is the TMLE ATE estimate. The variance of the ATE is estimated by the sample variance of the EIF divided by $n$: $\hat{\sigma}^2 = \frac{1}{n}\sum_i D_i^2$.
+
+The same EIF underlies AIPW's variance estimator, which is the deeper reason both estimators have the same asymptotic distribution. They differ in how they *form* the point estimate, not in the influence function used for inference.
 
 ::: {.callout-important}
-## When is EIC-based inference valid?
+## When is EIF-based inference valid?
 
-The EIC-based variance estimator and resulting Wald-type confidence intervals are asymptotically valid when (i) at least one nuisance model is consistently estimated, (ii) positivity holds, and (iii) certain regularity/rate conditions are met. When **data-adaptive or machine learning** methods are used for nuisance estimation, these conditions require **cross-fitting** (sample-splitting) or **CV-TMLE** to avoid empirical process conditions (Donsker class membership) that flexible learners typically violate. In the `tmle3` and `drtmle` R packages, cross-fitting is available; the classic `tmle` package does not cross-fit by default but remains valid when the Super Learner library is not too aggressive (e.g., excludes highly adaptive learners like HAL without cross-fitting). See @zheng2011crossvalidated for the theoretical foundations.
+The EIF-based variance estimator and resulting Wald-type confidence intervals are asymptotically valid when (i) at least one nuisance model is consistently estimated, (ii) positivity holds, and (iii) certain regularity/rate conditions are met. When **data-adaptive or machine learning** methods are used for nuisance estimation, these conditions require **cross-fitting** (sample-splitting) or **CV-TMLE** to avoid empirical process conditions (Donsker class membership) that flexible learners typically violate. In the `tmle3` and `drtmle` R packages, cross-fitting is available; the classic `tmle` package does not cross-fit by default but remains valid when the Super Learner library is not too aggressive (e.g., excludes highly adaptive learners like HAL without cross-fitting). See @zheng2011crossvalidated for the theoretical foundations.
 :::
 
 ```{r}
 #| interactive: true
 # Observed outcomes
-Y_obs <- dat$Y
+Y_obs <- dat$died
 
-# EIC (efficient influence curve) components
+# EIF (efficient influence function) components
 # For treated: use Q1_star; for control: use Q0_star
 # But we need Q* at the OBSERVED A for the residual terms
-Qstar_obs <- ifelse(dat$A == 1, Q1_star, Q0_star)  # <1>
-H_obs <- ifelse(dat$A == 1, H1, H0)                 # <1>
+Qstar_obs <- ifelse(dat$ever_haart == 1, Q1_star, Q0_star)  # <1>
+H_obs <- ifelse(dat$ever_haart == 1, H1, H0)                 # <1>
 
-# Efficient influence curve for each observation
+# Efficient influence function for each observation
 EIC <- H_obs * (Y_obs - Qstar_obs) + Q1_star - Q0_star - tmle_ate  # <2>
 
 # Standard error and 95% CI
@@ -286,33 +287,84 @@ tibble(
 )
 ```
 1. Select the targeted Q prediction and clever covariate at each observation's *observed* treatment value; needed to form the IPW-weighted residual term that corrects for outcome model error
-2. The EIC has two parts: (a) $H(A,W)(Y - Q^*)$; an IPW-weighted residual that corrects any outcome model bias, and (b) $(Q_1^* - Q_0^* - \hat\psi)$; the centered substitution component. When the fluctuation step correctly solved the EIC equation, the sample mean of EIC is exactly zero.
-3. The EIC variance divided by $n$ yields the semiparametric efficient variance; this is valid even when machine learning is used for nuisance models (with appropriate cross-fitting)
+2. The EIF has two parts: (a) $H(A,W)(Y - Q^*)$; an IPW-weighted residual that corrects any outcome model bias, and (b) $(Q_1^* - Q_0^* - \hat\psi)$; the centered substitution component. When the fluctuation step correctly solved the EIF equation, the sample mean of the EIF is exactly zero.
+3. The EIF variance divided by $n$ yields the semiparametric efficient variance; this is valid even when machine learning is used for nuisance models (with appropriate cross-fitting)
 
-:::{.callout-tip}
-## Interpreting TMLE Inference
-
-The EIC-based standard error is a key output of TMLE. Because the fluctuation step solves the EIC estimating equation, the resulting confidence interval achieves approximately correct coverage under regularity conditions, even when machine learning is used for the nuisance models (provided cross-fitting or other sample-splitting techniques are employed).
-
-If the confidence interval excludes zero, we have evidence that the treatment has a non-null causal effect on the outcome at the 95% confidence level.
-:::
+The EIF-based standard error is a key output of TMLE. Because the fluctuation step solves the EIF estimating equation, the resulting confidence interval achieves approximately correct coverage under regularity conditions, even when machine learning is used for the nuisance models (provided cross-fitting or other sample-splitting techniques are employed). If the confidence interval excludes zero, we have evidence that the treatment has a non-null causal effect on the outcome at the 95% confidence level.
 
 ---
 
-# Comparison: AIPW vs TMLE
+# AIPW vs TMLE: A Detailed Comparison
 
-### AIPW vs TMLE: Head-to-Head
+The chapter opened with the claim that AIPW and TMLE are two roads to the same destination. With both estimators now in hand, we can be precise about what is shared and what is not.
+
+## What is the same
+
+Both AIPW and TMLE are constructed from the **same efficient influence function** for the ATE. As a direct consequence:
+
+- **Doubly robust.** Both are consistent for the ATE if either the outcome model $Q$ or the propensity score $g$ is correctly specified.
+- **Semiparametric efficiency.** Both achieve the semiparametric efficiency bound when both nuisances converge fast enough (typically rates of at least $n^{-1/4}$ each, so the product is faster than $n^{-1/2}$).
+- **Same asymptotic distribution.** Under regularity conditions, both are asymptotically linear with the *same* influence function (the EIF), so both have the same asymptotic variance and the same EIF-based standard errors.
+- **Same nuisance requirements.** Both need an outcome model, a propensity model, positivity, and (when flexible learners are used) cross-fitting to control the empirical process bias from data-adaptive nuisance estimation.
+
+In large samples, on data with well-behaved propensity scores, AIPW and TMLE are essentially indistinguishable. They differ in finite samples, and they differ in their structural form.
+
+## What is different — and why
+
+The structural distinction is **additive correction (AIPW) versus substitution / fluctuation (TMLE)**, and almost every practical difference flows from it.
 
 | Property | AIPW | TMLE |
 |---|---|---|
-| Doubly robust | Yes | Yes |
-| Semiparametrically efficient | Yes (asymptotically) | Yes |
-| Handles ML well | Yes, with cross-fitting | Yes, with SuperLearner + cross-fitting (CV-TMLE) |
-| Predictions bounded in $[0,1]$ | No | Yes |
-| Solves EIC equation | Not guaranteed | Yes, by construction |
-| Implementation complexity | Simple | Moderate |
+| How the EIF equation is solved | Add the empirical EIF correction to G-computation | Update $Q \to Q^*$ until the substitution estimator solves it |
+| Form of the estimator | Sum of plug-in + IPW-weighted residual | Mean of $Q^*(1, W) - Q^*(0, W)$ |
+| Predictions bounded in $[0, 1]$ | No — the IPW correction is unbounded; with extreme $g$, the estimate can exit the parameter space | Yes — logit-scale fluctuation guarantees $Q^* \in [0, 1]$ |
+| Plug-in interpretability | No — sums of residuals don't decompose cleanly | Yes — every estimate is a mean of valid counterfactual predictions |
+| Integration with Super Learner | Works with cross-fitting (DML-style) | Designed alongside Super Learner; CV-TMLE is the standard recipe |
+| Implementation complexity | Simple (one formula) | Moderate (initial fit + fluctuation + targeted predictions) |
+| Inference (EIF-based SEs) | Yes | Yes |
 
-**Key point.** Both AIPW and TMLE are valid doubly robust estimators. TMLE is generally preferred because it respects the bounds of the parameter space (e.g., probabilities stay in $[0,1]$), integrates naturally with ensemble machine learning, and solves the efficient influence curve equation by construction. In practice, this means TMLE tends to have better finite-sample performance and more trustworthy inference.
+The most consequential of these is **boundedness**. When some propensity scores are near 0 or 1, the AIPW correction term $\frac{A}{g(W)}(Y - Q(1,W))$ can be large in magnitude and same-signed across many observations. Adding it to the G-computation plug-in can produce probability estimates above 1 or below 0, or risk-difference estimates outside $[-1, 1]$. TMLE absorbs the same correction *into* $Q$ on the logit scale, so the substitution estimator is always a mean of valid probabilities. This is a structural guarantee, not a finite-sample lucky break.
+
+## When to prefer which
+
+In practice the choice usually comes down to four questions:
+
+- **Is propensity score overlap clean?** If yes, AIPW is fine and simpler to implement. If no (extreme propensities, small overlap region), prefer TMLE for the boundedness guarantee.
+- **Are you using flexible machine learning?** If yes, prefer CV-TMLE (the most mature ML-aware doubly robust workflow). AIPW with sample-splitting (DML) also works but the tooling is less unified with the rest of the Targeted Learning ecosystem.
+- **Do you need to stratify or post-process the estimate?** If yes (e.g., subgroup risk differences, transformations to relative scales), prefer TMLE — its substitution form lets you re-aggregate $Q^*$ directly.
+- **Is this a quick prototype or a publishable analysis?** AIPW is excellent for prototyping and for a sanity check next to G-computation and IPTW. For published doubly robust estimates, TMLE is now the field default.
+
+---
+
+# Numerical Side-by-Side on the HAART Cohort
+
+Because both estimators target the same EIF on the same data with the same nuisance fits, their point estimates and standard errors should be very close.
+
+```{r}
+#| interactive: true
+# AIPW point estimate and EIF-based SE on the same nuisances
+mu1_aipw <- with(dat, mean( Q1 + ever_haart * (died - Q1) / ps ))
+mu0_aipw <- with(dat, mean( Q0 + (1 - ever_haart) * (died - Q0) / (1 - ps) ))
+aipw_ate <- mu1_aipw - mu0_aipw
+
+# AIPW EIF (uses the un-targeted Q, not Q*)
+H1_raw <- 1 / dat$ps
+H0_raw <- -1 / (1 - dat$ps)
+Q_obs  <- with(dat, ifelse(ever_haart == 1, Q1, Q0))
+H_obs_raw <- with(dat, ifelse(ever_haart == 1, H1_raw, H0_raw))
+EIF_aipw <- H_obs_raw * (dat$died - Q_obs) + dat$Q1 - dat$Q0 - aipw_ate
+aipw_se  <- sqrt(var(EIF_aipw) / n)
+
+bind_rows(
+  tibble(Estimator = "AIPW", ATE = aipw_ate, SE = aipw_se,
+         CI_lower = aipw_ate - 1.96 * aipw_se,
+         CI_upper = aipw_ate + 1.96 * aipw_se),
+  tibble(Estimator = "TMLE", ATE = tmle_ate, SE = tmle_se,
+         CI_lower = ci_lower, CI_upper = ci_upper)
+) |> knitr::kable(digits = 4, caption = "AIPW and TMLE on the same HAART data and nuisances")
+```
+
+The two estimates and their standard errors should agree to within roughly the third decimal. They are not identical because the AIPW estimator uses the initial $Q$ inside the substitution component while TMLE uses the targeted $Q^*$, and the fluctuation step gently shifts $Q^*$ away from $Q$ by an amount governed by $\hat\epsilon$. When propensity scores are well-behaved (as they are here), $\hat\epsilon$ is small and the gap is correspondingly small. When some propensity scores are extreme, $\hat\epsilon$ can be larger and the two estimators diverge — a useful diagnostic that the boundedness and stability advantages of TMLE are starting to matter.
 
 ---
 
@@ -321,9 +373,11 @@ If the confidence interval excludes zero, we have evidence that the treatment ha
 :::{.callout-tip}
 ## Key Takeaways
 
-- Doubly robust estimators (AIPW, TMLE) combine outcome and treatment models and are consistent if **either** model is correct
-- TMLE is preferred: bounded predictions, plug-in estimation, natural ML integration, and EIC-based inference
-- Doubly robust estimators are widely used for point-treatment causal inference in epidemiology and are recommended by several methodological guidelines
+- AIPW and TMLE both solve the EIF estimating equation for the ATE; both are doubly robust and both achieve the semiparametric efficiency bound
+- AIPW = G-computation + EIF correction (a sum); TMLE = G-computation with targeted $Q^* \to$ substitution estimator (a plug-in)
+- The substitution form gives TMLE bounded predictions, plug-in interpretability, and a natural fit with Super Learner / CV-TMLE
+- AIPW is simpler and equally valid when propensity scores are well-behaved; TMLE is the field default when machine learning is used or propensity scores are extreme
+- Inference for both rests on the same EIF, so their standard errors share the same theoretical justification
 :::
 
 ```{r}
@@ -345,14 +399,21 @@ No. "Doubly robust" means the estimator is consistent if *either* the treatment 
 <details>
 <summary><strong>Q2. Why does TMLE use a "clever covariate" derived from the propensity score, and what happens if propensity scores are extreme?</strong></summary>
 
-The clever covariate $H(A, W) = A / g(W) - (1 - A) / (1 - g(W))$ is derived from the efficient influence curve for the ATE. It directs the fluctuation of the initial outcome model toward the specific causal parameter of interest, ensuring that the final estimate solves the EIC estimating equation. If propensity scores are extreme (near 0 or 1), the clever covariate becomes very large, which can destabilize the fluctuation step. This is why practical positivity (adequate overlap in propensity score distributions) is important for TMLE just as it is for IPTW.
+The clever covariate $H(A, W) = A / g(W) - (1 - A) / (1 - g(W))$ is derived from the efficient influence function for the ATE. It directs the fluctuation of the initial outcome model toward the specific causal parameter of interest, ensuring that the final estimate solves the EIF estimating equation. If propensity scores are extreme (near 0 or 1), the clever covariate becomes very large, which can destabilize the fluctuation step. This is why practical positivity (adequate overlap in propensity score distributions) is important for TMLE just as it is for IPTW.
 
 </details>
 
 <details>
 <summary><strong>Q3. Your TMLE estimate of a risk probability is 0.85. Could AIPW have produced an estimate above 1.0 for the same data?</strong></summary>
 
-Yes. AIPW is a linear estimator that does not enforce the bounds of the parameter space. Because it adds a weighted residual correction to the outcome-model prediction, the resulting estimate can fall outside $[0, 1]$, especially when propensity scores are extreme and the correction term is large. TMLE avoids this by performing its update on the logistic (log-odds) scale and then back-transforming, which guarantees that predicted probabilities remain in $[0, 1]$. This is one of the key practical advantages of TMLE over AIPW.
+Yes, and this is the *structural* reason TMLE is generally preferred for bounded outcomes — not just a numerical curiosity. AIPW is a sum: the G-computation plug-in plus an unbounded IPW-weighted residual correction. When propensity scores are extreme, the correction can be large enough to push the sum outside the parameter space. TMLE absorbs the same correction into $Q$ on the logit scale, so the substitution estimator is the mean of valid probabilities and stays in $[0, 1]$ by construction. The two estimators target the same EIF; they differ in *how* they keep the result inside the parameter space.
+
+</details>
+
+<details>
+<summary><strong>Q4. Will AIPW and TMLE always give similar answers in practice?</strong></summary>
+
+In large samples on data with well-behaved propensity scores, yes — they share the same asymptotic distribution and the same EIF-based standard errors. Visible disagreement between the two estimates usually points to a specific cause: (i) some propensity scores are near 0 or 1, so the AIPW correction is large and the fluctuation parameter $\hat\epsilon$ is non-trivial; (ii) one nuisance is much more wrong than the other, so the boundedness behaviour matters; or (iii) the sample is small and the estimators' finite-sample distributions have not yet converged to the asymptotic one. A meaningful AIPW–TMLE gap is therefore a useful diagnostic, not a contradiction.
 
 </details>
 
