@@ -16,12 +16,12 @@ knitr::opts_chunk$set(
 )
 ```
 
-Throughout this handbook, we use a single recurring example to illustrate causal concepts, estimation methods, and diagnostic tools: a longitudinal HIV antiretroviral therapy cohort from the marginal structural model literature (Van der Wal & Geskus, 2011). Using one example across all chapters lets you see how the same data look through the lens of each method and makes it easier to compare approaches.
+Throughout this handbook, we use a single recurring causal question to illustrate causal concepts, estimation methods, and diagnostic tools: **does initiating highly active antiretroviral therapy (HAART) reduce mortality among people living with HIV, and if so, by how much?** We answer this question using a longitudinal HIV antiretroviral therapy cohort from the marginal structural model literature (Van der Wal & Geskus, 2011). Anchoring every chapter to the same question and dataset lets you see how each method approaches the same target, and makes it easier to compare results across approaches.
 
 
 ## Clinical and epidemiologic motivation
 
-In the early years of combination antiretroviral therapy (HAART), a central clinical question was: does initiating HAART reduce mortality among HIV-positive patients, and if so, by how much?
+In the early years of combination antiretroviral therapy (HAART), a central clinical question was: does initiating HAART reduce mortality among HIV-positive patients, and if so, by how much? Although this sounds like a question about HAART "use," it is really a question about *strategies for when to start* HAART, because therapy is initiated (and then sustained) in response to evolving clinical status. The longitudinal, time-dependent nature of the initiation decision is what creates the confounding structure we have to address.
 
 Answering this from observational data is harder than it looks. Physicians do not assign HAART randomly. They initiate therapy when CD4 cell counts decline and clinical status worsens. The very biomarkers that predict death also determine who gets treated and when. This is confounding by indication.
 
@@ -32,12 +32,12 @@ The dataset we use is a simulated cohort of 1,200 HIV-positive patients designed
 
 ## Why this example is useful
 
-This cohort illustrates three complications that motivate modern causal inference. First, confounding by indication: sicker patients are more likely to start HAART, so a naive comparison of treated and untreated patients conflates the drug's benefit with baseline severity. Second, time-varying confounding with treatment-confounder feedback: CD4 count changes over time, is affected by prior treatment, and also drives future treatment decisions. No standard regression can simultaneously adjust for CD4 as a confounder and preserve its role as a mediator. Third, the analysis requires a clearly specified target trial and estimand before any model is fit, because vague causal questions produce vague answers.
+This cohort illustrates three complications that motivate modern causal inference. First, confounding by indication: sicker patients are more likely to start HAART, so a naive comparison of treated and untreated patients conflates the drug's benefit with baseline severity. In this dataset that means HAART initiators look *worse* than non-initiators in a crude analysis, simply because they had lower CD4 counts and worse prognosis at the moment they started therapy. Second, time-varying confounding with treatment-confounder feedback: CD4 count changes over time, is affected by prior treatment, and also drives future treatment decisions. No standard regression can simultaneously adjust for CD4 as a confounder and preserve its role as a mediator. Third, the analysis requires a clearly specified target trial and estimand before any model is fit, because vague causal questions produce numerically precise answers that cannot be interpreted relative to any well-defined contrast.
 
 
 ## The observed data
 
-The dataset is distributed as `haartdat` in the `ipw` R package. It contains 1,200 simulated HIV-positive patients observed from HIV seroconversion in person-period (long) format, with one row per patient per 100-day interval.
+The dataset is distributed as `haartdat` in the `ipw` R package. It is a *simulated* cohort (not a prospective study) built to reproduce the structure of real HIV cohorts used in the marginal structural model literature. It contains 1,200 HIV-positive patients observed from HIV seroconversion in person-period (long) format, with one row per patient per fixed 100-day interval. The regular interval grid is a feature of the simulation; in real-world data, visit times would be irregular and would themselves need to be modeled.
 
 ```{r}
 #| code-fold: true
@@ -109,9 +109,9 @@ haartdat |>
 The figure shows CD4 trajectories on the original (back-transformed) scale. Each patient initiates HAART at a different time, and CD4 counts fluctuate throughout follow-up. This is the longitudinal, time-varying structure that makes causal inference challenging: treatment timing depends on the evolving CD4 trajectory, and treatment itself changes the trajectory.
 
 
-### Cohort summary
+### Cohort summary of baseline characteristics
 
-We also create a baseline snapshot (one row per patient) for chapters that use point-treatment examples:
+Several chapters (g-computation, IPTW, point-treatment TMLE) work with a simpler point-treatment version of the question, contrasting *ever* versus *never* initiating HAART using only baseline confounders. For those chapters we collapse the longitudinal data into a baseline snapshot with one row per patient:
 
 ```{r}
 #| code-fold: true
@@ -147,7 +147,13 @@ haart_baseline |>
 
 The primary causal question is:
 
-> **Among HIV-positive individuals under longitudinal follow-up from seroconversion, what would the risk of death have been under a strategy of initiating HAART when clinically indicated, compared with a strategy of deferring HAART?**
+> **Among HIV-positive individuals under longitudinal follow-up from seroconversion, what would the risk of death have been under a strategy of initiating HAART when clinically indicated, compared with a strategy of never initiating HAART during follow-up?**
+
+"Clinically indicated" here means a CD4-driven initiation rule consistent with the guidance in force during the cohort era — for concreteness, *initiate HAART at the first interval at which CD4 falls below a fixed threshold (e.g., 350 cells/µL)* and continue thereafter.
+
+It is worth being explicit about what this threshold is and is not. The threshold defines the **intervention regime we want to evaluate** — the counterfactual strategy whose mortality risk we are estimating. It does *not* describe the policy under which the observed data were generated: in the `haartdat` simulation, HAART initiation is not triggered by a hard CD4 cutoff but by a probabilistic model in which the hazard of initiating increases as CD4 falls (and also depends on age and sex). The whole point of the causal analysis is to estimate what would have happened under the cleaner threshold-based strategy, despite the fact that the observed initiation process is a noisier, covariate-driven one.
+
+The comparator strategy, "never initiate HAART," is the static contrast used in the marginal structural model literature and the longitudinal analogue of the *ever vs never* contrast used in Chapters [2.1](02-01-gcomputation.qmd)–[2.3](02-03-doubly-robust-tmle.qmd) (where the point-treatment chapters collapse the longitudinal data to a baseline snapshot and ask "ever initiated vs never initiated"). The dynamic-vs-static framing here is deliberate: a single regression cannot estimate the *dynamic* arm without inducing bias, which is the failure mode that motivates the g-methods developed in Part III. Readers interested in the clinically most relevant contrast — comparing two CD4-driven initiation strategies against each other, e.g., *initiate at CD4 < 350* vs *initiate at CD4 < 200* — will find that dynamic-vs-dynamic comparison developed in Chapters [3.7](03-07-longitudinal-td-confounding.qmd) and [3.9](03-09-illustrated-ltmle.qmd).
 
 This is a question about sustained treatment strategies, not a single-timepoint comparison of treated versus untreated patients. The causal question asks what would happen if we could assign treatment strategies to everyone, removing the influence of confounding on the treatment decision. The associational question, by contrast, compares patients who happened to initiate HAART with those who did not, and that comparison is confounded because sicker patients are more likely to start treatment.
 
@@ -160,12 +166,12 @@ To make the causal question precise, we specify the randomized trial we would id
 |-----------|---------------|
 | **Eligibility** | HIV-positive adults at seroconversion, antiretroviral-naive |
 | **Time zero** | Date of HIV seroconversion |
-| **Treatment strategies** | (1) Initiate HAART according to clinical guidelines vs. (2) defer HAART |
-| **Assignment** | Random assignment at time zero |
+| **Treatment strategies** | (1) Initiate HAART at the first interval at which CD4 falls below the contemporaneous clinical threshold (e.g., 350 cells/µL) and continue thereafter, vs. (2) never initiate HAART during follow-up |
+| **Assignment** | Random assignment to strategy at time zero |
 | **Outcome** | All-cause mortality |
 | **Follow-up** | From seroconversion until death, dropout, or administrative end of study (up to 3,700 days) |
 | **Causal contrast** | Risk difference in mortality at a specified time horizon |
-| **Analysis** | Intention-to-treat or per-protocol, depending on the question |
+| **Analysis** | Per-protocol: we estimate the effect of *adhering to* each sustained strategy, since the scientific question is about treatment strategies rather than randomized assignment. An ITT analogue is not natural in an observational target-trial emulation because there is no baseline randomization to be "intended." Chapter [1.2](01-02-causal-roadmap.qmd) discusses the ITT-vs-per-protocol choice as part of the Causal Roadmap, and Chapter [3.7](03-07-longitudinal-td-confounding.qmd) walks through how the per-protocol effect is identified from observational data via g-methods. |
 
 The target trial forces us to define the causal question before choosing a statistical method. It makes the assumptions transparent: we are asking what would have happened under specific, well-defined treatment strategies. And it highlights where the observational data fall short of the ideal, since treatment is not randomly assigned but determined by evolving clinical status. The causal roadmap (Chapter 1.2) provides the framework for bridging from this ideal trial to the data we actually have.
 
