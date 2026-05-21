@@ -468,20 +468,96 @@ Y_long <- blocks |>
 mean(Y_long |> filter(t == K) |> pull(Y))
 ```
 
-## Informative monitoring and censoring `C_t`
+## Informative monitoring: enrollment and outcome ascertainment
 
-In a randomised trial the analyst gets to decide when each participant is observed. In claims, *observation itself is endogenous*: a patient appears in block `t` because they remained enrolled, and enrollment can depend on health, employment, geography, and the very same time-varying covariates that drive adherence. This is informative monitoring, and treating "did not appear in our data" as missing-completely-at-random is a classical source of bias in pharmacoepidemiology.
+In a randomised trial the analyst gets to decide when each participant is observed. In claims, *observation itself is endogenous*: a patient appears in our analysis dataset in block `t` only if (a) they were still enrolled, and (b) the outcome of interest was actually ascertained — typically because the relevant lab or test was ordered and resulted in the data. Both pieces depend on the same time-varying covariates that drive adherence and failure, and both can introduce bias if they are ignored.
 
-The way the helpers handle this is by carrying an explicit observation indicator `C_t` that is part of the longitudinal node structure. `lmtp` then reweights for the probability of remaining observed (via `cens` nodes). The key practical points are:
+Two distinct informative-observation mechanisms collide on a real claims dataset, and they need to be combined into a single `C_t` indicator before any estimator is fit.
 
-- `C_t = 1` means "still observed at the end of block `t`" — this is the `lmtp` convention.
-- Once `C_t = 0`, the row is closed: `L_s`, `PDC_s`, `Y_s` for $s \ge t+1$ are `NA`.
-- The probability of being observed conditional on covariate history is modelled, so the censoring mechanism must be at least *informative on observed history* (sequential exchangeability of the censoring process).
-- A row that is censored *and* has experienced the event at the same block is treated as having failed, not as censored — the absorbing carry-forward dominates.
+**1. Enrollment-based censoring.** A patient may lose insurance coverage, switch to a payer not represented in the warehouse, or otherwise drop out of the claims extract. Enrollment ending is often weakly informative on baseline covariates (employment status, age) and at most weakly informative on post-baseline health — a defensible "missing-at-random given baseline" assumption is sometimes appropriate, though the more rigorous default is to model it.
 
-Build `C_t` from enrollment gaps (and from any regimen-switch logic you classify as censoring rather than failure):
+**2. Outcome-ascertainment-driven censoring.** This is the structurally harder problem and the one that bites pharmacoepi analyses most often. The chapter's outcome ($Y_t$ = virologic failure or new resistance mutation) is defined by a test result. *If no test happens in block `t`, the outcome is unascertained, not zero.* And test ordering is not random — patients with low adherence and disengagement from care get fewer routine viral-load and resistance tests. So absence of a test is correlated with both the underlying outcome (via adherence) and with the treatment process itself. Treating "no test in this block" as "$Y_t = 0$" — which is what naive cohort builds do — therefore introduces bias in the same direction as the bias from informative censoring on enrollment, but driven by a different mechanism. The right response is to recognise it as a *second* censoring channel and reweight for it.
+
+Both mechanisms are handled by `lmtp` and `ltmle` through the same `cens` argument. The trick is to combine them into a single block-level observation indicator:
+
+$$
+C_t = \mathbf{1}\{\text{enrolled for the full block}\} \times \mathbf{1}\{\text{at least one outcome-relevant test in the block}\}.
+$$
+
+In the chapter's HIV-failure example, the outcome-relevant test is the viral-load lab — the same lab that defines $Y_t$ when it returns a high value. In Sarah's resistance study (referenced in the source material for this chapter), the outcome-relevant test is the genotypic resistance assay. The principle is the same: a row is observed at the end of block `t` only if the patient was both enrolled and tested.
+
+Once `C_t = 0`:
+
+- the row is closed: $L_s$, $\mathrm{PDC}_s$, $Y_s$ for $s \ge t+1$ are `NA`;
+- a row censored at the same block as a confirmed event is treated as having failed, not as censored — the absorbing carry-forward dominates;
+- the probability of being observed conditional on covariate history is modelled by `lmtp::lmtp_tmle()` and `ltmle::ltmle()` as a nuisance function, so the censoring mechanism must be *informative on observed history* (sequential exchangeability of $C_t$ given $W_0$, $L_t$, and prior adherence). This is the analogue of sequential exchangeability for treatment — and it is the only assumption that lets the analysis compensate for missing tests.
+
+On a real claims dataset the combined observation indicator is built from two components and combined into a single monotone censoring variable. This is the construction we recommend for an applied analysis; the chapter's worked example below uses the simpler enrollment-only `C_t` because the simulator emits a routine VL test in every observed block (so the testing component is degenerate and the combined indicator collapses to the enrollment one).
 
 ```{r}
+#| eval: false
+# Real-data construction of C_t (combine enrollment + outcome ascertainment).
+# Use this on your warehouse data; the chapter's simulator below uses the
+# enrollment-only fallback because routine testing is deterministic there.
+
+# Component 1: enrolled for the full block
+enroll_long <- blocks |>
+  left_join(elig, by = "patient_id") |>
+  group_by(patient_id, t, block_start, block_end) |>
+  summarise(
+    covered_full_block = any(enroll_start <= block_start &
+                             enroll_end   >= block_end),
+    .groups = "drop"
+  ) |>
+  select(patient_id, t, covered_full_block)
+
+# Component 2: at least one outcome-relevant test in the block
+# (any VL lab; failure-level VLs are a subset)
+tested_long <- lab |>
+  filter(loinc %in% vl_loincs) |>
+  inner_join(blocks, by = "patient_id") |>
+  filter(collect_date >= block_start, collect_date <= block_end) |>
+  distinct(patient_id, t) |>
+  mutate(tested = 1L)
+
+# Combined observation indicator. Monotone via cummin: once a patient
+# is unobserved at any block (lost enrollment OR no outcome test), the
+# row is closed from that block onward. This matches the survival
+# likelihood that lmtp and ltmle fit, which expects C_t = 0 to be an
+# absorbing state.
+cens_long_combined <- blocks |>
+  select(patient_id, t) |>
+  left_join(enroll_long, by = c("patient_id", "t")) |>
+  left_join(tested_long, by = c("patient_id", "t")) |>
+  mutate(
+    tested = tidyr::replace_na(tested, 0L),
+    obs_block = as.integer(covered_full_block & tested == 1L)
+  ) |>
+  group_by(patient_id) |>
+  arrange(t, .by_group = TRUE) |>
+  mutate(C = cummin(obs_block)) |>
+  ungroup() |>
+  select(patient_id, t, C)
+
+# Diagnostic on real data: what fraction is censored at each block, by drug?
+# A meaningful gap by drug indicates that outcome ascertainment is informative
+# on adherence and the censoring nodes are doing real work.
+cens_long_combined |>
+  left_join(cohort |> select(patient_id, A0), by = "patient_id") |>
+  group_by(t, drug = ifelse(A0 == 1, "Drug A", "Drug B")) |>
+  summarise(pct_censored = round(100 * mean(C == 0), 1),
+            .groups = "drop")
+```
+
+::: {.callout-warning}
+## Practical note on the combined indicator and `lmtp`
+We have observed (lmtp 1.5.0) that fitting `lmtp_tmle()` against the combined indicator above can fail with a `subscript out of bounds` error when block-1 censoring is meaningful — this appears to be a known interaction between the cross-fit partitioning and right-censoring patterns. Two workarounds when you hit this: (1) restrict the analysis to subjects with `C_1 = 1` (drop never-observed subjects) before fitting, and (2) if the error persists, fit `lmtp_sdr()` in place of `lmtp_tmle()` — the sequentially doubly robust estimator handles the same estimand and is more robust to this particular failure mode. Both fits return the same risk-scale point estimates and SE structure.
+:::
+
+For the chapter's worked example we use the simpler enrollment-only `C_t` (since the simulator emits a routine VL in every observed block, the testing component is degenerate):
+
+```{r}
+# Enrollment-only C_t used by the runnable chunks below
 cens_long <- blocks |>
   left_join(elig, by = "patient_id") |>
   group_by(patient_id, t) |>
@@ -492,13 +568,17 @@ cens_long <- blocks |>
   ) |>
   mutate(C = as.integer(covered_full_block))
 
-# Censoring rate by block
 cens_long |>
   group_by(t) |>
   summarise(pct_censored = round(100 * mean(C == 0), 1))
 ```
 
-If your study can plausibly assume that enrollment is independent of post-baseline health *given baseline covariates*, you can skip the censoring nodes entirely. That is a strong assumption on a pharmacoepi cohort; the more defensible default is to model `C_t` explicitly and let the analysis reweight.
+**Sensitivity to the assumption.** Sequential exchangeability of `C_t` given observed history is *not* testable from the data. Two practical checks help bound its plausibility:
+
+- *A negative control on testing.* If you can identify a subset of patients whose testing should be plausibly random with respect to adherence (e.g., patients enrolled in a structured monitoring program with mandatory testing schedules), compare the LMTP shift estimated on the full cohort to the estimate restricted to that subset. Material differences suggest informative ascertainment is still leaking through.
+- *Vary the operationalisation.* Build `C_t` once with "any VL test in the block" and again with "VL test plus active clinical contact" (e.g., any office visit). If the headline estimates move meaningfully, the testing model is doing real work and the assumption is consequential.
+
+If your study can plausibly assume that *both* enrollment and outcome ascertainment are independent of post-baseline health *given baseline covariates*, you can skip the `cens` argument entirely and pass `include_censoring = FALSE` to the helpers. That is a strong assumption on a pharmacoepi cohort and almost never holds in practice; modelling `C_t` explicitly is the default.
 
 ## Long → wide and enforcing the invariants
 
@@ -1084,6 +1164,60 @@ fine |>
 ```
 
 The fine-bin dose-response is more demanding on positivity than either the three-category L-TMLE or the LMTP shift, because each bin defines a much narrower static regime. Expect some bins (especially the low ones on the focal drug) to have wide CIs or to fail to converge; the `converged` column lets you flag them rather than silently dropping them.
+
+# Extending to a richer outcome: viral-load distributions
+
+The chapter's outcome is binary: $Y_t = 1$ iff a failure-equivalent event (VL > 200, or new resistance mutation) by the end of block `t`. For some downstream uses — feeding the results into an HIV transmission model where transmissibility depends on *the viral-load distribution* among the not-suppressed, not just on suppressed-vs-not-suppressed status — the binary outcome is too coarse. The same g-method framework extends to richer outcomes with small API changes; the wide schema, censoring handling, diagnostic stack, and shift definitions all carry over.
+
+**Continuous outcome (mean counterfactual log-VL).** Replace `Y_t` with `log10(VL_t)` — the VL measured at the end of block `t`, with imputation for blocks without a test. Switch `lmtp::lmtp_tmle()` to `outcome_type = "continuous"`. The +10pp shift estimand becomes the mean counterfactual log-VL by drug; the contrast against natural-course gives the mean reduction in log-VL achievable by an adherence intervention.
+
+```{r}
+#| eval: false
+# Sketch: continuous-VL outcome. vl_value_at_block_t below is whichever
+# carry-forward / imputation rule you choose for blocks without a test.
+wide_cont <- wide
+for (t in 1:K) {
+  wide_cont[[paste0("VL_", t)]] <- log10(pmax(20, vl_value_at_block_t))
+}
+vl_nodes <- paste0("VL_", 1:K)
+
+fit_cont <- lmtp::lmtp_tmle(
+  data         = reorder_for_lmtp(wide_cont[wide_cont$A0 == 1, ], K),
+  trt          = trt_nodes,  outcome   = vl_nodes,
+  baseline     = "W0",       time_vary = tv_nodes,
+  cens         = cns_nodes,
+  shift        = shift_up,   mtp       = TRUE,
+  outcome_type = "continuous",
+  learners_trt = "SL.glm",   learners_outcome = "SL.glm",
+  folds        = 1
+)
+lmtp::tidy(fit_cont)
+```
+
+**Binned outcome (conditional VL distribution).** Bin VL into clinically meaningful categories — e.g., suppressed (<50), low-detectable (50–1000), moderate (1000–10000), high (>10000). For each bin, build a binary indicator `Y_t^{(bin)} = 1{VL_t in bin}` and fit `lmtp_tmle()` with `outcome_type = "binomial"`. The collection of per-bin counterfactual probabilities is the **counterfactual VL distribution under the intervention** — exactly the input most transmission models need to translate adherence shifts into infection-averted estimates.
+
+```{r}
+#| eval: false
+vl_bins <- list(
+  suppressed = function(v) v < 50,
+  low        = function(v) v >= 50    & v < 1000,
+  moderate   = function(v) v >= 1000  & v < 10000,
+  high       = function(v) v >= 10000
+)
+
+results <- list()
+for (bin_name in names(vl_bins)) {
+  wide_bin <- wide
+  for (t in 1:K) {
+    wide_bin[[paste0("Y_", t)]] <-
+      as.integer(vl_bins[[bin_name]](vl_value_at_block_t))
+  }
+  attr(wide_bin, "K") <- K
+  results[[bin_name]] <- run_lmtp(wide_bin, drug = 1, shift_fn = shift_up)
+}
+```
+
+Both extensions reuse the wide schema and shift definitions developed earlier; the API change is `outcome_type` and the construction of the outcome column(s). For the binned outcome, all of the positivity and overlap diagnostics from earlier in the chapter still need to be checked — for narrow bins at the tails of the VL distribution (e.g., "high"), the effective sample size may be small enough that the per-bin LMTP fit is unreliable, in which case a continuous-outcome analysis is the right fallback.
 
 # Pitfalls when moving from simulation to claims
 
