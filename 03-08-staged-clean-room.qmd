@@ -1,14 +1,13 @@
 ---
-title: "Staged and Clean-Room Designs for Real-World Evidence"
 format: html
 ---
 
 *Estimated reading time: 55 minutes*
 
-# Chapter 3.8: Staged and Clean-Room Designs for Real-World Evidence
+# Staged and Clean-Room Designs for Real-World Evidence {#sec-clean-room}
 *Pre-specified targeted learning with outcome-blind diagnostics, plasmode candidate selection, and a data-quality stress test*
 
-You have specified a target trial, chosen an estimand, defended your DAG, fit a TMLE with Super Learner, and run the diagnostics in [Chapter 3.5a](03-05a-assumption-diagnostics.qmd). Should the reviewer believe the estimate? In a regulatory or multi-site RWE setting, the answer increasingly depends not just on the estimator but on the **process** that produced it: was the analysis plan fixed before the outcome was inspected, were the design and estimator choices documented as they were made, and can an external reviewer reconstruct every decision from a single archived record?
+You have specified a target trial, chosen an estimand, defended your DAG, fit a TMLE with Super Learner, and run the diagnostics in @sec-advanced-diagnostics. Should the reviewer believe the estimate? In a regulatory or multi-site RWE setting, the answer increasingly depends not just on the estimator but on the **process** that produced it: was the analysis plan fixed before the outcome was inspected, were the design and estimator choices documented as they were made, and can an external reviewer reconstruct every decision from a single archived record?
 
 This chapter introduces the **staged, outcome-blind workflow** of [@muntner2024staging] and the **clean-room** governance arrangement that surrounds it. We then walk through the `cleanTMLE` R package, which provides the software layer for a staged TMLE analysis: an analysis lock with a SHA-256 fingerprint, automatic audit and decision logs, plasmode-based candidate selection, a data-quality stress test, and a GO / FLAG / STOP pre-outcome decision rule that physically refuses to read the primary outcome until the prespecified checkpoints have been recorded. We finish with a complete worked example on the HIV antiretroviral therapy cohort.
 
@@ -23,7 +22,7 @@ This chapter introduces the **staged, outcome-blind workflow** of [@muntner2024s
 - Carry out the full pipeline on the HIV antiretroviral therapy cohort using `cleanTMLE`
 :::
 
-*This chapter assumes familiarity with TMLE ([Chapter 2.3](02-03-doubly-robust-tmle.qmd)), Super Learner ([Chapter 2.4](02-04-superlearner.qmd)), and the diagnostic framework of [Chapter 3.5a](03-05a-assumption-diagnostics.qmd). It complements [Chapter 3.12](03-12-sensitivity-analysis.qmd) by showing how to combine pre-outcome diagnostics, plasmode robustness screening, and an audit trail into a single reproducible record.*
+*This chapter assumes familiarity with TMLE (@sec-doubly-robust-tmle), Super Learner (@sec-superlearner), and the diagnostic framework of @sec-advanced-diagnostics. It complements @sec-sensitivity-analysis by showing how to combine pre-outcome diagnostics, plasmode robustness screening, and an audit trail into a single reproducible record.*
 
 ```{r}
 #| include: false
@@ -91,7 +90,7 @@ A staged clean-room workflow is the roadmap **executed in a particular order**, 
 The crucial features of this sequence are:
 
 - **Stage 1a fingerprints the analytic specification.** Every later stage is reconciled against the lock hash, so a reviewer can detect any silent change to the cohort, covariates, or learner library.
-- **Stages 1b through 3 are outcome-blind.** They use covariates, treatment, event counts, marginal outcome summaries, synthetic outcomes, and negative-control outcomes — never the observed treatment–primary-outcome association.
+- **Stages 1b through 3 are outcome-blind.** They use covariates, treatment, event counts, marginal outcome summaries, synthetic outcomes, and negative-control outcomes, never the observed treatment–primary-outcome association.
 - **The pre-outcome decision is structural, not advisory.** Stage 4 estimators check for a recorded authorisation and refuse to execute without one.
 - **The decision log captures rationales.** Whenever the analyst deviates from the recorded plan (drops a covariate, narrows the NC panel, relaxes a threshold), the deviation appears as a separate entry an external reviewer can read.
 
@@ -127,7 +126,7 @@ The package depends on `survival`, `ggplot2`, `digest`, and (for the SuperLearne
 - The Super Learner library and the random seed
 - Plasmode settings: number of replicates, effect-size grid
 
-It then computes a SHA-256 fingerprint over those fields plus the row count, column count, and sorted column names of the data. The fingerprint is the `lock_hash`. Anything that changes those fields — adding a covariate, swapping `SL.glm` for `SL.glmnet`, recoding the treatment — invalidates the hash and the change becomes visible to a reviewer who reconciles the saved lock against the recorded analysis.
+It then computes a SHA-256 fingerprint over those fields plus the row count, column count, and sorted column names of the data. The fingerprint is the `lock_hash`. Anything that changes those fields, adding a covariate, swapping `SL.glm` for `SL.glmnet`, recoding the treatment, invalidates the hash and the change becomes visible to a reviewer who reconciles the saved lock against the recorded analysis.
 
 The estimand, sensitivity plan, decision thresholds, and audit-log entries are kept on the lock object but are **not** part of the fingerprint. They are tracked separately in the audit trail so that any later modification appears as its own entry; the lock hash is reserved for the core analytic specification.
 
@@ -143,7 +142,7 @@ TMLE is the prespecified primary estimator in the staged workflow; the conventio
 
 ## The data-quality stress test
 
-The package's distinguishing contribution is `run_plasmode_dq_stress()`. Standard outcome-blind plasmode selects the candidate with the best baseline RMSE under one locked synthetic outcome mechanism. The DQ stress test re-runs the same loop under four prespecified threat families and produces a **degradation gradient** — a curve of bias, RMSE, and coverage against the severity of the threat — for each TMLE candidate.
+The package's distinguishing contribution is `run_plasmode_dq_stress()`. Standard outcome-blind plasmode selects the candidate with the best baseline RMSE under one locked synthetic outcome mechanism. The DQ stress test re-runs the same loop under four prespecified threat families and produces a **degradation gradient**, a curve of bias, RMSE, and coverage against the severity of the threat, for each TMLE candidate.
 
 | Threat | What is perturbed | Identification assumption probed |
 |---|---|---|
@@ -154,7 +153,7 @@ The package's distinguishing contribution is `run_plasmode_dq_stress()`. Standar
 
 The degradation gradient is analogous to a dose–response curve for estimator fragility. A *shallow* gradient says the candidate is stable across the plausible severity range. A *cliff* says small increases in degradation move performance outside the locked operating-characteristic thresholds.
 
-The stress test is a **quantitative supplement** to a SPIFD2-style [@gatto2023spifd2] fit-for-purpose review, not a substitute for source-data validation, variable-validation studies, or post-outcome quantitative bias analysis. Once the analyst specifies plausible threats and severity ranges — from external validation studies, data profiling, or expert elicitation — the stress test evaluates how candidate estimators behave under those prespecified perturbations on the same bias-RMSE-coverage scale used for baseline candidate selection.
+The stress test is a **quantitative supplement** to a SPIFD2-style [@gatto2023spifd2] fit-for-purpose review, not a substitute for source-data validation, variable-validation studies, or post-outcome quantitative bias analysis. Once the analyst specifies plausible threats and severity ranges, from external validation studies, data profiling, or expert elicitation, the stress test evaluates how candidate estimators behave under those prespecified perturbations on the same bias-RMSE-coverage scale used for baseline candidate selection.
 
 ---
 
@@ -251,7 +250,7 @@ The roadmap step that has to happen before any code runs is the target-trial spe
 | **Outcome** | All-cause mortality (`Y = died`) at end of follow-up |
 | **Causal contrast** | Marginal risk difference, $\Psi = E[Y(1)] - E[Y(0)]$ |
 
-The statistical estimand under the standard identification assumptions ([Chapter 1.2](01-02-causal-roadmap.qmd)) is the g-formula contrast
+The statistical estimand under the standard identification assumptions (@sec-roadmap) is the g-formula contrast
 
 $$
 \Psi = E_W\!\left[E\{Y \mid A = 1, W\} - E\{Y \mid A = 0, W\}\right].
@@ -259,7 +258,7 @@ $$
 
 ::: {.callout-warning}
 ## Scope of this worked example
-The full HAART analysis treats `haartind` as a time-varying treatment with treatment-confounder feedback in CD4 — exactly the longitudinal setting that motivates LTMPS and LTMLE in [Chapter 3.7](03-07-longitudinal-td-confounding.qmd) and [Chapter 3.9](03-09-illustrated-ltmle.qmd). Collapsing to `ever_haart` here is a deliberate simplification to exercise the binary-outcome scope of `cleanTMLE` v0.1. The reported point estimates are pedagogical and should not be interpreted as causal effects of HAART; they illustrate the staged workflow, not the substantive question.
+The full HAART analysis treats `haartind` as a time-varying treatment with treatment-confounder feedback in CD4, exactly the longitudinal setting that motivates LTMPS and LTMLE in @sec-longitudinal-confounding and @sec-illustrated-ltmle. Collapsing to `ever_haart` here is a deliberate simplification to exercise the binary-outcome scope of `cleanTMLE` v0.1. The reported point estimates are pedagogical and should not be interpreted as causal effects of HAART; they illustrate the staged workflow, not the substantive question.
 :::
 
 A clean-room workflow records this scoping decision rather than absorbing it into a silent analytic choice. In `cleanTMLE` the event-process classification is recorded structurally with `clean_event_process_table()`:
@@ -340,7 +339,7 @@ The hash is reproducible: any reviewer who reruns `create_analysis_lock()` on th
 
 ## Stage 1b: cohort adequacy
 
-Before any modelling we confirm the cohort can support the analysis. `checkpoint_cohort_adequacy()` reads event *counts* — not the joint distribution of $A$ and $Y$ — and returns a structured checkpoint object.
+Before any modelling we confirm the cohort can support the analysis. `checkpoint_cohort_adequacy()` reads event *counts*, not the joint distribution of $A$ and $Y$, and returns a structured checkpoint object.
 
 ```{r}
 #| eval: false
@@ -378,7 +377,7 @@ cp2 <- checkpoint_balance(diag,
 audit <- record_checkpoint(audit, cp2)
 ```
 
-For the HIV cohort the propensity for HAART initiation is driven largely by baseline CD4 count: lower CD4 increases the probability of initiation. With only three baseline covariates the overlap is generally adequate but the lower tail of CD4 is sparser in the untreated arm — a positivity strain worth noting.
+For the HIV cohort the propensity for HAART initiation is driven largely by baseline CD4 count: lower CD4 increases the probability of initiation. With only three baseline covariates the overlap is generally adequate but the lower tail of CD4 is sparser in the untreated arm, a positivity strain worth noting.
 
 To make the diagnostics concrete without requiring the package, the same calculations in base R:
 
@@ -423,7 +422,7 @@ A weighted SMD of $\le 0.10$ across all three covariates and an ESS above 50 % o
 
 We now compare prespecified TMLE candidates on plasmode-simulated outcomes. Plasmode simulation preserves the real covariate and treatment distributions and generates synthetic outcomes from a parametric model fitted on the cohort, allowing us to evaluate bias, RMSE, and coverage at a *known* truth before unmasking the real outcome.
 
-The candidates vary the propensity-score truncation threshold and the Super Learner library. The selection rule — minimum RMSE across plasmode replicates — is declared in advance and is itself part of the audit log.
+The candidates vary the propensity-score truncation threshold and the Super Learner library. The selection rule, minimum RMSE across plasmode replicates, is declared in advance and is itself part of the audit log.
 
 ```{r}
 #| eval: false
@@ -467,7 +466,7 @@ This is the workflow's distinguishing contribution and the most useful diagnosti
 For the HIV cohort, a reasonable threat list is:
 
 - **Covariate missingness:** Baseline CD4 was unmeasured for 5–20 % of patients in some early HIV registries; we set that fraction of CD4 values to `NA` and impute with the column median.
-- **Treatment misclassification:** Early registries sometimes recorded HAART initiation with sensitivity 0.90–0.95 and specificity 0.95–0.99 — true initiators were occasionally missed and a small fraction of mono- or dual-therapy regimens were misclassified as HAART.
+- **Treatment misclassification:** Early registries sometimes recorded HAART initiation with sensitivity 0.90–0.95 and specificity 0.95–0.99, true initiators were occasionally missed and a small fraction of mono- or dual-therapy regimens were misclassified as HAART.
 - **Outcome misclassification:** Death ascertainment via clinic visits without national vital-status linkage typically has sensitivity around 0.90 and specificity near 1.0, with a possibility of differential ascertainment by treatment arm.
 - **Unmeasured confounding:** Adherence and concurrent opportunistic-infection prophylaxis are not measured in the baseline summary and could plausibly induce a moderate latent confounder ($U$-treatment OR 1.5–2.0, $U$-outcome OR 1.5–2.0).
 
@@ -511,11 +510,11 @@ Two things to read from a table like this:
 1. **Outcome misclassification and the larger unmeasured-confounding scenario produce the largest bias.** This matches the theoretical expectation: outcome misclassification violates the no-measurement-error assumption directly, and unmeasured confounding violates conditional exchangeability. The DQ stress test is doing exactly what we ask of it: making the threats that the identification assumptions exclude *visible* on the same scale as the baseline plasmode metrics.
 2. **The covariate-missingness gradient is shallow.** At 20 % missing-CD4 the bias change is still well under the locked envelope (`dq_max_abs_bias = 0.02`). A reviewer reading the SPIFD2 narrative can conclude that the candidate is stable under the plausible CD4-missingness range.
 
-The combined verdict — `cp_dq` returns FLAG because the OR 2.0/2.0 unmeasured-confounding scenario breaches the prespecified bias envelope — is exactly the kind of nuanced result the stress test is designed to produce. The candidate is not disqualified, but the reviewer is told *where* the candidate fails and *under which prespecified threat*.
+The combined verdict, `cp_dq` returns FLAG because the OR 2.0/2.0 unmeasured-confounding scenario breaches the prespecified bias envelope, is exactly the kind of nuanced result the stress test is designed to produce. The candidate is not disqualified, but the reviewer is told *where* the candidate fails and *under which prespecified threat*.
 
 ## Stage 3: negative-control outcomes
 
-A negative-control outcome (NCO) is a variable that on substantive grounds is not caused by the treatment but shares the same confounding structure. If the analytic pipeline finds a non-null effect on the NCO, the assumption of no unmeasured confounding is suspect; see [Chapter 3.5a](03-05a-assumption-diagnostics.qmd) and [Chapter 3.12](03-12-sensitivity-analysis.qmd).
+A negative-control outcome (NCO) is a variable that on substantive grounds is not caused by the treatment but shares the same confounding structure. If the analytic pipeline finds a non-null effect on the NCO, the assumption of no unmeasured confounding is suspect; see @sec-advanced-diagnostics and @sec-sensitivity-analysis.
 
 For the HIV cohort there is no canonical NCO embedded in the baseline summary, so we illustrate the pattern with a covariate-driven synthetic NCO and treat it as a workflow demonstration only:
 
@@ -531,7 +530,7 @@ audit <- record_checkpoint(audit, nc$checkpoint)
 print(nc)
 ```
 
-In a real submission, candidate NCOs for a HAART analysis might include incident injury at a specific anatomic site, or use of a clearly unrelated medication class — both of which should not be causally affected by HAART initiation but plausibly share confounders such as healthcare access and clinic attendance.
+In a real submission, candidate NCOs for a HAART analysis might include incident injury at a specific anatomic site, or use of a clearly unrelated medication class, both of which should not be causally affected by HAART initiation but plausibly share confounders such as healthcare access and clinic attendance.
 
 ## The pre-outcome decision
 
@@ -554,7 +553,7 @@ print(gate)
 #>                       sensitivity in the post-outcome interpretation."
 ```
 
-`FLAG` is not a polite `STOP`. It is a structured instruction to proceed *and* to attach a documented qualification — here, the post-outcome interpretation must explicitly address what the DQ stress test surfaced. The decision log records the rationale; the audit log records the classification. A reviewer reading the dossier sees both.
+`FLAG` is not a polite `STOP`. It is a structured instruction to proceed *and* to attach a documented qualification, here, the post-outcome interpretation must explicitly address what the DQ stress test surfaced. The decision log records the rationale; the audit log records the classification. A reviewer reading the dossier sees both.
 
 ## Stage 4: the locked primary analysis
 
@@ -633,7 +632,7 @@ tibble(
   mutate(across(where(is.numeric), \(x) round(x, 3)))
 ```
 
-The crude difference is large and positive (treated patients in the registry have *higher* mortality because they started HAART when they were sicker — the classic confounding-by-indication signal). The three adjusted estimators all reverse the sign and agree closely on the direction and magnitude of the protective effect; the locked TMLE is reported as the primary estimate and the others as concordance checks.
+The crude difference is large and positive (treated patients in the registry have *higher* mortality because they started HAART when they were sicker, the classic confounding-by-indication signal). The three adjusted estimators all reverse the sign and agree closely on the direction and magnitude of the protective effect; the locked TMLE is reported as the primary estimate and the others as concordance checks.
 
 ```{r}
 #| code-fold: true
@@ -658,7 +657,7 @@ ggplot(results,
 
 ## Closing out the audit
 
-The audit and decision logs are exported as tidy data frames suitable for archiving alongside the lock. The dossier the reviewer reads at the end consists of the lock, the audit trail, the decision log, the SPIFD2 narrative, the DQ stress-test figure, and the locked primary estimate — in that order.
+The audit and decision logs are exported as tidy data frames suitable for archiving alongside the lock. The dossier the reviewer reads at the end consists of the lock, the audit trail, the decision log, the SPIFD2 narrative, the DQ stress-test figure, and the locked primary estimate, in that order.
 
 ```{r}
 #| eval: false
@@ -682,17 +681,17 @@ It is worth being explicit about what passing the gate establishes. A workflow t
 - The cohort, covariates, learner library, seed, and decision thresholds were fingerprinted before any outcome access.
 - The prespecified balance, overlap, and ESS thresholds were met under the locked propensity-score model.
 - A prespecified TMLE candidate met the locked operating-characteristic thresholds on baseline plasmode replicates.
-- The selected candidate stayed inside the locked thresholds across the prespecified DQ severity ranges, or — under `FLAG` — breached them only on documented scenarios that the analyst commits to address in post-outcome interpretation.
+- The selected candidate stayed inside the locked thresholds across the prespecified DQ severity ranges, or, under `FLAG`, breached them only on documented scenarios that the analyst commits to address in post-outcome interpretation.
 - No negative-control outcome flagged residual confounding above the prespecified equivalence band.
 
 It does **not** show that:
 
-- The exchangeability assumption holds. The unmeasured-confounding scenario in the DQ stress test probes the *consequences* of plausible latent confounders; it cannot rule out larger ones. Post-outcome E-values and tipping-point analyses ([Chapter 3.12](03-12-sensitivity-analysis.qmd)) still belong in the dossier.
+- The exchangeability assumption holds. The unmeasured-confounding scenario in the DQ stress test probes the *consequences* of plausible latent confounders; it cannot rule out larger ones. Post-outcome E-values and tipping-point analyses (@sec-sensitivity-analysis) still belong in the dossier.
 - The plasmode generator is faithful to the real outcome process. The DQ stress test inherits the synthetic-outcome model; if that model is misspecified, the degradation gradients can mislead. The package's `assess_dgp_fidelity()` helper compares synthetic and observed marginal outcome distributions but cannot test the conditional structure directly.
 - The data are fit for purpose. SPIFD2 [@gatto2023spifd2], HARPER, START-RWE [@wang2021start], and ICH M14 all require external study-level justification that the package cannot replace.
 - The institutional partition of duties is real. Software-enforced outcome masking complements, but does not substitute for, the personnel-based clean-room governance of [@muntner2024staging].
 
-A useful framing is that the staged workflow turns an analyst's prespecification *from a paper plan into a reproducible record*. That record is what a reviewer reads. The substantive defence of the identification assumptions, the fit-for-purpose argument, and the institutional governance still have to be made — and made convincingly — alongside it.
+A useful framing is that the staged workflow turns an analyst's prespecification *from a paper plan into a reproducible record*. That record is what a reviewer reads. The substantive defence of the identification assumptions, the fit-for-purpose argument, and the institutional governance still have to be made, and made convincingly, alongside it.
 
 ---
 
@@ -700,32 +699,32 @@ A useful framing is that the staged workflow turns an analyst's prespecification
 
 The staged workflow draws on tools developed throughout the handbook:
 
-- The estimand and identifiability discussion in [Chapter 1.2](01-02-causal-roadmap.qmd) is the substantive content of Stage 1a.
-- The TMLE machinery and Super Learner library in [Chapter 2.3](02-03-doubly-robust-tmle.qmd) and [Chapter 2.4](02-04-superlearner.qmd) is what the locked candidates run.
-- The propensity-score overlap, ESS, and weight diagnostics in [Chapter 3.2](03-02-positivity-overlap.qmd) and [Chapter 3.5a](03-05a-assumption-diagnostics.qmd) feed Stage 2a.
-- The E-value, truncation-sensitivity, and negative-control tools in [Chapter 3.12](03-12-sensitivity-analysis.qmd) are the post-outcome sensitivity analyses that the workflow defers but does not replace.
-- The hybrid RCT-RWD and transportability designs of [Chapter 3.6](03-06-rwd-meets-rct-hybrid-designs.qmd) and [Chapter 3.13](03-13-transportability-generalizability.qmd) can be wrapped inside a clean-room arrangement when the external augmentation must be locked before the trial outcome is read.
+- The estimand and identifiability discussion in @sec-roadmap is the substantive content of Stage 1a.
+- The TMLE machinery and Super Learner library in @sec-doubly-robust-tmle and @sec-superlearner is what the locked candidates run.
+- The propensity-score overlap, ESS, and weight diagnostics in @sec-positivity-overlap and @sec-advanced-diagnostics feed Stage 2a.
+- The E-value, truncation-sensitivity, and negative-control tools in @sec-sensitivity-analysis are the post-outcome sensitivity analyses that the workflow defers but does not replace.
+- The hybrid RCT-RWD and transportability designs of @sec-hybrid-designs and @sec-transportability can be wrapped inside a clean-room arrangement when the external augmentation must be locked before the trial outcome is read.
 
 ---
 
 # Summary
 
-A staged design enforces the *order* of analytic decisions; a clean-room design adds *role separation* on top of that order. Both arrangements address the same underlying concern: decisions made after seeing the treatment–outcome association are not credible. The `cleanTMLE` package operationalises the software portion of the staged workflow — the lock, the audit trail, the plasmode candidate selector, the data-quality stress test, and the GO / FLAG / STOP decision rule — while leaving target-trial design, fit-for-purpose review, source-data validation, and institutional governance as external responsibilities.
+A staged design enforces the *order* of analytic decisions; a clean-room design adds *role separation* on top of that order. Both arrangements address the same underlying concern: decisions made after seeing the treatment–outcome association are not credible. The `cleanTMLE` package operationalises the software portion of the staged workflow, the lock, the audit trail, the plasmode candidate selector, the data-quality stress test, and the GO / FLAG / STOP decision rule, while leaving target-trial design, fit-for-purpose review, source-data validation, and institutional governance as external responsibilities.
 
 The package's distinguishing contribution is the **data-quality stress test**, which extends the standard outcome-blind plasmode loop with prespecified perturbations of $W$, $A$, $Y$, and an unmeasured $U$, producing a degradation gradient that the same decision rule consumes. The stress test does not validate the data and does not replace post-outcome quantitative bias analysis; it provides a quantitative bridge between the qualitative fit-for-purpose review and the estimator-selection argument.
 
-Applied to the HIV antiretroviral therapy cohort, the workflow turned an analytic plan into a reproducible record: a fingerprinted lock, a documented chain of pre-outcome checkpoints, a transparent FLAG arising from a prespecified unmeasured-confounding scenario, and a locked TMLE that an external reviewer can rerun from the archived RDS files. That record is the reviewer-facing artefact — and the reason staged clean-room designs are increasingly the default for regulatory-grade RWE.
+Applied to the HIV antiretroviral therapy cohort, the workflow turned an analytic plan into a reproducible record: a fingerprinted lock, a documented chain of pre-outcome checkpoints, a transparent FLAG arising from a prespecified unmeasured-confounding scenario, and a locked TMLE that an external reviewer can rerun from the archived RDS files. That record is the reviewer-facing artefact, and the reason staged clean-room designs are increasingly the default for regulatory-grade RWE.
 
 ---
 
 # Further Reading
 
-- @muntner2024staging — the original "staging and clean room" article in *Pharmacoepidemiology and Drug Safety* introducing the construct, its three review-team verdicts, and the Romiplostim worked example.
-- @dang2023causal — the Causal Roadmap article that sets out the seven-step sequence the staged workflow operationalises.
-- @petersen2014causal — the foundational roadmap paper.
-- @gatto2023spifd2 — SPIFD2, the structured process for identifying fit-for-purpose study designs and data for regulatory RWE; the source of the threat list the DQ stress test consumes.
-- @wang2021start — START-RWE, the reporting template that the audit trail can populate directly.
-- @schuler2017tmle — TMLE for RWE, including the role of prespecified candidate libraries.
-- @franklin2014plasmode — the original plasmode framework for evaluating estimators on synthetic outcomes generated from real covariate distributions.
-- @fda2018rwe and @fda2024ehr — the U.S. FDA RWE framework and the source-specific guidances for EHR and claims data.
+- @muntner2024staging, the original "staging and clean room" article in *Pharmacoepidemiology and Drug Safety* introducing the construct, its three review-team verdicts, and the Romiplostim worked example.
+- @dang2023causal, the Causal Roadmap article that sets out the seven-step sequence the staged workflow operationalises.
+- @petersen2014causal, the foundational roadmap paper.
+- @gatto2023spifd2, SPIFD2, the structured process for identifying fit-for-purpose study designs and data for regulatory RWE; the source of the threat list the DQ stress test consumes.
+- @wang2021start, START-RWE, the reporting template that the audit trail can populate directly.
+- @schuler2017tmle, TMLE for RWE, including the role of prespecified candidate libraries.
+- @franklin2014plasmode, the original plasmode framework for evaluating estimators on synthetic outcomes generated from real covariate distributions.
+- @fda2018rwe and @fda2024ehr, the U.S. FDA RWE framework and the source-specific guidances for EHR and claims data.
 - The `cleanTMLE` package vignettes [`cleanTMLE-staged-analysis`](https://amertens.github.io/cleanTMLE/articles/cleanTMLE-staged-analysis.html) and [`cleanTMLE-functions`](https://amertens.github.io/cleanTMLE/articles/cleanTMLE-functions.html) provide the function-reference companion to this chapter and a step-by-step worked example with full code execution.

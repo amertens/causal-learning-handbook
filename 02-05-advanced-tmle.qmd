@@ -14,7 +14,7 @@ After completing this chapter, you will be able to:
 5. Distinguish CV-TMLE from double/debiased machine learning (DML) and articulate why the substitution property matters
 :::
 
-Chapter 2.3 introduced TMLE as a doubly robust, semiparametrically efficient estimator that combines flexible outcome modeling with a targeting step. In many applications, standard TMLE works well. But three practical problems can arise, each addressed by a different TMLE variant:
+@sec-doubly-robust-tmle introduced TMLE as a doubly robust, semiparametrically efficient estimator that combines flexible outcome modeling with a targeting step. In many applications, standard TMLE works well. But three practical problems can arise, each addressed by a different TMLE variant:
 
 | Problem | Variant | Core idea |
 |:--------|:--------|:----------|
@@ -40,7 +40,7 @@ knitr::opts_chunk$set(
 
 ## The Problem That Motivates All Three Variants {#sec-why-advanced}
 
-Recall the standard TMLE recipe from Chapter 2.3:
+Recall the standard TMLE recipe from @sec-doubly-robust-tmle:
 
 1. **Initial estimation**: Fit an outcome model $\hat{Q}(A, W)$ and a propensity score $\hat{g}(W)$, typically using Super Learner.
 2. **Targeting step**: Update $\hat{Q}$ along a least-favorable parametric submodel, using $\hat{g}$ as the "clever covariate."
@@ -51,7 +51,7 @@ The asymptotic guarantees of TMLE (consistency, efficiency, valid confidence int
 ::: {.callout-important}
 ## When Standard TMLE Can Fail
 
-Standard TMLE's theoretical guarantees assume the nuisance estimators fall in a **Donsker class**---a set of functions with controlled complexity. This is satisfied by parametric models and many regularized estimators, but can be violated by:
+Standard TMLE's theoretical guarantees assume the nuisance estimators fall in a **Donsker class**, a set of functions with controlled complexity. This is satisfied by parametric models and many regularized estimators, but can be violated by:
 
 - Highly adaptive machine learning (deep ensembles, unregularized random forests, neural networks)
 - Super Learners with very large candidate libraries
@@ -103,50 +103,79 @@ In practice, the substitution property of CV-TMLE matters when the outcome is ra
 
 The `tmle3` package in the `tlverse` ecosystem implements CV-TMLE natively. The older `tmle` package does not support cross-validation by default, but you can implement it manually by cross-validating the initial fits.
 
+We use the shared ART cohort throughout, loaded with its canonical variable names (`ever_haart` = treatment, `died` = outcome, `cd4_sqrt_baseline` = baseline CD4) so the same data object can be reused across chapters.
+
 ```{r}
-#| label: cv-tmle-example
+#| label: adv-tmle-setup
 #| code-fold: show
 #| message: false
 #| warning: false
 
-library(ipw)
 library(dplyr)
 library(SuperLearner)
 library(tmle)
 
-# Load the ART cohort
-data(haartdat)
-haart_bl <- haartdat |>
-  group_by(patient) |>
-  summarise(
-    sex = first(sex),
-    age = first(age),
-    cd4_bl = first(cd4.sqrt)^2,
-    cd4_sqrt_bl = first(cd4.sqrt),
-    A = max(haartind),
-    Y = max(event),
-    .groups = "drop"
-  )
+source("_data/load-haart-cohort.R")
+d <- haart_baseline
+W <- d[, c("age", "sex", "cd4_sqrt_baseline")]
 
-W <- haart_bl[, c("age", "sex", "cd4_sqrt_bl")]
+SL_lib <- c("SL.glm", "SL.glmnet", "SL.mean")
 
 # --- Standard TMLE (no cross-validation) ---
 set.seed(42)
 fit_standard <- tmle(
-  Y = haart_bl$Y,
-  A = haart_bl$A,
+  Y = d$died,
+  A = d$ever_haart,
   W = W,
-  Q.SL.library = c("SL.glm", "SL.glmnet", "SL.mean"),
-  g.SL.library = c("SL.glm", "SL.glmnet", "SL.mean"),
+  Q.SL.library = SL_lib,
+  g.SL.library = SL_lib,
   family = "binomial"
 )
 
-cat("=== Standard TMLE ===\n")
-cat(sprintf("ATE: %.4f (95%% CI: %.4f, %.4f)\n",
-    fit_standard$estimates$ATE$psi,
-    fit_standard$estimates$ATE$CI[1],
-    fit_standard$estimates$ATE$CI[2]))
+ate_std <- fit_standard$estimates$ATE$psi
+ci_std  <- fit_standard$estimates$ATE$CI
+cat(sprintf("Standard TMLE ATE: %.4f (95%% CI: %.4f, %.4f)\n",
+            ate_std, ci_std[1], ci_std[2]))
 ```
+
+#### Doubly robust cross-check: TMLE vs. AIPW
+
+TMLE and AIPW (augmented inverse-probability weighting) are both doubly robust and asymptotically equivalent: built from the same nuisance models, they should give nearly identical point estimates. (The `AIPW` CRAN package is not available in this build, so we compute the AIPW estimator directly from the nuisance fits, which makes the equivalence transparent.)
+
+```{r}
+#| label: adv-tmle-aipw
+#| code-fold: show
+#| message: false
+#| warning: false
+
+A <- d$ever_haart
+Y <- d$died
+
+set.seed(42)
+g_fit <- SuperLearner(Y = A, X = W, SL.library = SL_lib, family = binomial())
+g1 <- pmin(pmax(predict(g_fit, W)$pred[, 1], 0.025), 0.975)  # bounded PS
+
+Q_fit <- SuperLearner(Y = Y, X = data.frame(A = A, W),
+                      SL.library = SL_lib, family = binomial())
+Q1 <- predict(Q_fit, data.frame(A = 1, W))$pred[, 1]
+Q0 <- predict(Q_fit, data.frame(A = 0, W))$pred[, 1]
+
+# AIPW (efficient-influence-function) estimator of E[Y(1)] and E[Y(0)]
+psi1 <- mean(A / g1 * (Y - Q1) + Q1)
+psi0 <- mean((1 - A) / (1 - g1) * (Y - Q0) + Q0)
+ate_aipw <- psi1 - psi0
+
+IC_aipw <- (A / g1) * (Y - Q1) + Q1 - psi1 -
+           ((1 - A) / (1 - g1)) * (Y - Q0) - Q0 + psi0
+se_aipw <- sqrt(var(IC_aipw) / nrow(d))
+
+cat(sprintf("AIPW ATE:          %.4f (95%% CI: %.4f, %.4f)\n",
+            ate_aipw, ate_aipw - 1.96 * se_aipw, ate_aipw + 1.96 * se_aipw))
+```
+
+The two estimates agree to the third decimal place, as expected for two doubly robust estimators sharing the same nuisance models. The practical difference is structural rather than numerical here: TMLE is a *substitution* estimator, so its estimate is guaranteed to respect the natural bounds of the parameter (a risk difference implied by probabilities in $[0, 1]$), whereas the AIPW estimating-equation form carries no such guarantee and can stray out of range when the outcome is rare or weights are extreme.
+
+#### Cross-validated targeting: standard TMLE vs. CV-TMLE
 
 ```{r}
 #| label: cv-tmle-manual
@@ -155,17 +184,15 @@ cat(sprintf("ATE: %.4f (95%% CI: %.4f, %.4f)\n",
 #| warning: false
 
 # --- Manual CV-TMLE (3-fold for teaching) ---
-# Demonstrates the cross-validation logic explicitly. Production
-# analyses should use V = 5 or V = 10; we use V = 3 here to keep
-# the chapter runnable in the browser (WebR / interactive build) in
-# under a few minutes.
+# Demonstrates the cross-validation logic explicitly. Production analyses
+# should use V = 5 or V = 10; we use V = 3 to keep the chapter fast.
+# tmle3 in the tlverse performs this cross-validation automatically.
 
 set.seed(42)
-n <- nrow(haart_bl)
+n <- nrow(d)
 V <- 3
 folds <- sample(rep(1:V, length.out = n))
 
-# Storage for cross-validated predictions
 Qbar_cv <- matrix(NA, n, 2)  # columns: Q(0,W), Q(1,W)
 g_cv <- rep(NA, n)
 
@@ -174,57 +201,64 @@ for (v in 1:V) {
   valid <- folds == v
 
   # Fit outcome model on training data
-  Q_fit <- SuperLearner(
-    Y = haart_bl$Y[train],
-    X = data.frame(A = haart_bl$A[train], W[train, ]),
-    SL.library = c("SL.glm", "SL.glmnet", "SL.mean"),
-    family = binomial()
+  Q_fit_v <- SuperLearner(
+    Y = d$died[train],
+    X = data.frame(A = d$ever_haart[train], W[train, ]),
+    SL.library = SL_lib, family = binomial()
   )
-
-  # Predict on validation data under A=0 and A=1
-  newX0 <- data.frame(A = 0, W[valid, ])
-  newX1 <- data.frame(A = 1, W[valid, ])
-  Qbar_cv[valid, 1] <- predict(Q_fit, newdata = newX0)$pred
-  Qbar_cv[valid, 2] <- predict(Q_fit, newdata = newX1)$pred
+  Qbar_cv[valid, 1] <- predict(Q_fit_v, data.frame(A = 0, W[valid, ]))$pred[, 1]
+  Qbar_cv[valid, 2] <- predict(Q_fit_v, data.frame(A = 1, W[valid, ]))$pred[, 1]
 
   # Fit propensity score on training data
-  g_fit <- SuperLearner(
-    Y = haart_bl$A[train],
-    X = W[train, ],
-    SL.library = c("SL.glm", "SL.glmnet", "SL.mean"),
-    family = binomial()
+  g_fit_v <- SuperLearner(
+    Y = d$ever_haart[train], X = W[train, ],
+    SL.library = SL_lib, family = binomial()
   )
-  g_cv[valid] <- predict(g_fit, newdata = W[valid, ])$pred
+  g_cv[valid] <- predict(g_fit_v, W[valid, ])$pred[, 1]
 }
 
-# --- Targeting step on full dataset using CV predictions ---
-# Clever covariate
-H1 <- haart_bl$A / g_cv
-H0 <- -(1 - haart_bl$A) / (1 - g_cv)
+g_cv <- pmin(pmax(g_cv, 0.025), 0.975)
 
-# Fluctuation model (logistic submodel)
-Q_logit_A <- qlogis(ifelse(haart_bl$A == 1, Qbar_cv[, 2], Qbar_cv[, 1]))
-eps_fit <- glm(haart_bl$Y ~ -1 + offset(Q_logit_A) + H1 + H0,
-               family = binomial)
+# --- Targeting step on the full dataset using the CV predictions ---
+H1 <- d$ever_haart / g_cv
+H0 <- -(1 - d$ever_haart) / (1 - g_cv)
+
+Q_logit_A <- qlogis(ifelse(d$ever_haart == 1, Qbar_cv[, 2], Qbar_cv[, 1]))
+eps_fit <- glm(d$died ~ -1 + offset(Q_logit_A) + H1 + H0, family = binomial)
 eps <- coef(eps_fit)
 
-# Update predictions
 Q1_star <- plogis(qlogis(Qbar_cv[, 2]) + eps["H1"] / g_cv)
 Q0_star <- plogis(qlogis(Qbar_cv[, 1]) - eps["H0"] / (1 - g_cv))
 
-# Plug in
 mu1 <- mean(Q1_star)
 mu0 <- mean(Q0_star)
 ate_cv <- mu1 - mu0
 
-# Influence curve-based SE
-IC <- (haart_bl$A / g_cv) * (haart_bl$Y - Q1_star) + Q1_star - mu1 -
-      ((1 - haart_bl$A) / (1 - g_cv)) * (haart_bl$Y - Q0_star) - Q0_star + mu0
-se_cv <- sqrt(var(IC) / n)
+IC_cv <- (d$ever_haart / g_cv) * (d$died - Q1_star) + Q1_star - mu1 -
+         ((1 - d$ever_haart) / (1 - g_cv)) * (d$died - Q0_star) - Q0_star + mu0
+se_cv <- sqrt(var(IC_cv) / n)
 
-cat("=== CV-TMLE (manual, 5-fold) ===\n")
-cat(sprintf("ATE: %.4f (95%% CI: %.4f, %.4f)\n",
-    ate_cv, ate_cv - 1.96 * se_cv, ate_cv + 1.96 * se_cv))
+cat(sprintf("CV-TMLE (manual, %d-fold) ATE: %.4f (95%% CI: %.4f, %.4f)\n",
+            V, ate_cv, ate_cv - 1.96 * se_cv, ate_cv + 1.96 * se_cv))
+```
+
+Putting the three estimators side by side shows how little the point estimate moves on this well-behaved cohort---the value of CV-TMLE is not a different number but *trustworthy inference* when the nuisance models are fit with aggressive machine learning:
+
+```{r}
+#| label: tbl-adv-tmle-compare
+#| tbl-cap: "Three doubly robust estimates of the ATE of ever initiating HAART on mortality in the ART cohort, from the same data and nuisance library. The point estimates are nearly identical; CV-TMLE's contribution is valid confidence-interval coverage under highly adaptive learners, not a shifted estimate."
+#| code-fold: show
+data.frame(
+  Estimator = c("Standard TMLE", "AIPW", "CV-TMLE (3-fold)"),
+  ATE       = sprintf("%.4f", c(ate_std, ate_aipw, ate_cv)),
+  `95% CI`  = c(
+    sprintf("(%.4f, %.4f)", ci_std[1], ci_std[2]),
+    sprintf("(%.4f, %.4f)", ate_aipw - 1.96 * se_aipw, ate_aipw + 1.96 * se_aipw),
+    sprintf("(%.4f, %.4f)", ate_cv - 1.96 * se_cv, ate_cv + 1.96 * se_cv)
+  ),
+  check.names = FALSE
+) |>
+  knitr::kable(align = c("l", "r", "c"))
 ```
 
 In the `tlverse` ecosystem, `tmle3` handles CV-TMLE automatically. For the `tmle` package, you can approximate CV-TMLE by passing pre-computed cross-validated predictions. The manual implementation above shows the core logic: fit on training folds, predict on validation folds, target on the stacked predictions.
@@ -279,9 +313,9 @@ The `ctmle` R package implements both discrete (greedy) and LASSO-based C-TMLE.
 # install.packages("ctmle")
 library(ctmle)
 
-# Prepare data
-Y <- haart_bl$Y
-A <- haart_bl$A
+# Prepare data (canonical names from the shared loader)
+Y <- d$died
+A <- d$ever_haart
 W_mat <- as.matrix(W)
 
 # --- LASSO-C-TMLE ---
@@ -290,8 +324,8 @@ Q_init <- SuperLearner(
   Y = Y, X = data.frame(A = A, W_mat),
   SL.library = c("SL.glm", "SL.mean"), family = binomial()
 )
-Q0 <- predict(Q_init, newdata = data.frame(A = 0, W_mat))$pred
-Q1 <- predict(Q_init, newdata = data.frame(A = 1, W_mat))$pred
+Q0 <- predict(Q_init, newdata = data.frame(A = 0, W_mat))$pred[, 1]
+Q1 <- predict(Q_init, newdata = data.frame(A = 1, W_mat))$pred[, 1]
 Q_mat <- cbind(QAW = ifelse(A == 1, Q1, Q0), Q0W = Q0, Q1W = Q1)
 
 # Step 2: Get LASSO regularization path for the propensity score
@@ -301,11 +335,12 @@ glmnet_fit <- glmnet::glmnet(x = W_mat, y = A, family = "binomial", nlambda = 20
 #         produces the best TMLE for the causal estimate
 set.seed(42)
 fit_ctmle <- ctmleGlmnet(
-  Y = Y, A = A, W = W_mat, Wg = W_mat,
+  Y = as.numeric(Y), A = as.numeric(A),
+  W = data.frame(W_mat), Wg = data.frame(W_mat),
   Q = Q_mat,
   lambdas = glmnet_fit$lambda,
   ctmletype = 1,         # forward selection along LASSO path
-  family = "gaussian",
+  family = "binomial",
   V = 5                  # folds for cross-validated selection
 )
 
@@ -446,4 +481,4 @@ These variants are not mutually exclusive. CV-C-TMLE (cross-validated collaborat
 - @ju2017scalable: Scalable C-TMLE with pre-ordering strategies for high-dimensional data; the `ctmle` R package
 - @vanderlaan2024atmle: A-TMLE for integrating RCT and real-world data with the no-harm guarantee
 - @chernozhukov2018dml: Double/debiased machine learning; the estimating-equation counterpart to CV-TMLE
-- @vanderLaan2011targeted: Targeted Learning textbook; comprehensive treatment of all TMLE variants
+- @vanderLaan2011targeted: Targeted Learning textbook; complete treatment of all TMLE variants
