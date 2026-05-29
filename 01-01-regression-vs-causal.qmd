@@ -1,7 +1,8 @@
 ---
-title: 'Chapter 1.1: Why We Need a Causal Roadmap'
 format: html
 ---
+
+# Why We Need a Causal Roadmap {#sec-regression-vs-causal}
 
 *Estimated reading time: 25 minutes*
 
@@ -119,30 +120,95 @@ where W represents the measured confounders and A is the treatment. This express
 Misspecification bias is **silent**. A regression with the wrong functional form still produces coefficients and p-values with no warning. This motivates semiparametric estimators (like TMLE with machine learning) that relax parametric assumptions.
 :::
 
-Let's compare the Cox approach to g-computation, which directly targets the marginal risk difference for mortality over follow-up:
+Let's compare the Cox approach to g-computation, which directly targets the marginal risk difference for mortality over follow-up. Both models are fit on the *same* data and adjust for the *same* confounders; the only thing that changes is what we ask the fitted model to report.
 
 ```{r}
-# Fit a logistic model for cumulative mortality risk
+# G-computation: fit a logistic outcome model, then standardize
 gcomp_model <- glm(
   died ~ ever_haart + age + sex + cd4_sqrt_baseline,
   family = binomial, data = dat
 )
 
-# Predict counterfactual mortality risks under each treatment
-p1 <- predict(gcomp_model, newdata = mutate(dat, ever_haart = 1), type = "response")
-p0 <- predict(gcomp_model, newdata = mutate(dat, ever_haart = 0), type = "response")
+# Predict each person's counterfactual mortality risk under both strategies,
+# then average to get the marginal (population-level) risks
+risk1 <- mean(predict(gcomp_model, mutate(dat, ever_haart = 1), type = "response"))
+risk0 <- mean(predict(gcomp_model, mutate(dat, ever_haart = 0), type = "response"))
+risk_diff <- risk1 - risk0
+risk_ratio <- risk1 / risk0
 
-# Marginal risk difference
-cat("G-computation risk difference:", round(mean(p1 - p0), 4), "\n")
+# Cox model on the same data: the conditional hazard ratio
+cox_hr <- exp(coef(cox_model)["ever_haart"])
 ```
 
-G-computation **predicts** counterfactual outcomes for every person under treatment and under control, then **averages** the difference. The result is a **marginal risk difference**, a population-level quantity directly relevant to decision-making, unlike the conditional hazard ratio from the Cox model.
-
-Compare this to the Cox hazard ratio:
+G-computation **predicts** counterfactual outcomes for every person under treatment and under control, then **averages** the difference. The result is a **marginal risk difference**, a population-level quantity directly relevant to decision-making, unlike the conditional hazard ratio from the Cox model. Placing the two side by side makes the gap concrete:
 
 ```{r}
-# The Cox HR (exponentiating the coefficient)
-exp(coef(cox_model)["ever_haart"])
+#| label: tbl-cox-vs-gcomp
+#| tbl-cap: "The same data and the same confounders, two different estimands. The Cox hazard ratio lives on an instantaneous rate scale and does not translate into how many deaths a treatment policy would avert; the g-computation contrasts live on the risk scale and do."
+#| code-fold: true
+data.frame(
+  Quantity = c(
+    "Cox hazard ratio (ever vs never HAART)",
+    "Risk if everyone initiated HAART, E[Y(1)]",
+    "Risk if no one initiated HAART, E[Y(0)]",
+    "Marginal risk difference, E[Y(1)] - E[Y(0)]",
+    "Marginal risk ratio, E[Y(1)] / E[Y(0)]"
+  ),
+  Value = c(
+    sprintf("%.2f", cox_hr),
+    sprintf("%.1f%%", 100 * risk1),
+    sprintf("%.1f%%", 100 * risk0),
+    sprintf("%+.1f per 100", 100 * risk_diff),
+    sprintf("%.2f", risk_ratio)
+  ),
+  Scale = c(
+    "Conditional, instantaneous rate ratio",
+    "Probability", "Probability",
+    "Probability difference", "Probability ratio"
+  )
+) |>
+  kable(caption = NULL, align = c("l", "r", "l"))
+```
+
+```{r}
+#| label: fig-cox-vs-gcomp
+#| fig-cap: "Two answers to one question, from one dataset. The g-computation bars show the marginal cumulative-mortality risk the population would experience if *everyone* versus *no one* initiated HAART; the gap between them is the causal risk difference a clinician can act on. The Cox model fit to the very same data returns only the single hazard ratio in the subtitle—a conditional rate ratio that cannot be read off the risk axis at all."
+#| code-fold: true
+#| fig-width: 7
+#| fig-height: 4
+library(ggplot2)
+
+gcomp_df <- data.frame(
+  strategy = factor(
+    c("Everyone initiates\nHAART  (E[Y(1)])", "No one initiates\nHAART  (E[Y(0)])"),
+    levels = c("No one initiates\nHAART  (E[Y(0)])", "Everyone initiates\nHAART  (E[Y(1)])")
+  ),
+  risk = c(risk1, risk0)
+)
+
+ggplot(gcomp_df, aes(strategy, risk, fill = strategy)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = sprintf("%.1f%%", 100 * risk)), vjust = -0.5, size = 4) +
+  annotate(
+    "label", x = 1.5, y = max(gcomp_df$risk) * 1.18,
+    label = sprintf("Causal risk difference\n%+.1f per 100", 100 * risk_diff),
+    size = 3.5, label.size = 0
+  ) +
+  scale_y_continuous(
+    labels = function(x) paste0(100 * x, "%"),
+    expand = expansion(mult = c(0, 0.30))
+  ) +
+  scale_fill_manual(values = c("#9ecae1", "#3182bd")) +
+  labs(
+    x = NULL, y = "Cumulative mortality risk",
+    title = "G-computation reports a marginal, decision-relevant contrast",
+    subtitle = sprintf(
+      "The Cox model on the same data reports only HR = %.2f (a conditional rate ratio, not a risk)",
+      cox_hr
+    )
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title.position = "plot")
 ```
 
 The Cox model and the logistic g-computation are fitted on the same data, but they answer different questions. The hazard ratio is a conditional, instantaneous rate ratio that does not directly tell us how many deaths would be averted by HAART, and it is non-collapsible: the conditional HR differs from the marginal HR even without confounding. The g-computation risk difference tells you: "X more people per 100 would have died over follow-up if no one had been initiated on HAART compared to if everyone had been." That is the kind of number patients and clinicians need to make decisions.
@@ -153,7 +219,7 @@ The point-treatment analysis above already shows that the *estimand* matters. Th
 
 Standard regression faces an impossible choice in this setting. If you do not adjust for time-varying CD4, you leave confounding of future treatment decisions unaddressed. If you do adjust for it, you block part of the causal pathway from HAART through improved CD4 to reduced mortality. Neither approach produces a consistent estimate of the total treatment effect. This is not a matter of choosing the right covariates or the right functional form. It is a structural limitation of the regression framework when applied to longitudinal data with feedback.
 
-The g-methods developed in this handbook — g-computation, IPTW with marginal structural models, and longitudinal TMLE — were designed for exactly this structure. We return to the longitudinal HAART data in the [Running Case Study](00-case-study.qmd) and develop the necessary methods in Part III.
+The g-methods developed in this handbook (g-computation, IPTW with marginal structural models, and longitudinal TMLE) were designed for exactly this structure. We return to the longitudinal HAART data in the [Running Case Study](00-case-study.qmd) and develop the necessary methods in Part III.
 
 ## Summary
 

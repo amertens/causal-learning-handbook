@@ -145,7 +145,7 @@ where $\hat S$ is the all-cause survival from the Kaplan--Meier-style product of
 KM-based "risk" multiplies $1 - dN_j / Y$ over time, treating competing events as if those individuals could still experience cause $j$ later. AJ multiplies the *all-cause* survival by the *cause-specific* increment, so it never re-credits people who have already left the population.
 :::
 
-In plain English: at each follow-up time, AJ asks two questions in order. First, what fraction of the original cohort is still alive and event-free, given everything that has happened so far? Second, of those people, what fraction has the event of interest right now? The cumulative incidence by time $t$ is the running sum of those "still around" times "event of interest now" pieces. Crucially, "still around" gets reduced by competing events as well as by the event of interest, so a patient who died of a non-cancer cause is correctly removed from the pool that could later contribute relapses.
+In plain English: at each follow-up time, AJ asks two questions in order. First, what fraction of the original cohort is still alive and event-free, given everything that has happened so far? Second, of those people, what fraction has the event of interest right now? The cumulative incidence by time $t$ is the running sum of those "still around" times "event of interest now" pieces. Note that "still around" gets reduced by competing events as well as by the event of interest, so a patient who died of a non-cancer cause is correctly removed from the pool that could later contribute relapses.
 
 ### Plain-language interpretation
 
@@ -787,29 +787,48 @@ If the analytic goal is a confounder-adjusted 24-month risk difference, the surv
 
 ```{r}
 #| label: tmle-applied
-#| eval: false
+#| message: false
+#| warning: false
+#| cache: true
 
 library(survtmle)
+library(SuperLearner)
 
 tmle_fit <- survtmle(
   ftime      = dat$time,
-  ftype      = dat$event %>% if_else(. == 3, 0, .),  # treat LTFU as censoring
+  ftype      = ifelse(dat$event == 3, 0, dat$event),  # treat LTFU as censoring
   trt        = dat$A,
   adjustVars = dat %>% select(age, prior_cvd, kidney, frailty),
   t0         = 24,
   method     = "hazard",
-  SL.trt     = c("SL.glm", "SL.glmnet"),
-  SL.ctime   = c("SL.glm", "SL.glmnet"),
-  SL.ftime   = c("SL.glm", "SL.glmnet"),
+  SL.trt     = c("SL.glm", "SL.mean"),
+  SL.ctime   = c("SL.glm", "SL.mean"),
+  SL.ftime   = c("SL.glm", "SL.mean"),
   returnIC   = TRUE
 )
 
-# Treatment-specific 24-month CIF for HF hospitalization
+# Treatment-specific 24-month CIF estimates (rows: "<trt> <cause>")
 tmle_fit$est
+# Influence-function-based standard errors
 sqrt(diag(tmle_fit$var))
 ```
 
-The point of using TMLE here is not that it makes competing risks "go away." It targets a specific estimand, the adjusted treatment-specific cumulative incidence of HF hospitalization at 24 months, and gives influence-function-based inference for the contrast.
+The rows labelled `0 1` and `1 1` are the adjusted 24-month cumulative incidence of HF hospitalization (cause 1) under no treatment and treatment; rows `0 2` and `1 2` are the same for death (cause 2). Reading off the adjusted risk difference for HF hospitalization makes the contrast explicit:
+
+```{r}
+#| label: tmle-applied-contrast
+est <- tmle_fit$est[, 1]
+se  <- sqrt(diag(tmle_fit$var))
+# Cause-1 (HF hospitalization) rows are named "0 1" and "1 1"
+rd_hosp <- est["1 1"] - est["0 1"]
+se_rd   <- sqrt(se["1 1"]^2 + se["0 1"]^2)   # conservative (ignores covariance)
+cat(sprintf("Adjusted 24-month HF-hospitalization CIF: A=0 %.3f, A=1 %.3f\n",
+            est["0 1"], est["1 1"]))
+cat(sprintf("Adjusted risk difference (A=1 - A=0): %.3f (approx 95%% CI %.3f, %.3f)\n",
+            rd_hosp, rd_hosp - 1.96 * se_rd, rd_hosp + 1.96 * se_rd))
+```
+
+The adjusted TMLE estimate confirms the descriptive Aalen--Johansen picture: Drug A lowers the cumulative incidence of HF hospitalization (cause 1) while raising the cumulative incidence of death (cause 2). The point of using TMLE here is not that it makes competing risks "go away." It targets a specific estimand, the adjusted treatment-specific cumulative incidence of HF hospitalization at 24 months, and gives influence-function-based inference for the contrast.
 
 TMLE does not choose the estimand for you. Software choice is downstream of the estimand. Two analyses can both call `survtmle` and target completely different quantities depending on whether death is coded as a competing event (cause 2) or recoded as censoring. The software will produce a confidence interval either way. Only the analyst can decide which question is being asked.
 

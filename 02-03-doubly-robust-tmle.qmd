@@ -1,12 +1,11 @@
 ---
-title: "Chapter 2.3: Doubly Robust Estimators and Targeted Learning (AIPW + TMLE)"
 format: html
 ---
 
-*Estimated reading time: 50 minutes*
-
-# Chapter 2.3: Doubly Robust Estimation and Targeted Learning
+# Doubly Robust Estimators and Targeted Learning (AIPW + TMLE) {#sec-doubly-robust-tmle}
 *Bridging outcome modeling and weighting for more robust causal effect estimation*
+
+*Estimated reading time: 50 minutes*
 
 In previous chapters, you learned:
 
@@ -77,7 +76,7 @@ The structure is *G-computation plus an EIF correction*: the first term, $m(a, W
 
 # HIV Antiretroviral Therapy Cohort
 
-We use the same point-treatment HAART cohort from chapters [2.1](02-01-gcomputation.qmd) and [2.2](02-02-iptw.qmd) so that all three estimators (G-computation, IPTW, AIPW/TMLE) can be compared on identical data. The treatment is `ever_haart` (1 = initiated HAART at any point, 0 = never), the outcome is `died`, and we adjust for baseline age, sex, and baseline square-root CD4 count.
+We use the same point-treatment HAART cohort from @sec-gcomputation and @sec-iptw so that all three estimators (G-computation, IPTW, AIPW/TMLE) can be compared on identical data. The treatment is `ever_haart` (1 = initiated HAART at any point, 0 = never), the outcome is `died`, and we adjust for baseline age, sex, and baseline square-root CD4 count.
 
 ```{r}
 #| interactive: true
@@ -193,7 +192,7 @@ $$
 \text{logit}(E[Y \mid A, W]) = \text{logit}(Q_n^0(A, W)) + \epsilon \cdot H(A, W)
 $$
 
-The estimated $\hat{\epsilon}$ is then used to **update** (fluctuate) the initial predictions. Crucially, we must apply this fluctuation to the counterfactual predictions $Q_n^0(1, W)$ and $Q_n^0(0, W)$ using their respective clever covariates $H_1$ and $H_0$. This step ensures the final estimates solve the efficient influence function equation, which is what gives TMLE its optimal statistical properties.
+The estimated $\hat{\epsilon}$ is then used to **update** (fluctuate) the initial predictions. This fluctuation must be applied to the counterfactual predictions $Q_n^0(1, W)$ and $Q_n^0(0, W)$ using their respective clever covariates $H_1$ and $H_0$. This step ensures the final estimates solve the efficient influence function equation, which is what gives TMLE its optimal statistical properties.
 
 The targeting step is not trying to improve prediction in general. It is adjusting the initial outcome predictions specifically to reduce bias for the ATE. A well-calibrated prediction model might predict individual outcomes accurately but still produce a biased ATE when predictions are averaged. The fluctuation step corrects for exactly this discrepancy by incorporating information from the propensity score.
 
@@ -309,7 +308,7 @@ Both AIPW and TMLE are constructed from the **same efficient influence function*
 
 In large samples, on data with well-behaved propensity scores, AIPW and TMLE are essentially indistinguishable. They differ in finite samples, and they differ in their structural form.
 
-## What is different — and why
+## What is different, and why
 
 The structural distinction is **additive correction (AIPW) versus substitution / fluctuation (TMLE)**, and almost every practical difference flows from it.
 
@@ -317,8 +316,8 @@ The structural distinction is **additive correction (AIPW) versus substitution /
 |---|---|---|
 | How the EIF equation is solved | Add the empirical EIF correction to G-computation | Update $Q \to Q^*$ until the substitution estimator solves it |
 | Form of the estimator | Sum of plug-in + IPW-weighted residual | Mean of $Q^*(1, W) - Q^*(0, W)$ |
-| Predictions bounded in $[0, 1]$ | No — the IPW correction is unbounded; with extreme $g$, the estimate can exit the parameter space | Yes — logit-scale fluctuation guarantees $Q^* \in [0, 1]$ |
-| Plug-in interpretability | No — sums of residuals don't decompose cleanly | Yes — every estimate is a mean of valid counterfactual predictions |
+| Predictions bounded in $[0, 1]$ | No: the IPW correction is unbounded; with extreme $g$, the estimate can exit the parameter space | Yes: logit-scale fluctuation guarantees $Q^* \in [0, 1]$ |
+| Plug-in interpretability | No: sums of residuals do not decompose cleanly | Yes: every estimate is a mean of valid counterfactual predictions |
 | Integration with Super Learner | Works with cross-fitting (DML-style) | Designed alongside Super Learner; CV-TMLE is the standard recipe |
 | Implementation complexity | Simple (one formula) | Moderate (initial fit + fluctuation + targeted predictions) |
 | Inference (EIF-based SEs) | Yes | Yes |
@@ -331,7 +330,7 @@ In practice the choice usually comes down to four questions:
 
 - **Is propensity score overlap clean?** If yes, AIPW is fine and simpler to implement. If no (extreme propensities, small overlap region), prefer TMLE for the boundedness guarantee.
 - **Are you using flexible machine learning?** If yes, prefer CV-TMLE (the most mature ML-aware doubly robust workflow). AIPW with sample-splitting (DML) also works but the tooling is less unified with the rest of the Targeted Learning ecosystem.
-- **Do you need to stratify or post-process the estimate?** If yes (e.g., subgroup risk differences, transformations to relative scales), prefer TMLE — its substitution form lets you re-aggregate $Q^*$ directly.
+- **Do you need to stratify or post-process the estimate?** If yes (e.g., subgroup risk differences, transformations to relative scales), prefer TMLE, whose substitution form lets you re-aggregate $Q^*$ directly.
 - **Is this a quick prototype or a publishable analysis?** AIPW is excellent for prototyping and for a sanity check next to G-computation and IPTW. For published doubly robust estimates, TMLE is now the field default.
 
 ---
@@ -364,7 +363,7 @@ bind_rows(
 ) |> knitr::kable(digits = 4, caption = "AIPW and TMLE on the same HAART data and nuisances")
 ```
 
-The two estimates and their standard errors should agree to within roughly the third decimal. They are not identical because the AIPW estimator uses the initial $Q$ inside the substitution component while TMLE uses the targeted $Q^*$, and the fluctuation step gently shifts $Q^*$ away from $Q$ by an amount governed by $\hat\epsilon$. When propensity scores are well-behaved (as they are here), $\hat\epsilon$ is small and the gap is correspondingly small. When some propensity scores are extreme, $\hat\epsilon$ can be larger and the two estimators diverge — a useful diagnostic that the boundedness and stability advantages of TMLE are starting to matter.
+The two estimates and their standard errors should agree to within roughly the third decimal. They are not identical because the AIPW estimator uses the initial $Q$ inside the substitution component while TMLE uses the targeted $Q^*$, and the fluctuation step gently shifts $Q^*$ away from $Q$ by an amount governed by $\hat\epsilon$. When propensity scores are well-behaved (as they are here), $\hat\epsilon$ is small and the gap is correspondingly small. When some propensity scores are extreme, $\hat\epsilon$ can be larger and the two estimators diverge, a useful diagnostic that the boundedness and stability advantages of TMLE are starting to matter.
 
 ---
 
@@ -406,14 +405,14 @@ The clever covariate $H(A, W) = A / g(W) - (1 - A) / (1 - g(W))$ is derived from
 <details>
 <summary><strong>Q3. Your TMLE estimate of a risk probability is 0.85. Could AIPW have produced an estimate above 1.0 for the same data?</strong></summary>
 
-Yes, and this is the *structural* reason TMLE is generally preferred for bounded outcomes — not just a numerical curiosity. AIPW is a sum: the G-computation plug-in plus an unbounded IPW-weighted residual correction. When propensity scores are extreme, the correction can be large enough to push the sum outside the parameter space. TMLE absorbs the same correction into $Q$ on the logit scale, so the substitution estimator is the mean of valid probabilities and stays in $[0, 1]$ by construction. The two estimators target the same EIF; they differ in *how* they keep the result inside the parameter space.
+Yes, and this is the *structural* reason TMLE is generally preferred for bounded outcomes, not merely a numerical curiosity. AIPW is a sum: the G-computation plug-in plus an unbounded IPW-weighted residual correction. When propensity scores are extreme, the correction can be large enough to push the sum outside the parameter space. TMLE absorbs the same correction into $Q$ on the logit scale, so the substitution estimator is the mean of valid probabilities and stays in $[0, 1]$ by construction. The two estimators target the same EIF; they differ in *how* they keep the result inside the parameter space.
 
 </details>
 
 <details>
 <summary><strong>Q4. Will AIPW and TMLE always give similar answers in practice?</strong></summary>
 
-In large samples on data with well-behaved propensity scores, yes — they share the same asymptotic distribution and the same EIF-based standard errors. Visible disagreement between the two estimates usually points to a specific cause: (i) some propensity scores are near 0 or 1, so the AIPW correction is large and the fluctuation parameter $\hat\epsilon$ is non-trivial; (ii) one nuisance is much more wrong than the other, so the boundedness behaviour matters; or (iii) the sample is small and the estimators' finite-sample distributions have not yet converged to the asymptotic one. A meaningful AIPW–TMLE gap is therefore a useful diagnostic, not a contradiction.
+In large samples on data with well-behaved propensity scores, yes; they share the same asymptotic distribution and the same EIF-based standard errors. Visible disagreement between the two estimates usually points to a specific cause: (i) some propensity scores are near 0 or 1, so the AIPW correction is large and the fluctuation parameter $\hat\epsilon$ is non-trivial; (ii) one nuisance is much more wrong than the other, so the boundedness behaviour matters; or (iii) the sample is small and the estimators' finite-sample distributions have not yet converged to the asymptotic one. A meaningful AIPW versus TMLE gap is therefore a useful diagnostic, not a contradiction.
 
 </details>
 
