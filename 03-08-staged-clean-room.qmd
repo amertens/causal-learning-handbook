@@ -7,6 +7,11 @@ format: html
 # Staged and Clean-Room Designs for Real-World Evidence {#sec-clean-room}
 *Pre-specified targeted learning with outcome-blind diagnostics, plasmode candidate selection, and a data-quality stress test*
 
+::: {.callout-tip}
+## If you only read one thing
+The credibility of a high-stakes real-world-evidence estimate depends on the process as much as the estimator. Lock the analysis plan and run every diagnostic outcome-blind, so that no analytic choice is made after seeing the treatment-outcome association. This chapter's `cleanTMLE` workflow enforces that discipline with an analysis lock, audit logs, a data-quality stress test, and a GO / FLAG / STOP rule that refuses to read the outcome until the prespecified checkpoints are recorded.
+:::
+
 You have specified a target trial, chosen an estimand, defended your DAG, fit a TMLE with Super Learner, and run the diagnostics in @sec-advanced-diagnostics. Should the reviewer believe the estimate? In a regulatory or multi-site RWE setting, the answer increasingly depends not just on the estimator but on the **process** that produced it: was the analysis plan fixed before the outcome was inspected, were the design and estimator choices documented as they were made, and can an external reviewer reconstruct every decision from a single archived record?
 
 This chapter introduces the **staged, outcome-blind workflow** of [@muntner2024staging] and the **clean-room** governance arrangement that surrounds it. We then walk through the `cleanTMLE` R package, which provides the software layer for a staged TMLE analysis: an analysis lock with a SHA-256 fingerprint, automatic audit and decision logs, plasmode-based candidate selection, a data-quality stress test, and a GO / FLAG / STOP pre-outcome decision rule that physically refuses to read the primary outcome until the prespecified checkpoints have been recorded. We finish with a complete worked example on the HIV antiretroviral therapy cohort.
@@ -142,7 +147,7 @@ TMLE is the prespecified primary estimator in the staged workflow; the conventio
 
 ## The data-quality stress test
 
-The package's distinguishing contribution is `run_plasmode_dq_stress()`. Standard outcome-blind plasmode selects the candidate with the best baseline RMSE under one locked synthetic outcome mechanism. The DQ stress test re-runs the same loop under four prespecified threat families and produces a **degradation gradient**, a curve of bias, RMSE, and coverage against the severity of the threat, for each TMLE candidate.
+The package's distinguishing contribution is `run_plasmode_dq_stress()`. Standard outcome-blind plasmode selects the candidate with the best baseline RMSE under one locked synthetic outcome mechanism. The DQ stress test re-runs the same loop under four prespecified threat families and produces a **bias-severity curve**, a curve of bias, RMSE, and coverage against the severity of the threat, for each TMLE candidate.
 
 | Threat | What is perturbed | Identification assumption probed |
 |---|---|---|
@@ -151,7 +156,7 @@ The package's distinguishing contribution is `run_plasmode_dq_stress()`. Standar
 | Outcome misclassification | Asymmetric (sensitivity, specificity) applied to $Y$, optionally per arm | No measurement error in $Y$ |
 | Unmeasured confounding | Latent $U$ shifts $A$ and $Y$ via prespecified ORs | Conditional exchangeability |
 
-The degradation gradient is analogous to a dose–response curve for estimator fragility. A *shallow* gradient says the candidate is stable across the plausible severity range. A *cliff* says small increases in degradation move performance outside the locked operating-characteristic thresholds.
+The bias-severity curve is analogous to a dose–response curve for estimator fragility. A *shallow* gradient says the candidate is stable across the plausible severity range. A *cliff* says small increases in degradation move performance outside the locked operating-characteristic thresholds.
 
 The stress test is a **quantitative supplement** to a SPIFD2-style [@gatto2023spifd2] fit-for-purpose review, not a substitute for source-data validation, variable-validation studies, or post-outcome quantitative bias analysis. Once the analyst specifies plausible threats and severity ranges, from external validation studies, data profiling, or expert elicitation, the stress test evaluates how candidate estimators behave under those prespecified perturbations on the same bias-RMSE-coverage scale used for baseline candidate selection.
 
@@ -494,7 +499,7 @@ cp_dq <- gate_dq(dq, candidate = selected$candidate_id,
 audit <- record_checkpoint(audit, cp_dq)
 ```
 
-The degradation gradient is the curve of bias and RMSE against severity, plotted separately for each threat. A representative output for this cohort looks like:
+The bias-severity curve is the curve of bias and RMSE against severity, plotted separately for each threat. A representative output for this cohort looks like:
 
 | Threat | Severity | Bias change | RMSE ratio | Coverage drop |
 |---|---:|---:|---:|---:|
@@ -687,7 +692,7 @@ It is worth being explicit about what passing the gate establishes. A workflow t
 It does **not** show that:
 
 - The exchangeability assumption holds. The unmeasured-confounding scenario in the DQ stress test probes the *consequences* of plausible latent confounders; it cannot rule out larger ones. Post-outcome E-values and tipping-point analyses (@sec-sensitivity-analysis) still belong in the dossier.
-- The plasmode generator is faithful to the real outcome process. The DQ stress test inherits the synthetic-outcome model; if that model is misspecified, the degradation gradients can mislead. The package's `assess_dgp_fidelity()` helper compares synthetic and observed marginal outcome distributions but cannot test the conditional structure directly.
+- The plasmode generator is faithful to the real outcome process. The DQ stress test inherits the synthetic-outcome model; if that model is misspecified, the bias-severity curves can mislead. The package's `assess_dgp_fidelity()` helper compares synthetic and observed marginal outcome distributions but cannot test the conditional structure directly.
 - The data are fit for purpose. SPIFD2 [@gatto2023spifd2], HARPER, START-RWE [@wang2021start], and ICH M14 all require external study-level justification that the package cannot replace.
 - The institutional partition of duties is real. Software-enforced outcome masking complements, but does not substitute for, the personnel-based clean-room governance of [@muntner2024staging].
 
@@ -711,7 +716,7 @@ The staged workflow draws on tools developed throughout the handbook:
 
 A staged design enforces the *order* of analytic decisions; a clean-room design adds *role separation* on top of that order. Both arrangements address the same underlying concern: decisions made after seeing the treatment–outcome association are not credible. The `cleanTMLE` package operationalises the software portion of the staged workflow, the lock, the audit trail, the plasmode candidate selector, the data-quality stress test, and the GO / FLAG / STOP decision rule, while leaving target-trial design, fit-for-purpose review, source-data validation, and institutional governance as external responsibilities.
 
-The package's distinguishing contribution is the **data-quality stress test**, which extends the standard outcome-blind plasmode loop with prespecified perturbations of $W$, $A$, $Y$, and an unmeasured $U$, producing a degradation gradient that the same decision rule consumes. The stress test does not validate the data and does not replace post-outcome quantitative bias analysis; it provides a quantitative bridge between the qualitative fit-for-purpose review and the estimator-selection argument.
+The package's distinguishing contribution is the **data-quality stress test**, which extends the standard outcome-blind plasmode loop with prespecified perturbations of $W$, $A$, $Y$, and an unmeasured $U$, producing a bias-severity curve that the same decision rule consumes. The stress test does not validate the data and does not replace post-outcome quantitative bias analysis; it provides a quantitative bridge between the qualitative fit-for-purpose review and the estimator-selection argument.
 
 Applied to the HIV antiretroviral therapy cohort, the workflow turned an analytic plan into a reproducible record: a fingerprinted lock, a documented chain of pre-outcome checkpoints, a transparent FLAG arising from a prespecified unmeasured-confounding scenario, and a locked TMLE that an external reviewer can rerun from the archived RDS files. That record is the reviewer-facing artefact, and the reason staged clean-room designs are increasingly the default for regulatory-grade RWE.
 
@@ -727,4 +732,4 @@ Applied to the HIV antiretroviral therapy cohort, the workflow turned an analyti
 - @schuler2017tmle, TMLE for RWE, including the role of prespecified candidate libraries.
 - @franklin2014plasmode, the original plasmode framework for evaluating estimators on synthetic outcomes generated from real covariate distributions.
 - @fda2018rwe and @fda2024ehr, the U.S. FDA RWE framework and the source-specific guidances for EHR and claims data.
-- The `cleanTMLE` package vignettes [`cleanTMLE-staged-analysis`](https://amertens.github.io/cleanTMLE/articles/cleanTMLE-staged-analysis.html) and [`cleanTMLE-functions`](https://amertens.github.io/cleanTMLE/articles/cleanTMLE-functions.html) provide the function-reference companion to this chapter and a step-by-step worked example with full code execution.
+- The `cleanTMLE` package vignettes [`cleanTMLE-staged-analysis`](https://amertens.github.io/cleanTMLE/articles/cleanTMLE-staged-analysis.h

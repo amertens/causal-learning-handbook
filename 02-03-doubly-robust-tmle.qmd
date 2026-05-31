@@ -24,7 +24,7 @@ A doubly robust estimator provides consistency if **either** the treatment model
 
 # Two Roads to the Same Destination: AIPW and TMLE
 
-AIPW [@robins1994estimation; @bang2005doubly] and TMLE [@vanderLaan2006tmle] are not competing methods aimed at different problems. They are **two strategies for solving the same problem**: producing an estimator of the ATE that is doubly robust, semiparametrically efficient, and uses both the outcome model $Q(A, W) = E[Y \mid A, W]$ and the propensity score $g(W) = P(A=1 \mid W)$. Both estimators are derived from the **efficient influence function (EIF)** for the ATE, and under regularity conditions both achieve the same asymptotic distribution and the same semiparametric efficiency bound.
+AIPW [@robins1994estimation; @bang2005doubly] and TMLE [@vanderLaan2006tmle] are not competing methods aimed at different problems. They are **two strategies for solving the same problem**: producing an estimator of the ATE that is doubly robust, semiparametrically efficient, and uses both the outcome model $Q(A, W) = E[Y \mid A, W]$ and the propensity score $g(W) = P(A=1 \mid W)$. Both estimators are derived from the **[efficient influence function](notation.qmd) (EIF)** for the ATE, and under regularity conditions both achieve the same asymptotic distribution and the same semiparametric efficiency bound.
 
 What separates them is **how** they incorporate the EIF:
 
@@ -32,6 +32,14 @@ What separates them is **how** they incorporate the EIF:
 - **TMLE** is a *substitution* (plug-in) estimator. It begins with the same initial $Q$, then *modifies* it (via a small "fluctuation" guided by $g$) until the substitution estimator $\frac{1}{n}\sum_i [Q^*(1, W_i) - Q^*(0, W_i)]$ already solves the EIF equation. No extra correction term is needed because the correction has been absorbed into the updated $Q^*$.
 
 Both routes arrive at an estimator with the same large-sample behaviour. The structural difference (a sum versus a substitution) is what generates the practical differences we will revisit at the end of the chapter: TMLE estimates respect the bounds of the outcome scale (e.g., probabilities stay in $[0, 1]$), are interpretable as means of valid counterfactual predictions, and integrate naturally with cross-validated machine learning. AIPW is simpler to code and equally valid when propensity scores are well-behaved.
+
+::: {.callout-note}
+## What is an influence function? (plain version)
+
+Almost any estimator in this book can be rewritten, to a close approximation, as a simple average of one number per patient. That per-patient number is the patient's value of the **influence function**: it says how far, and in which direction, that single patient pulls the final estimate. Two consequences are all an applied reader needs. The spread of those per-patient pulls is what sets the standard error: take their standard deviation and divide by the square root of the sample size. And an estimator reaches the smallest possible standard error when its influence function is the *efficient* one; TMLE earns that efficiency by nudging the fitted models until the pulls average to zero.
+
+Every patient casts a vote on the final estimate. Most votes are quiet, but a few loud ones set the margin of error. A two-patient picture makes it concrete. Imagine the estimate is a risk difference and we have computed each patient's influence value. An ordinary patient, well matched on covariates with a predictable outcome, might have an influence value near $0$, so dropping them barely moves the estimate. A high-leverage patient, say a treated patient whose propensity score was only $0.03$ (very unlikely to be treated) and who then had the outcome, might have an influence value of $+18$: that one patient hauls the estimate upward, and a handful like them widen the confidence interval. The standard error is just the standard deviation of these per-patient values over the square root of $n$, so a few large values inflate it. The inference code later in this chapter computes exactly these per-patient numbers.
+:::
 
 ---
 
@@ -163,7 +171,7 @@ ps <- dat$ps
 :::{.callout-note}
 ## Definition: The Clever Covariate
 
-The **clever covariate** $H(A, W)$ is the key ingredient that makes TMLE "targeted." It is derived from the efficient influence function for the ATE:
+The **[clever covariate](notation.qmd)** $H(A, W)$ is the key ingredient that makes TMLE "targeted." It is derived from the efficient influence function for the ATE:
 
 $$
 H(A, W) = \frac{A}{g(W)} - \frac{1 - A}{1 - g(W)}
@@ -174,7 +182,7 @@ For computing the counterfactual means, we also need the treatment-specific comp
 - $H_1(W) = \frac{1}{g(W)}$ (for the treated potential outcome)
 - $H_0(W) = \frac{-1}{1 - g(W)}$ (for the control potential outcome)
 
-The clever covariate directs the fluctuation to reduce bias for the specific causal estimand we care about, the ATE.
+Think of it as a nudge that pushes hardest exactly where the outcome model is most vulnerable, the patients who got a treatment almost no one like them received. More precisely, the clever covariate is large when the received treatment was unlikely given the covariates: a small $g(W)$ for a treated patient, or a small $1 - g(W)$ for an untreated one. Those are exactly the patients where the outcome model is most likely to be wrong, because few similar patients received the same treatment, so the update leans hardest on them. In this way the clever covariate directs the fluctuation to reduce bias for the specific causal estimand we care about, the ATE.
 :::
 
 ```{r}
@@ -323,6 +331,21 @@ The structural distinction is **additive correction (AIPW) versus substitution /
 | Inference (EIF-based SEs) | Yes | Yes |
 
 The most consequential of these is **boundedness**. When some propensity scores are near 0 or 1, the AIPW correction term $\frac{A}{g(W)}(Y - Q(1,W))$ can be large in magnitude and same-signed across many observations. Adding it to the G-computation plug-in can produce probability estimates above 1 or below 0, or risk-difference estimates outside $[-1, 1]$. TMLE absorbs the same correction *into* $Q$ on the logit scale, so the substitution estimator is always a mean of valid probabilities. This is a structural guarantee, not a finite-sample lucky break.
+
+The following deliberately small, extreme example exposes the mechanism. Two treated patients had a propensity score of only $0.02$ (they looked very unlikely to be treated) and did have the outcome, so their inverse-probability weights are enormous.
+
+```{r}
+g  <- c(0.02, 0.02, 0.50, 0.50, 0.98, 0.98)
+A  <- c(1,    1,    1,    0,    1,    0)
+Y  <- c(1,    1,    0,    0,    1,    0)
+Q1 <- c(0.30, 0.30, 0.40, 0.40, 0.60, 0.60)   # outcome-model risk under treatment
+
+# AIPW estimate of the treated-world mean E[Y(1)]: plug-in plus IPW correction
+aipw_mu1 <- mean(Q1 + (A == 1) / g * (Y - Q1))
+round(aipw_mu1, 2)
+```
+
+The AIPW estimate of a probability comes out far above 1, which is impossible: the unbounded $A/g(W)$ correction, summed over a few enormous weights, pushed the plug-in outside the parameter space. TMLE folds the same correction into the outcome model on the logit scale, so every updated prediction is `plogis(...)`, a genuine probability strictly between 0 and 1. Averaging numbers that each lie in $[0, 1]$ cannot leave $[0, 1]$, so the TMLE substitution estimate stays in range no matter how extreme the propensity scores. That single property is the practical reason to prefer TMLE when overlap is poor.
 
 ## When to prefer which
 

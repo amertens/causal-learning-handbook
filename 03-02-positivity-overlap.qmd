@@ -59,7 +59,7 @@ patients in your study. Positivity says: **for every type of patient defined by 
 confounders you adjust for, both treatment options must be possible.** If some patient
 profiles always receive the drug (or never receive it), you have no observed
 counterfactual for that stratum, and the causal contrast there is unidentifiable from
-data alone.
+data alone. You cannot learn the effect of a treatment in patients who would never have received it, any more than you can politically poll the views of people who never pick up the phone.
 
 ## Formal definition
 
@@ -269,6 +269,36 @@ dat |>
                caption = "Covariate strata by treatment: look for near-empty cells")
 ```
 
+## A reusable data-support report
+
+The individual checks above are easier to use as one routine that returns the numbers most worth seeing before trusting any weighted or standardized estimate. Pass the treatment, the estimated propensity score, and a covariate frame; the report gives the propensity mass in the tails, the largest stabilized weight, the effective sample size, and the covariate balance before and after weighting. Later chapters refer back to this report rather than re-deriving the pieces.
+
+```{r}
+#| code-fold: show
+data_support_report <- function(A, ps, W) {
+  w   <- ifelse(A == 1, mean(A) / ps, mean(1 - A) / (1 - ps))   # stabilized weights
+  ess <- sum(w)^2 / sum(w^2)
+  smd <- sapply(W, function(x) {
+    s  <- sqrt((var(x[A == 1]) + var(x[A == 0])) / 2)           # pooled SD
+    c(before = (mean(x[A == 1]) - mean(x[A == 0])) / s,
+      after  = (weighted.mean(x[A == 1], w[A == 1]) -
+                weighted.mean(x[A == 0], w[A == 0])) / s)
+  })
+  list(
+    pct_ps_below_05  = round(100 * mean(ps < 0.05), 1),
+    pct_ps_above_95  = round(100 * mean(ps > 0.95), 1),
+    max_stab_weight  = round(max(w), 1),
+    effective_n      = round(ess),
+    nominal_n        = length(A),
+    smd_before_after = round(t(smd), 3)
+  )
+}
+
+data_support_report(dat$A, dat$ps_hat, dat[, c("age", "severity")])
+```
+
+Read it as a checklist. Any appreciable mass with a propensity below 0.05 or above 0.95 flags patients with little counterfactual support. A maximum stabilized weight in the tens or hundreds, or an effective sample size far below the nominal count, means a few patients dominate. The standardized mean differences should shrink toward zero after weighting; a covariate whose imbalance persists is one the weights failed to balance, which points back to the propensity model. The covariate-by-treatment cell table above complements this by exposing exact structural zeros, and the per-stratum version of the same positivity check, applied inside each subgroup, appears in @sec-effect-modification.
+
 ---
 
 # How Positivity Problems Affect Different Estimators {#sec-estimator-effects}
@@ -460,6 +490,20 @@ later chapters; for now, just note the idea: if the static intervention
 $\text{do}(A=1)$ creates positivity problems, a *stochastic* or *shift* intervention
 may not.
 
+## A remedies decision guide
+
+The responses above are not a menu to pick from at random; the diagnosis points to the remedy. The table maps what the diagnostics show to what to do, and to how the estimand changes as a result.
+
+| What the diagnostics show | Recommended response | Estimand consequence |
+|---|---|---|
+| A few extreme weights, estimate stable under truncation | Truncate and report a truncation sensitivity curve | Mild; the target is essentially unchanged |
+| A region of covariate space with no overlap | Restrict to the overlap region | The target becomes the ATE in the overlap population |
+| The question is about the treated, and controls are sparse | Target the ATT rather than the ATE | The question narrows to the treated |
+| A static "treat everyone" regime has no support | Switch to a stochastic or modified treatment policy (@sec-adherence-shift, @sec-applied-lmtp) | The target becomes a feasible, support-respecting intervention |
+| A longitudinal regime loses support across visits | Use a feasible shift rule rather than a fixed path | As above, defined visit by visit |
+
+The unifying principle is that a positivity problem signals that the data cannot answer the original question. The honest move is to answer a nearby question the data can support, and to state plainly which question that is.
+
 ## Honest reporting
 
 When positivity problems remain after reasonable adjustments, the most important
@@ -566,6 +610,33 @@ ggplot(haart_baseline, aes(x = ps_hat, fill = factor(ever_haart))) +
 The overlap plot reveals that patients with low `cd4_sqrt_baseline` cluster near propensity scores of 1, because clinical guidelines make HAART initiation near-certain for severely immunocompromised patients. This is a practical (not structural) positivity violation: HAART is not literally required, but it is rarely withheld.
 
 Any causal estimate for those patients relies heavily on model extrapolation rather than observed counterfactual data. Analysts should consider restricting the target population to the overlap region or reporting effective sample sizes (@sec-advanced-diagnostics) to quantify how much information these near-violations consume.
+
+---
+
+# Positivity in the longitudinal setting {#sec-longitudinal-positivity}
+
+In a longitudinal analysis the treatment decision is repeated at every visit, and positivity must hold at each one. The danger is multiplicative. A treatment probability that is merely uncomfortable at a single visit becomes untenable once it is chained across many visits, because the longitudinal estimand depends on the product of the per-visit probabilities. A regime that asks a patient to have followed an increasingly unlikely treatment path can end up with almost no support, even when each single step looked acceptable.
+
+The diagnostic mirrors the point-treatment one but is computed visit by visit, and the cumulative product is the quantity to watch.
+
+```{r}
+#| code-fold: show
+set.seed(5)
+n  <- 1000
+g1 <- plogis(rnorm(n, 1.0, 0.7))      # probability of following the regime at each visit,
+g2 <- plogis(rnorm(n, 0.7, 0.9))      # each individually plausible
+g3 <- plogis(rnorm(n, 0.4, 1.1))
+cum_g <- g1 * g2 * g3                  # probability of following the regime through visit 3
+
+data.frame(
+  visit        = c("v1", "v2", "v3", "cumulative"),
+  min_prob     = round(c(min(g1), min(g2), min(g3), min(cum_g)), 3),
+  pct_below_10 = round(100 * c(mean(g1 < 0.1), mean(g2 < 0.1),
+                               mean(g3 < 0.1), mean(cum_g < 0.1)), 1)
+)
+```
+
+Each visit on its own looks tolerable, but the cumulative probability develops a long tail near zero, and the inverse of that cumulative probability is the weight a longitudinal IPW analysis would carry. TMLE-based longitudinal estimators (@sec-illustrated-ltmle) avoid forming explicit weight products, but they inherit the same support limitation: the contrast still rests on person-histories that barely occur. The visit-by-visit treatment-probability and effective-sample-size diagnostic in @sec-applied-lmtp is the applied version of this check. When the cumulative support is thin, the static regime is the wrong target, and a modified treatment policy that shifts treatment by a feasible amount (@sec-adherence-shift) restores support.
 
 ---
 

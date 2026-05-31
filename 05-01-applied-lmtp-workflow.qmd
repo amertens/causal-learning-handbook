@@ -217,11 +217,54 @@ If the rule would shift very few observations (most patients with low CD4 are al
 
 ### Propensity score overlap
 
-The treatment mechanism at each visit should show adequate overlap. Estimated probabilities of treatment near 0 or 1 at any visit indicate positivity concerns that compound across time points.
+The treatment mechanism at each visit should show adequate overlap. Estimated probabilities of treatment near 0 or 1 at any visit indicate positivity concerns that compound across time points. The block below fits the per-visit initiation model among patients still at risk of initiating (those not already on HAART) and reports the range of fitted probabilities at each visit.
+
+```{r}
+#| label: lmtp-overlap
+#| code-fold: show
+# Treatment-initiation probability at each visit, among patients still at risk
+# of initiating. Values near 0 or 1 flag positivity strain; because the
+# longitudinal estimand chains across visits, thin overlap at any single visit
+# propagates into the contrast.
+g1 <- predict(glm(A_1 ~ age + sex + L_1, binomial, dat_wide), type = "response")
+
+at_risk2 <- dat_wide$A_1 == 0
+g2 <- predict(glm(A_2 ~ age + sex + L_2, binomial, dat_wide[at_risk2, ]),
+              type = "response")
+
+at_risk3 <- dat_wide$A_2 == 0
+g3 <- predict(glm(A_3 ~ age + sex + L_3, binomial, dat_wide[at_risk3, ]),
+              type = "response")
+
+data.frame(
+  visit     = c("A_1", "A_2", "A_3"),
+  n_at_risk = c(nrow(dat_wide), sum(at_risk2), sum(at_risk3)),
+  g_min     = round(c(min(g1), min(g2), min(g3)), 3),
+  g_max     = round(c(max(g1), max(g2), max(g3)), 3)
+)
+```
 
 ### Effective sample size
 
-In longitudinal settings, the effective sample size can shrink rapidly because the cumulative product of inverse-probability weights grows with the number of visits. Even with TMLE-based estimation (which avoids explicit weight products), near-positivity violations at individual time points can inflate the influence of a few observations. Monitoring the distribution of influence-curve values across patients helps detect this.
+In longitudinal settings, the effective sample size can shrink rapidly because the cumulative product of inverse-probability weights grows with the number of visits. Even with TMLE-based estimation (which avoids explicit weight products), near-positivity violations at individual time points can inflate the influence of a few observations. The visit-1 weights below illustrate the idea; the effective sample size is the squared sum of weights over the sum of squared weights, and it falls further once weights are multiplied across visits.
+
+```{r}
+#| label: lmtp-ess
+#| code-fold: show
+# Inverse-probability weights for the observed (natural-course) treatment at
+# visit 1, and the resulting effective sample size. An ESS well below the
+# nominal n means a few person-histories dominate the estimate.
+w1   <- ifelse(dat_wide$A_1 == 1, 1 / g1, 1 / (1 - g1))
+ess1 <- sum(w1)^2 / sum(w1^2)
+
+data.frame(
+  nominal_n     = nrow(dat_wide),
+  max_weight_v1 = round(max(w1), 1),
+  ess_visit1    = round(ess1, 1)
+)
+```
+
+A large gap between `nominal_n` and `ess_visit1`, or a large `max_weight_v1`, at any visit is the longitudinal analogue of the point-treatment positivity problem: the contrast is being carried by a small number of person-histories, and the confidence interval understates the true fragility.
 
 
 ## Interpretation
@@ -297,7 +340,6 @@ This analysis integrates every major concept from the handbook into a single app
 
 ## Sources and further reading
 
-- Diaz I, Williams N, Hoffman KL, Schenck EJ (2023). Nonparametric causal effects based on longitudinal modified treatment policies. *Journal of the American Statistical Association* 118(542):846-856.
-- Petersen ML, van der Laan MJ (2014). Causal models and learning from data. *Epidemiology* 25(3):418-426.
-- Dang LE, Tager I, Petersen ML (2023). A causal roadmap for generating high-quality real-world evidence. *Journal of Clinical and Translational Science* 7(1):e127.
+- @diaz2021lmtp introduces the LMTP framework for realistic longitudinal interventions that depend on the natural treatment value.
+- @petersen2014causal and @dang2023causal develop the Causal Roadmap and its extension to real-world evidence.
 - `lmtp` R package: [CRAN](https://cran.r-project.org/package=lmtp)

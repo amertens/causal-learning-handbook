@@ -28,7 +28,7 @@ The **[Interactions chapter](03-04b-interactions-rwe.qmd)** treats a different q
 
 If the second variable is not itself conceptualised as an intervention, the estimand is usually effect modification rather than causal interaction.
 
-The two chapters are designed to be read together. Effect modification asks *who benefits more from one treatment*. Interaction asks *how two exposures combine*. The two questions can both be relevant in the same applied study, but they require different estimands [@hernan2020whatif].
+The two chapters are designed to be read together. Effect modification asks *who benefits more from one treatment*. Interaction asks *how two exposures combine*. The two questions can both be relevant in the same applied study, but they require different estimands [@hernan2020whatif; @vanderweele2009distinction].
 :::
 
 ::: {.callout-note}
@@ -192,7 +192,7 @@ The key idea is to project the CATE onto basis functions of $X$, estimate each p
 
 Prespecified subgroup analysis answers the question *given these subgroups, where is the effect larger?* A complementary question is *which covariates drive heterogeneity in the first place?* Two modern targeted-learning tools address that question. **Causal forests are exploratory heterogeneity-discovery tools, not confirmatory causal-interaction estimators.** They produce individual-level CATE estimates by data-adaptively partitioning covariate space, which is useful for *generating hypotheses* about where heterogeneity sits but not for *confirming* a prespecified additive or multiplicative interaction parameter. The next section (Section 8) gives the R implementation; Section 9 introduces treatment-effect variable importance (te-VIM) measures, which add inferential rigor to the discovery step by targeting the contribution of each candidate modifier to the variance of the CATE.
 
-In plain language, causal forests are tree-based methods designed to estimate CATEs. Think of them as smart subgroup finders that search across covariates for splits that maximise treatment-effect heterogeneity. Honest sample splitting and averaging across many trees produce smooth, individual-level CATE estimates $\widehat\tau(x)$ with approximate pointwise confidence intervals.
+In plain language, causal forests [@wager2018estimation; @athey2016recursive] are tree-based methods designed to estimate CATEs. Think of them as smart subgroup finders that search across covariates for splits that maximise treatment-effect heterogeneity. Honest sample splitting and averaging across many trees produce smooth, individual-level CATE estimates $\widehat\tau(x)$ with approximate pointwise confidence intervals.
 
 Causal forests are powerful exploratory tools, but they come with important limitations.
 
@@ -433,24 +433,70 @@ TMLE gives a population-level effect with solid identifiability and efficiency. 
 
 See the [Running Case Study](00-case-study.qmd) for the full data description. Effect modification is clinically relevant in the HAART cohort because the benefit of treatment may vary across patient characteristics. Patients with very low baseline CD4 counts face the highest mortality risk and may experience the largest absolute risk reduction from HAART, while patients with higher CD4 at baseline have less room to benefit. Age is another plausible modifier, since immune reconstitution dynamics differ for older patients.
 
+We prespecify two subgroups by splitting baseline CD4 at its median. Two groups, rather than many fine bins, keep each stratum large enough to support a within-stratum effect estimate, which is the first defence against the positivity problem described in Section 3.
+
+**Step 1: check positivity within each stratum before estimating anything.** A subgroup CATE is only identified where both treated and untreated patients exist across the confounder distribution *inside that subgroup*. The diagnostic below refits the propensity model within each CD4 group and reports the size of each treatment arm, the number of deaths, and the range of within-stratum propensity scores. It uses base R only, so it runs without the targeted-learning packages.
+
 ```{r}
-#| eval: false
 #| code-fold: true
 source("_data/load-haart-cohort.R")
 
-# Define clinically meaningful subgroups by baseline CD4
-haart_baseline <- haart_baseline %>%
-  mutate(cd4_group = if_else(cd4_baseline < median(cd4_baseline),
-                             "low_cd4", "high_cd4"))
+# Prespecified subgroups: split baseline CD4 at its median (two groups).
+cd4_med <- median(haart_baseline$cd4_baseline)
+haart_baseline$cd4_group <- ifelse(haart_baseline$cd4_baseline < cd4_med,
+                                   "low_cd4", "high_cd4")
 
-# Prespecified subgroup analysis: estimate the CATE within each CD4 group
-# using TMLE with confounders age and sex.
-# A causal forest could also explore heterogeneity across cd4_baseline
-# and age simultaneously as an exploratory complement.
-table(haart_baseline$cd4_group, haart_baseline$ever_haart)
+# Per-stratum positivity diagnostic: treated/untreated counts, deaths, and the
+# range of estimated propensity scores within the stratum. Propensity scores
+# pinned near 0 or 1, or an almost-empty treatment arm, signal that the CATE in
+# that stratum rests on extrapolation rather than data.
+positivity_by_group <- lapply(
+  split(haart_baseline, haart_baseline$cd4_group),
+  function(d) {
+    ps <- predict(glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
+                      family = binomial, data = d), type = "response")
+    data.frame(
+      n           = nrow(d),
+      n_treated   = sum(d$ever_haart),
+      n_untreated = sum(d$ever_haart == 0),
+      deaths      = sum(d$died),
+      ps_min      = round(min(ps), 3),
+      ps_max      = round(max(ps), 3)
+    )
+  }
+)
+do.call(rbind, positivity_by_group)
 ```
 
-Before estimating subgroup-specific effects, verify that positivity holds within each stratum (@sec-positivity-overlap). Both the HAART-treated (`ever_haart = 1`) and untreated groups should be well represented in each CD4 subgroup. With only 1,200 patients and 31 deaths, very fine stratification will produce sparse cells and unstable CATE estimates, so analyses should focus on a small number of prespecified subgroups rather than exhaustive slicing.
+In this cohort the low-CD4 stratum is where positivity strains. Guidelines push almost everyone with a low CD4 count toward HAART, so the untreated arm in that stratum is small and its estimated propensity scores cluster near 1. That is exactly the configuration that inflates inverse-probability weights and lets g-computation extrapolate silently (@sec-positivity-overlap). A subgroup whose CATE is driven by a handful of untreated patients is fragile no matter which estimator is used.
+
+**Step 2: estimate the subgroup-specific effect with TMLE**, but only in strata that passed the positivity check. The stratifying variable (CD4 group) is excluded from `W`; the within-stratum confounders are age, sex, and baseline CD4 on the square-root scale.
+
+```{r}
+#| eval: false
+library(tmle)
+library(SuperLearner)
+
+sl_lib <- c("SL.glm", "SL.mean")   # keep the library small in sparse strata
+
+run_subgroup_tmle <- function(d) {
+  fit <- tmle(
+    Y = d$died,
+    A = d$ever_haart,
+    W = d[, c("age", "sex", "cd4_sqrt_baseline")],
+    family = "binomial",
+    Q.SL.library = sl_lib,
+    g.SL.library = sl_lib
+  )
+  c(ATE = fit$estimates$ATE$psi,
+    lower = fit$estimates$ATE$CI[1],
+    upper = fit$estimates$ATE$CI[2])
+}
+
+lapply(split(haart_baseline, haart_baseline$cd4_group), run_subgroup_tmle)
+```
+
+With only 31 deaths spread across 1,200 patients, the per-stratum event counts are small, so the confidence intervals are wide and a rich Super Learner library can overfit. Three practical rules follow from this. Keep the number of prespecified subgroups small. Run the positivity diagnostic in every stratum and drop, or explicitly flag as extrapolation, any subgroup with a near-empty treatment arm. And report the overall ATE alongside the subgroup estimates so a reader can see how far each CATE departs from the average and judge whether the departure is signal or sparse-data noise.
 
 ---
 
@@ -467,7 +513,7 @@ Before estimating subgroup-specific effects, verify that positivity holds within
 
 ### Bridge to optimal treatment rules
 
-Effect modification is also the conceptual bridge to optimal treatment rules. Once we move from asking *whether the average effect differs across one subgroup variable* to asking *which treatment rule, applied as a function of many baseline covariates, would maximise expected outcomes in the population*, we have moved into the setting of individualised treatment rules and policy learning. The CATE machinery in this chapter (TMLE for prespecified subgroups, causal forests, treatment-effect variable importance) is the input to that next step. Chapters on optimal regimes and policy learning develop the formal estimators and decision-theoretic framing.
+Effect modification is also the conceptual bridge to optimal treatment rules. Once we move from asking *whether the average effect differs across one subgroup variable* to asking *which treatment rule, applied as a function of many baseline covariates, would maximise expected outcomes in the population*, we have moved into the setting of individualised treatment rules and policy learning. The CATE machinery in this chapter (TMLE for prespecified subgroups, causal forests, treatment-effect variable importance) is the input to that next step. The optimal-treatment-regime chapter (@sec-optimal-regimes) develops the formal estimators and decision-theoretic framing.
 
 ---
 

@@ -81,7 +81,7 @@ ate  <- risk1 - risk0
 knitr::kable(data.frame(risk1 = risk1, risk0 = risk0, ate = ate))
 ```
 
-Interpret the result as: “If the entire population had initiated HAART rather than not, the estimated change in mortality risk would be X percentage points.”
+**How to interpret these results:** `ate` is the standardized (marginal) risk difference, and it is the causal number, not either regression coefficient. Read it as: if the entire population had initiated HAART rather than not, the estimated mortality risk would change by `ate` (about X percentage points), with the measured confounders' distribution held fixed. `risk1` and `risk0` are the standardized risks under universal treatment and under no treatment; the contrast between them is what a well-randomized trial would have estimated.
 
 ### Beyond the Risk Difference: Relative Risk and Population Attributable Fraction
 
@@ -143,6 +143,40 @@ G-computation bridges the gap: it uses the conditional model internally but **st
 
 G-computation rests entirely on the outcome model $E[Y \mid A, W]$. If that model is wrong (e.g., omits interactions, assumes linearity when the truth is non-linear), bias propagates directly into the causal estimate. For example, suppose the true risk of virologic failure depends on a nonlinear interaction between baseline CD4 count and age, but the fitted model includes only main effects. The model will generate systematically wrong counterfactual predictions for patients with unusual combinations of CD4 and age, and the resulting ATE estimate will be biased. Unlike IPTW, where positivity failures produce visible extreme weights, g-computation's extrapolation errors are silent: the model returns a number with no warning that it is wrong. Always check residuals and consider flexible alternatives (see @sec-doubly-robust-tmle).
 :::
+
+## Watch it fail: a misspecified model biases the estimate
+
+The warning above is easy to state and easy to ignore, so here it is as a number. We simulate a world where the truth is nonlinear, then estimate the effect two ways: with a main-terms logistic regression that misses the nonlinearity, and with a model that includes it. The risk difference is known by construction, so we can see exactly how far the misspecified model lands from the truth.
+
+```{r}
+#| code-fold: show
+set.seed(2024)
+n   <- 4000
+age <- runif(n, 30, 80)
+A   <- rbinom(n, 1, plogis(-2 + 0.04 * age))             # older patients treated more often
+
+# True risk: curved in age, and the treatment effect is larger above age 65
+true_risk <- function(a, w) plogis(-1 + 0.8 * a - 0.0009 * (w - 55)^2 + 0.6 * a * (w > 65))
+Y <- rbinom(n, 1, true_risk(A, age))
+d <- data.frame(Y, A, age)
+
+# Truth: population risk difference under the known model
+true_ate <- mean(true_risk(1, age) - true_risk(0, age))
+
+# Misspecified g-computation: main terms only (no curvature, no interaction)
+m_wrong   <- glm(Y ~ A + age, family = binomial, data = d)
+ate_wrong <- mean(predict(m_wrong, transform(d, A = 1), type = "response") -
+                  predict(m_wrong, transform(d, A = 0), type = "response"))
+
+# Correctly flexible g-computation: include the curvature and interaction
+m_flex   <- glm(Y ~ A * age + I((age - 55)^2) + A:I(age > 65), family = binomial, data = d)
+ate_flex <- mean(predict(m_flex, transform(d, A = 1), type = "response") -
+                 predict(m_flex, transform(d, A = 0), type = "response"))
+
+round(c(truth = true_ate, main_terms = ate_wrong, flexible = ate_flex), 3)
+```
+
+The main-terms estimate misses the true risk difference because it cannot represent the curvature and the above-65 interaction; the flexible model, which happens to include exactly those terms, recovers the truth. The catch in real data is that no one tells you which terms to add. That is the problem Super Learner (@sec-superlearner) solves: rather than guessing the functional form, it lets a library of algorithms and cross-validation choose it, which is why the next chapters build g-computation and TMLE on top of machine learning rather than a single hand-specified regression.
 
 ---
 

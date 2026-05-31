@@ -35,7 +35,7 @@ logit <- function(p) log(p / (1 - p))
 
 # Where this chapter fits
 
-The previous chapter explained why treatment-confounder feedback breaks standard regression. This chapter explains how L-TMLE solves the problem conceptually. The focus is on the logic of the algorithm, not a full code walkthrough. Readers who want the complete by-hand implementation can consult the [technical companion chapter](03-09b-ltmle-by-hand.qmd). For practical applied analysis of realistic longitudinal interventions, the LMTP chapters that follow are the recommended pathway.
+The previous chapter explained why treatment-confounder feedback breaks standard regression. This chapter explains how L-TMLE [@vanderLaan2012ltmle; @petersen2014causal] solves the problem conceptually. The focus is on the logic of the algorithm, not a full code walkthrough. Readers who want the complete by-hand implementation can consult the [technical companion chapter](03-09b-ltmle-by-hand.qmd). For practical applied analysis of realistic longitudinal interventions, the LMTP chapters that follow are the recommended pathway.
 
 
 # The causal question
@@ -95,7 +95,7 @@ cat("Failure rate:", round(mean(Y), 3), "\n")
 
 # The backwards regression idea
 
-L-TMLE estimates the causal effect through three ideas working together.
+We solve the maze from the exit. Start at the final outcome and work back toward the first treatment decision, so each step already knows where it needs to end up. Concretely, L-TMLE estimates the causal effect through three ideas working together.
 
 **Sequential regressions, working backwards.** Start at the final outcome and model $E[Y \mid A_2, L_1, A_1, W]$. This conditions on $L_1$ to deconfound $A_2$. Then move backwards: take the predicted outcomes under $A_2 = 1$ and regress them on $(A_1, W)$ only, without conditioning on $L_1$. This integrates $L_1$ out, preserving the mediated effect of $A_1$ through $L_1$.
 
@@ -104,6 +104,21 @@ L-TMLE estimates the causal effect through three ideas working together.
 **Targeting steps.** Use the treatment mechanism to construct clever covariates that correct the sequential regressions for any remaining bias. At each time point, the final estimate is consistent if either the outcome regression or the treatment model is correctly specified (sequential double robustness).
 
 The key insight: conditioning on $L_1$ at time 2 deconfounds $A_2$, while NOT conditioning on $L_1$ at time 1 preserves the indirect effect $A_1 \to L_1 \to Y$. Standard regression cannot do both in a single model.
+
+@fig-backwards-regression shows the two-step logic. The same variable $L_1$ is handled differently at each step: it is included in the visit-2 regression, where it confounds $A_2$, and omitted from the visit-1 regression, where it carries part of the effect of $A_1$.
+
+```{mermaid}
+%%| label: fig-backwards-regression
+%%| fig-cap: "Backwards sequential regression for two time points. The time-varying covariate L1 is included where it confounds (visit 2) and omitted where it mediates (visit 1). Including L1 at visit 1 would block the pathway A1 to L1 to Y and bias the estimate, which is the error a single standard regression makes."
+flowchart TD
+    Y["Observed outcome Y"] --> Q2["<b>Step 1: visit-2 regression</b><br/>Model E[Y | A2, L1, A1, W]<br/><i>include L1</i> to deconfound A2"]
+    Q2 --> P2["Predict under A2 = 1<br/>= targeted prediction Q-hat 2"]
+    P2 --> Q1["<b>Step 2: visit-1 regression</b><br/>Regress Q-hat 2 on A1 and W only<br/><i>omit L1</i> to keep the path A1 &rarr; L1 &rarr; Y"]
+    Q1 --> P1["Predict under A1 = 1, then average<br/>= E[Y(1,1)]"]
+    note["L1 confounds A2 but mediates A1.<br/>Include it at visit 2; omit it at visit 1."]
+    note -. "include" .-> Q2
+    note -. "omit" .-> Q1
+```
 
 
 # How the recipe works in plain language

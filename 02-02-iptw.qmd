@@ -209,6 +209,8 @@ ate_ipw <- risk1_ipw - risk0_ipw
 c(risk1 = risk1_ipw, risk0 = risk0_ipw, ate = ate_ipw)
 ```
 
+**How to interpret these results:** `ate` is the marginal risk difference in the weighted pseudo-population, where reweighting has made the treated and untreated groups comparable on the measured confounders. Read it as the change in mortality risk if everyone, rather than no one, had initiated HAART. It should land close to the g-computation estimate from @sec-gcomputation; a large gap between the two is a signal to check the propensity model and the weights, not to split the difference.
+
 This matches the formula
 
 $$
@@ -350,6 +352,55 @@ Note that under severe truncation, the estimator implicitly targets a modified e
 
 
 :::
+
+---
+
+# Watch it fail: poor overlap inflates the variance
+
+The warnings about extreme weights are easier to trust as numbers. Below we hold the true effect fixed and change only how strongly treatment depends on the covariate, then compare the IPTW estimate, the largest weight, and a bootstrap standard error. The true risk difference is known by construction.
+
+```{r}
+#| code-fold: show
+set.seed(11)
+n <- 2000
+W <- rnorm(n)
+
+true_risk <- function(a, w) plogis(-0.7 + 0.4 * a + 0.9 * w)   # same in both scenarios
+true_ate  <- mean(true_risk(1, W) - true_risk(0, W))
+
+iptw_ate <- function(A, Y, ps) {                                # Hajek IPTW risk difference
+  w  <- ifelse(A == 1, 1 / ps, 1 / (1 - ps))
+  sum(w * A * Y) / sum(w * A) - sum(w * (1 - A) * Y) / sum(w * (1 - A))
+}
+boot_se <- function(A, Y, ps, B = 300) {
+  sd(replicate(B, { i <- sample(seq_along(A), replace = TRUE); iptw_ate(A[i], Y[i], ps[i]) }))
+}
+
+# Good overlap: treatment only mildly related to W
+psA <- plogis(0.5 * W); A_A <- rbinom(n, 1, psA); Y_A <- rbinom(n, 1, true_risk(A_A, W))
+# Near-positivity violation: treatment almost determined by W
+psB <- plogis(3.5 * W); A_B <- rbinom(n, 1, psB); Y_B <- rbinom(n, 1, true_risk(A_B, W))
+
+data.frame(
+  scenario   = c("good overlap", "near-violation"),
+  max_weight = round(c(max(ifelse(A_A == 1, 1/psA, 1/(1-psA))),
+                       max(ifelse(A_B == 1, 1/psB, 1/(1-psB)))), 1),
+  iptw_ate   = round(c(iptw_ate(A_A, Y_A, psA), iptw_ate(A_B, Y_B, psB)), 3),
+  boot_se    = round(c(boot_se(A_A, Y_A, psA),  boot_se(A_B, Y_B, psB)), 3),
+  truth      = round(true_ate, 3)
+)
+```
+
+Both scenarios use the correct propensity score, so both estimates target the same truth, but the near-violation scenario produces a much larger maximum weight and a substantially wider bootstrap standard error: the estimate is being carried by a few highly weighted patients. That is variance inflation from poor overlap, not bias.
+
+Bias is a separate failure, and it comes from the propensity model rather than from overlap. If the propensity score is misspecified badly enough to ignore the confounder, weighting cannot remove the confounding it never modeled, and the estimate collapses back toward the crude, confounded answer.
+
+```{r}
+ps_wrong <- rep(mean(A_B), n)             # a propensity model that ignores W entirely
+round(c(misspecified_ps = iptw_ate(A_B, Y_B, ps_wrong), truth = true_ate), 3)
+```
+
+The two failure modes call for different responses. Poor overlap is a positivity problem, addressed by truncation, a redefined target population, or a support-respecting intervention (@sec-positivity-overlap). A misspecified propensity model is an estimation problem, addressed by a more flexible model such as Super Learner (@sec-superlearner).
 
 ---
 
