@@ -22,7 +22,7 @@ This chapter is a self-contained short course that walks through the core ideas 
 
 # The Causal Roadmap
 
-Every causal analysis in this handbook follows a structured sequence:
+It is tempting to load the data and start fitting models. The roadmap resists that, because the model you reach for silently decides which question you end up answering. Working through a fixed sequence keeps the scientific question, rather than the software, in charge. Every causal analysis in this handbook follows the same seven steps:
 
 1. **Define the causal question** using a target trial protocol
 2. **Specify the causal model** (draw a DAG)
@@ -93,11 +93,11 @@ gcomp_ate <- mean(Q1) - mean(Q0)
 cat("G-computation ATE:", round(gcomp_ate, 4), "\n")
 ```
 
-G-computation depends entirely on the outcome model. If the model is wrong, the estimate is biased.
+G-computation depends entirely on the outcome model. If that model is wrong, the estimate is biased and nothing downstream repairs it. Two ideas in the rest of this section address that: a flexible way to fit the models (Super Learner), and an estimator that stays consistent if either the outcome model or the treatment model is right (TMLE).
 
 ## TMLE by hand
 
-TMLE adds a targeting step that corrects the outcome model using the propensity score. This makes it doubly robust: consistent if either the outcome model or the treatment model is correctly specified.
+TMLE adds a targeting step that corrects the outcome model using the propensity score. This makes it doubly robust: consistent if either the outcome model or the treatment model is correctly specified. The correction nudges the initial predictions hardest for patients whose treatment was least expected given their covariates, which is where the outcome model is most likely to be wrong; the propensity score enters only through that nudge, the *clever covariate* `H` below.
 
 ```{r}
 logit <- function(p) log(p / (1 - p))
@@ -132,6 +132,8 @@ The fluctuation parameter $\hat{\epsilon}$ captures how much the treatment model
 
 ## Inference from the efficient influence curve
 
+Each patient contributes one number to the estimate, the patient's value of the *efficient influence curve*. The estimate behaves like the average of those numbers, so its standard error is their standard deviation divided by the square root of `n`, and a few patients with extreme values are what widen the interval.
+
 ```{r}
 # Efficient influence curve
 Qstar_obs <- ifelse(dat$A == 1, Q1_star, Q0_star)
@@ -146,6 +148,10 @@ cat("ATE:", round(tmle_ate, 4), "\n")
 cat("SE: ", round(se, 4), "\n")
 cat("95% CI: [", round(ci[1], 4), ",", round(ci[2], 4), "]\n")
 ```
+
+## Super Learner: flexible models for the nuisances
+
+The code above fit the outcome and treatment models with `glm`, which assumes the relationships are linear on the logit scale. When they are not, both nuisance estimates are biased, and so is the causal estimate. Super Learner replaces a single guessed model with a library of candidate algorithms, for example a logistic regression, a spline model, and a random forest, and uses cross-validation to weight them by how well each predicts data it did not see. The ensemble is, in large samples, about as accurate as the best candidate in the library, without the analyst having to know in advance which that is. In a targeted-learning analysis Super Learner estimates the nuisance models and TMLE does the targeting on top; the software call below sets this up through its `Q.SL.library` and `g.SL.library` arguments.
 
 ## Software implementation
 
@@ -231,6 +237,8 @@ cat("G-computation (long):", round(gcomp_long, 4), "\n")
 
 The naive estimate is biased because it conditions on $L_1$ (blocking part of the treatment effect). The backwards G-computation avoids this.
 
+Longitudinal **TMLE** adds a targeting step to each of these backwards regressions, the same fluctuation idea as in the point-treatment case, applied at every time point. This buys *sequential* double robustness: the estimate is consistent if, at each step, either the outcome regression or the treatment model is correct. The mechanics are developed in @sec-illustrated-ltmle; here we turn to the kind of intervention that longitudinal data make possible.
+
 ## LMTP for realistic interventions
 
 Static regimes ("always treat") often violate positivity. The `lmtp` package estimates modified treatment policies that shift treatment by a feasible amount.
@@ -289,4 +297,9 @@ This short course covered the essentials. The full handbook develops each topic 
 
 - **Part I, Foundations:** Why regression coefficients are not causal effects; the full 7-step Causal Roadmap
 - **Part II, Core Estimators:** G-computation, IPTW, TMLE, and Super Learner in detail
-- **Part III, Longitudinal
+- **Part III, Longitudinal Causal Inference:** Time-varying confounding and treatment-confounder feedback, longitudinal TMLE (L-TMLE), and Longitudinal Modified Treatment Policies (LMTP)
+- **Part IV, Diagnostics and Sensitivity Analysis:** Positivity and overlap, model diagnostics, and sensitivity analysis for unmeasured confounding
+- **Part V, Putting It All Together:** An end-to-end applied workflow built around the `lmtp` package
+- **Part VI, Special Topics:** Effect heterogeneity, mediation, hybrid RCT/RWD designs, and time-to-event estimands
+
+Each part builds on the running HAART case study, so you can see how the methods connect rather than treating them in isolation.

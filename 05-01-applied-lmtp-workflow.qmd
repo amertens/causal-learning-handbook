@@ -18,9 +18,9 @@ knitr::opts_chunk$set(
 )
 ```
 
-The preceding chapters taught each piece of the causal inference toolkit separately: the roadmap, g-computation, IPTW, TMLE, Super Learner, and longitudinal methods. This chapter puts them together. We walk through a complete applied analysis, from the causal question through estimation, diagnostics, and interpretation, using a realistic longitudinal intervention estimated with the `lmtp` package [@diaz2021lmtp].
+By this point the moving parts of a longitudinal targeted-learning analysis are already in hand: the backwards sequential-regression logic of longitudinal TMLE (@sec-illustrated-ltmle), the shift-function and `lmtp_tmle` workflow for modified treatment policies (@sec-adherence-shift), and the positivity diagnostics that decide whether any of it can be trusted (@sec-positivity-overlap). This chapter does not re-teach that machinery. It spends its length on the one thing the method chapters do not: a single analysis carried from a clinical question to a defended estimate, with every decision in view.
 
-The example is deliberately more advanced than the earlier teaching examples. Instead of a static "everyone treated vs. no one treated" contrast, we define a dynamic treatment rule: initiate HAART when CD4 count drops below a clinically meaningful threshold. This is the kind of question that clinical guidelines actually address, and it requires the longitudinal methods from Part III.
+The thread is a dynamic treatment rule, initiate HAART when CD4 falls below a clinically meaningful threshold, estimated with the `lmtp` package [@diaz2021lmtp]. A dynamic rule is a sharper question than the adherence-distribution shift of @sec-adherence-shift or the static "treat everyone" contrast of the earlier chapters, and it is the kind of question clinical guidelines actually pose.
 
 
 ## The causal question
@@ -36,13 +36,7 @@ The estimand is the risk difference in mortality under the two regimes, marginal
 
 A static point-treatment comparison (ever-treated vs. never-treated) ignores the timing and clinical context of treatment initiation. Two patients who both "ever started HAART" may have initiated at very different times, for very different reasons, with very different prognoses at initiation. The static comparison conflates the effect of early initiation in healthier patients with late initiation in sicker patients.
 
-A dynamic rule analysis addresses this directly. It asks: what would happen if treatment initiation followed a specific clinical rule, applied consistently to everyone? This is closer to the question that guideline developers actually need answered, and it requires the longitudinal g-methods from Part III because:
-
-- CD4 evolves over time and is affected by prior treatment (treatment-confounder feedback)
-- The intervention is defined at each visit conditional on current health status
-- Censoring is potentially informative (sicker patients may drop out)
-
-The identification assumptions are the longitudinal versions introduced in @sec-longitudinal-confounding: sequential exchangeability, positivity at each time point, and consistency of the dynamic rule.
+A dynamic-rule analysis asks instead what would happen if initiation followed one clinical rule applied consistently to everyone, which is closer to what guideline developers need. Because CD4 both responds to past treatment and drives future treatment, this is the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it needs the longitudinal g-methods developed there and in @sec-illustrated-ltmle. The identification assumptions are their longitudinal versions: sequential exchangeability, positivity at each visit, and consistency of the dynamic rule. Informative censoring, sicker patients dropping out, is handled by the same machinery.
 
 
 ## Data setup
@@ -134,7 +128,7 @@ baseline  <- c("age", "sex")               # fixed baseline covariates
 
 ## Estimation with LMTP
 
-With the data prepared and the shift function defined, estimation follows the standard `lmtp` workflow: estimate the counterfactual mortality risk under the dynamic rule, estimate it under the natural course (no intervention, `shift = NULL`), and contrast the two.
+With the data prepared and the shift function defined, estimation follows the same `lmtp` workflow used in @sec-adherence-shift: estimate the counterfactual mortality risk under the dynamic rule, estimate it under the natural course (`shift = NULL`), and contrast the two.
 
 ```{r}
 #| label: lmtp-estimate
@@ -176,7 +170,7 @@ fit_rule
 fit_natural
 ```
 
-The `lmtp_tmle()` function implements a sequentially doubly robust estimator with cross-fitting. At each time point, it estimates the outcome regression and the treatment/censoring mechanisms, then applies a TMLE-style targeting step. The shift function is called at each time point to determine the counterfactual treatment value, and the `mtp = TRUE` flag tells `lmtp` that the shifted value depends on the natural treatment value.
+The call pattern is the one from @sec-adherence-shift: `lmtp_tmle()` fits a sequentially doubly robust estimator with cross-fitting, calling the shift function at each visit to set the counterfactual treatment, with `mtp = TRUE` because the shifted value depends on the natural one. What is new here is only the rule that shift function encodes.
 
 The contrast turns the two intervention-specific risks into the policy-relevant risk difference:
 

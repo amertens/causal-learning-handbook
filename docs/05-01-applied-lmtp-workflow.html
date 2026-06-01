@@ -523,8 +523,8 @@ div.csl-indent {
 
 
 <p><em>Estimated reading time: 55 minutes</em></p>
-<p>The preceding chapters taught each piece of the causal inference toolkit separately: the roadmap, g-computation, IPTW, TMLE, Super Learner, and longitudinal methods. This chapter puts them together. We walk through a complete applied analysis, from the causal question through estimation, diagnostics, and interpretation, using a realistic longitudinal intervention estimated with the <code>lmtp</code> package <span class="citation" data-cites="diaz2021lmtp">(<a href="#ref-diaz2021lmtp" role="doc-biblioref">Dı́az et al. 2023</a>)</span>.</p>
-<p>The example is deliberately more advanced than the earlier teaching examples. Instead of a static “everyone treated vs.&nbsp;no one treated” contrast, we define a dynamic treatment rule: initiate HAART when CD4 count drops below a clinically meaningful threshold. This is the kind of question that clinical guidelines actually address, and it requires the longitudinal methods from Part III.</p>
+<p>By this point the moving parts of a longitudinal targeted-learning analysis are already in hand: the backwards sequential-regression logic of longitudinal TMLE (<a href="03-09-illustrated-ltmle.html" class="quarto-xref"><span>Chapter 14</span></a>), the shift-function and <code>lmtp_tmle</code> workflow for modified treatment policies (<a href="03-03b-adherence-shift-methods.html" class="quarto-xref"><span>Chapter 16</span></a>), and the positivity diagnostics that decide whether any of it can be trusted (<a href="03-02-positivity-overlap.html" class="quarto-xref"><span>Chapter 12</span></a>). This chapter does not re-teach that machinery. It spends its length on the one thing the method chapters do not: a single analysis carried from a clinical question to a defended estimate, with every decision in view.</p>
+<p>The thread is a dynamic treatment rule, initiate HAART when CD4 falls below a clinically meaningful threshold, estimated with the <code>lmtp</code> package <span class="citation" data-cites="diaz2021lmtp">(<a href="#ref-diaz2021lmtp" role="doc-biblioref">Dı́az et al. 2023</a>)</span>. A dynamic rule is a sharper question than the adherence-distribution shift of <a href="03-03b-adherence-shift-methods.html" class="quarto-xref"><span>Chapter 16</span></a> or the static “treat everyone” contrast of the earlier chapters, and it is the kind of question clinical guidelines actually pose.</p>
 <section id="the-causal-question" class="level2" data-number="20.1">
 <h2 data-number="20.1" class="anchored" data-anchor-id="the-causal-question"><span class="header-section-number">20.1</span> The causal question</h2>
 <p>Clinical guidelines for HIV treatment have evolved over time, but a recurring question is: <strong>what would mortality look like if HAART were initiated whenever a patient’s CD4 count fell below 350 cells/µL, compared to the observed treatment pattern where initiation depends on clinical judgment?</strong></p>
@@ -534,13 +534,7 @@ div.csl-indent {
 <section id="why-a-simpler-analysis-would-be-inadequate" class="level2" data-number="20.2">
 <h2 data-number="20.2" class="anchored" data-anchor-id="why-a-simpler-analysis-would-be-inadequate"><span class="header-section-number">20.2</span> Why a simpler analysis would be inadequate</h2>
 <p>A static point-treatment comparison (ever-treated vs.&nbsp;never-treated) ignores the timing and clinical context of treatment initiation. Two patients who both “ever started HAART” may have initiated at very different times, for very different reasons, with very different prognoses at initiation. The static comparison conflates the effect of early initiation in healthier patients with late initiation in sicker patients.</p>
-<p>A dynamic rule analysis addresses this directly. It asks: what would happen if treatment initiation followed a specific clinical rule, applied consistently to everyone? This is closer to the question that guideline developers actually need answered, and it requires the longitudinal g-methods from Part III because:</p>
-<ul>
-<li>CD4 evolves over time and is affected by prior treatment (treatment-confounder feedback)</li>
-<li>The intervention is defined at each visit conditional on current health status</li>
-<li>Censoring is potentially informative (sicker patients may drop out)</li>
-</ul>
-<p>The identification assumptions are the longitudinal versions introduced in <a href="03-07-longitudinal-td-confounding.html" class="quarto-xref"><span>Chapter 14</span></a>: sequential exchangeability, positivity at each time point, and consistency of the dynamic rule.</p>
+<p>A dynamic-rule analysis asks instead what would happen if initiation followed one clinical rule applied consistently to everyone, which is closer to what guideline developers need. Because CD4 both responds to past treatment and drives future treatment, this is the treatment-confounder-feedback setting of <a href="03-07-longitudinal-td-confounding.html" class="quarto-xref"><span>Chapter 14</span></a>, and it needs the longitudinal g-methods developed there and in <a href="03-09-illustrated-ltmle.html" class="quarto-xref"><span>Chapter 14</span></a>. The identification assumptions are their longitudinal versions: sequential exchangeability, positivity at each visit, and consistency of the dynamic rule. Informative censoring, sicker patients dropping out, is handled by the same machinery.</p>
 </section>
 <section id="data-setup" class="level2" data-number="20.3">
 <h2 data-number="20.3" class="anchored" data-anchor-id="data-setup"><span class="header-section-number">20.3</span> Data setup</h2>
@@ -626,7 +620,7 @@ div.csl-indent {
 </section>
 <section id="estimation-with-lmtp" class="level2" data-number="20.4">
 <h2 data-number="20.4" class="anchored" data-anchor-id="estimation-with-lmtp"><span class="header-section-number">20.4</span> Estimation with LMTP</h2>
-<p>With the data prepared and the shift function defined, estimation follows the standard <code>lmtp</code> workflow: estimate the counterfactual mortality risk under the dynamic rule, estimate it under the natural course (no intervention, <code>shift = NULL</code>), and contrast the two.</p>
+<p>With the data prepared and the shift function defined, estimation follows the same <code>lmtp</code> workflow used in <a href="03-03b-adherence-shift-methods.html" class="quarto-xref"><span>Chapter 16</span></a>: estimate the counterfactual mortality risk under the dynamic rule, estimate it under the natural course (<code>shift = NULL</code>), and contrast the two.</p>
 <div class="cell" data-layout-align="center">
 <details open="" class="code-fold">
 <summary>Show code</summary>
@@ -666,7 +660,7 @@ div.csl-indent {
 <div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>fit_natural</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
-<p>The <code>lmtp_tmle()</code> function implements a sequentially doubly robust estimator with cross-fitting. At each time point, it estimates the outcome regression and the treatment/censoring mechanisms, then applies a TMLE-style targeting step. The shift function is called at each time point to determine the counterfactual treatment value, and the <code>mtp = TRUE</code> flag tells <code>lmtp</code> that the shifted value depends on the natural treatment value.</p>
+<p>The call pattern is the one from <a href="03-03b-adherence-shift-methods.html" class="quarto-xref"><span>Chapter 16</span></a>: <code>lmtp_tmle()</code> fits a sequentially doubly robust estimator with cross-fitting, calling the shift function at each visit to set the counterfactual treatment, with <code>mtp = TRUE</code> because the shifted value depends on the natural one. What is new here is only the rule that shift function encodes.</p>
 <p>The contrast turns the two intervention-specific risks into the policy-relevant risk difference:</p>
 <div class="cell" data-layout-align="center">
 <details open="" class="code-fold">
@@ -1349,9 +1343,9 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 <span id="cb12-20"><a href="#cb12-20" aria-hidden="true" tabindex="-1"></a>)</span>
 <span id="cb12-21"><a href="#cb12-21" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
 <span id="cb12-22"><a href="#cb12-22" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-23"><a href="#cb12-23" aria-hidden="true" tabindex="-1"></a>The preceding chapters taught each piece of the causal inference toolkit separately: the roadmap, g-computation, IPTW, TMLE, Super Learner, and longitudinal methods. This chapter puts them together. We walk through a complete applied analysis, from the causal question through estimation, diagnostics, and interpretation, using a realistic longitudinal intervention estimated with the <span class="in">`lmtp`</span> package <span class="co">[</span><span class="ot">@diaz2021lmtp</span><span class="co">]</span>.</span>
+<span id="cb12-23"><a href="#cb12-23" aria-hidden="true" tabindex="-1"></a>By this point the moving parts of a longitudinal targeted-learning analysis are already in hand: the backwards sequential-regression logic of longitudinal TMLE (@sec-illustrated-ltmle), the shift-function and <span class="in">`lmtp_tmle`</span> workflow for modified treatment policies (@sec-adherence-shift), and the positivity diagnostics that decide whether any of it can be trusted (@sec-positivity-overlap). This chapter does not re-teach that machinery. It spends its length on the one thing the method chapters do not: a single analysis carried from a clinical question to a defended estimate, with every decision in view.</span>
 <span id="cb12-24"><a href="#cb12-24" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-25"><a href="#cb12-25" aria-hidden="true" tabindex="-1"></a>The example is deliberately more advanced than the earlier teaching examples. Instead of a static "everyone treated vs. no one treated" contrast, we define a dynamic treatment rule: initiate HAART when CD4 count drops below a clinically meaningful threshold. This is the kind of question that clinical guidelines actually address, and it requires the longitudinal methods from Part III.</span>
+<span id="cb12-25"><a href="#cb12-25" aria-hidden="true" tabindex="-1"></a>The thread is a dynamic treatment rule, initiate HAART when CD4 falls below a clinically meaningful threshold, estimated with the <span class="in">`lmtp`</span> package <span class="co">[</span><span class="ot">@diaz2021lmtp</span><span class="co">]</span>. A dynamic rule is a sharper question than the adherence-distribution shift of @sec-adherence-shift or the static "treat everyone" contrast of the earlier chapters, and it is the kind of question clinical guidelines actually pose.</span>
 <span id="cb12-26"><a href="#cb12-26" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb12-27"><a href="#cb12-27" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb12-28"><a href="#cb12-28" aria-hidden="true" tabindex="-1"></a><span class="fu">## The causal question</span></span>
@@ -1367,313 +1361,307 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 <span id="cb12-38"><a href="#cb12-38" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb12-39"><a href="#cb12-39" aria-hidden="true" tabindex="-1"></a>A static point-treatment comparison (ever-treated vs. never-treated) ignores the timing and clinical context of treatment initiation. Two patients who both "ever started HAART" may have initiated at very different times, for very different reasons, with very different prognoses at initiation. The static comparison conflates the effect of early initiation in healthier patients with late initiation in sicker patients.</span>
 <span id="cb12-40"><a href="#cb12-40" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-41"><a href="#cb12-41" aria-hidden="true" tabindex="-1"></a>A dynamic rule analysis addresses this directly. It asks: what would happen if treatment initiation followed a specific clinical rule, applied consistently to everyone? This is closer to the question that guideline developers actually need answered, and it requires the longitudinal g-methods from Part III because:</span>
+<span id="cb12-41"><a href="#cb12-41" aria-hidden="true" tabindex="-1"></a>A dynamic-rule analysis asks instead what would happen if initiation followed one clinical rule applied consistently to everyone, which is closer to what guideline developers need. Because CD4 both responds to past treatment and drives future treatment, this is the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it needs the longitudinal g-methods developed there and in @sec-illustrated-ltmle. The identification assumptions are their longitudinal versions: sequential exchangeability, positivity at each visit, and consistency of the dynamic rule. Informative censoring, sicker patients dropping out, is handled by the same machinery.</span>
 <span id="cb12-42"><a href="#cb12-42" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-43"><a href="#cb12-43" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>CD4 evolves over time and is affected by prior treatment (treatment-confounder feedback)</span>
-<span id="cb12-44"><a href="#cb12-44" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The intervention is defined at each visit conditional on current health status</span>
-<span id="cb12-45"><a href="#cb12-45" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Censoring is potentially informative (sicker patients may drop out)</span>
-<span id="cb12-46"><a href="#cb12-46" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-47"><a href="#cb12-47" aria-hidden="true" tabindex="-1"></a>The identification assumptions are the longitudinal versions introduced in @sec-longitudinal-confounding: sequential exchangeability, positivity at each time point, and consistency of the dynamic rule.</span>
-<span id="cb12-48"><a href="#cb12-48" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-49"><a href="#cb12-49" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-50"><a href="#cb12-50" aria-hidden="true" tabindex="-1"></a><span class="fu">## Data setup</span></span>
-<span id="cb12-51"><a href="#cb12-51" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-52"><a href="#cb12-52" aria-hidden="true" tabindex="-1"></a>The real <span class="in">`haartdat`</span> cohort (introduced in the <span class="co">[</span><span class="ot">Running Case Study</span><span class="co">](00-case-study.qmd)</span>) follows 1,200 patients over irregularly spaced visits, but it contains only 31 deaths spread across up to 38 visits. That extreme outcome sparsity makes a short-horizon longitudinal estimator unstable, so for a fully reproducible end-to-end run we use a **simulated extension of the cohort**: a balanced three-visit panel calibrated to the same clinical story (CD4 drives both treatment initiation and mortality, and HAART raises subsequent CD4). The simulation preserves the feature that matters pedagogically here, treatment-confounder feedback, while guaranteeing the estimator has enough events and enough low-CD4-untreated person-time to estimate the contrast.</span>
-<span id="cb12-53"><a href="#cb12-53" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-56"><a href="#cb12-56" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb12-57"><a href="#cb12-57" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-simulate</span></span>
-<span id="cb12-58"><a href="#cb12-58" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
-<span id="cb12-59"><a href="#cb12-59" aria-hidden="true" tabindex="-1"></a><span class="co">#| message: false</span></span>
-<span id="cb12-60"><a href="#cb12-60" aria-hidden="true" tabindex="-1"></a><span class="co">#| warning: false</span></span>
-<span id="cb12-61"><a href="#cb12-61" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
-<span id="cb12-62"><a href="#cb12-62" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(lmtp)</span>
-<span id="cb12-63"><a href="#cb12-63" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-64"><a href="#cb12-64" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2024</span>)</span>
-<span id="cb12-65"><a href="#cb12-65" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">700</span></span>
-<span id="cb12-66"><a href="#cb12-66" aria-hidden="true" tabindex="-1"></a>cd4_threshold <span class="ot">&lt;-</span> <span class="dv">350</span>  <span class="co"># cells/µL: the initiation rule we will evaluate</span></span>
-<span id="cb12-67"><a href="#cb12-67" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-68"><a href="#cb12-68" aria-hidden="true" tabindex="-1"></a><span class="co"># Baseline covariates</span></span>
-<span id="cb12-69"><a href="#cb12-69" aria-hidden="true" tabindex="-1"></a>age <span class="ot">&lt;-</span> <span class="fu">round</span>(<span class="fu">rnorm</span>(n, <span class="dv">40</span>, <span class="dv">9</span>))</span>
-<span id="cb12-70"><a href="#cb12-70" aria-hidden="true" tabindex="-1"></a>sex <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fl">0.45</span>)</span>
-<span id="cb12-71"><a href="#cb12-71" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-72"><a href="#cb12-72" aria-hidden="true" tabindex="-1"></a><span class="co"># Visit 1: CD4, then treatment (more likely to start if CD4 is low)</span></span>
-<span id="cb12-73"><a href="#cb12-73" aria-hidden="true" tabindex="-1"></a>L_1 <span class="ot">&lt;-</span> <span class="fu">pmax</span>(<span class="dv">50</span>, <span class="fu">rnorm</span>(n, <span class="dv">420</span>, <span class="dv">140</span>))</span>
-<span id="cb12-74"><a href="#cb12-74" aria-hidden="true" tabindex="-1"></a>A_1 <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(<span class="sc">-</span><span class="fl">0.5</span> <span class="sc">+</span> <span class="fl">1.2</span> <span class="sc">*</span> (L_1 <span class="sc">&lt;</span> cd4_threshold) <span class="sc">+</span> <span class="fl">0.01</span> <span class="sc">*</span> (<span class="dv">40</span> <span class="sc">-</span> age)))</span>
-<span id="cb12-75"><a href="#cb12-75" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-76"><a href="#cb12-76" aria-hidden="true" tabindex="-1"></a><span class="co"># Visit 2: CD4 responds to treatment; HAART is absorbing (once on, stays on)</span></span>
-<span id="cb12-77"><a href="#cb12-77" aria-hidden="true" tabindex="-1"></a>L_2 <span class="ot">&lt;-</span> <span class="fu">pmax</span>(<span class="dv">50</span>, L_1 <span class="sc">+</span> <span class="fu">ifelse</span>(A_1 <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">60</span>, <span class="sc">-</span><span class="dv">30</span>) <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, <span class="dv">80</span>))</span>
-<span id="cb12-78"><a href="#cb12-78" aria-hidden="true" tabindex="-1"></a>A_2 <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(A_1 <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">1</span>, <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(<span class="sc">-</span><span class="fl">0.5</span> <span class="sc">+</span> <span class="fl">1.2</span> <span class="sc">*</span> (L_2 <span class="sc">&lt;</span> cd4_threshold))))</span>
-<span id="cb12-79"><a href="#cb12-79" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-80"><a href="#cb12-80" aria-hidden="true" tabindex="-1"></a><span class="co"># Visit 3</span></span>
-<span id="cb12-81"><a href="#cb12-81" aria-hidden="true" tabindex="-1"></a>L_3 <span class="ot">&lt;-</span> <span class="fu">pmax</span>(<span class="dv">50</span>, L_2 <span class="sc">+</span> <span class="fu">ifelse</span>(A_2 <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">60</span>, <span class="sc">-</span><span class="dv">30</span>) <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, <span class="dv">80</span>))</span>
-<span id="cb12-82"><a href="#cb12-82" aria-hidden="true" tabindex="-1"></a>A_3 <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(A_2 <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">1</span>, <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(<span class="sc">-</span><span class="fl">0.5</span> <span class="sc">+</span> <span class="fl">1.2</span> <span class="sc">*</span> (L_3 <span class="sc">&lt;</span> cd4_threshold))))</span>
-<span id="cb12-83"><a href="#cb12-83" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-84"><a href="#cb12-84" aria-hidden="true" tabindex="-1"></a><span class="co"># Death by end of follow-up: driven by low CD4 and lack of treatment</span></span>
-<span id="cb12-85"><a href="#cb12-85" aria-hidden="true" tabindex="-1"></a>lp <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">1.6</span> <span class="sc">+</span> <span class="fl">1.4</span> <span class="sc">*</span> (L_3 <span class="sc">&lt;</span> <span class="dv">250</span>) <span class="sc">+</span> <span class="fl">0.8</span> <span class="sc">*</span> (L_2 <span class="sc">&lt;</span> <span class="dv">250</span>) <span class="sc">-</span> <span class="fl">0.7</span> <span class="sc">*</span> (A_1 <span class="sc">+</span> A_2 <span class="sc">+</span> A_3) <span class="sc">/</span> <span class="dv">3</span></span>
-<span id="cb12-86"><a href="#cb12-86" aria-hidden="true" tabindex="-1"></a>died <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(lp))</span>
-<span id="cb12-87"><a href="#cb12-87" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-88"><a href="#cb12-88" aria-hidden="true" tabindex="-1"></a>dat_wide <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
-<span id="cb12-89"><a href="#cb12-89" aria-hidden="true" tabindex="-1"></a>  age, sex,</span>
-<span id="cb12-90"><a href="#cb12-90" aria-hidden="true" tabindex="-1"></a>  L_1, L_2, L_3,   <span class="co"># time-varying CD4 (confounder), measured before treatment each visit</span></span>
-<span id="cb12-91"><a href="#cb12-91" aria-hidden="true" tabindex="-1"></a>  A_1, A_2, A_3,   <span class="co"># HAART indicator at each visit (absorbing)</span></span>
-<span id="cb12-92"><a href="#cb12-92" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> died</span>
-<span id="cb12-93"><a href="#cb12-93" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb12-94"><a href="#cb12-94" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-95"><a href="#cb12-95" aria-hidden="true" tabindex="-1"></a>dat_wide <span class="sc">|&gt;</span></span>
-<span id="cb12-96"><a href="#cb12-96" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(</span>
-<span id="cb12-97"><a href="#cb12-97" aria-hidden="true" tabindex="-1"></a>    <span class="at">patients =</span> <span class="fu">n</span>(),</span>
-<span id="cb12-98"><a href="#cb12-98" aria-hidden="true" tabindex="-1"></a>    <span class="at">deaths =</span> <span class="fu">sum</span>(Y),</span>
-<span id="cb12-99"><a href="#cb12-99" aria-hidden="true" tabindex="-1"></a>    <span class="at">pct_died =</span> <span class="fu">round</span>(<span class="dv">100</span> <span class="sc">*</span> <span class="fu">mean</span>(Y), <span class="dv">1</span>),</span>
-<span id="cb12-100"><a href="#cb12-100" aria-hidden="true" tabindex="-1"></a>    <span class="at">pct_treated_by_v3 =</span> <span class="fu">round</span>(<span class="dv">100</span> <span class="sc">*</span> <span class="fu">mean</span>(A_3), <span class="dv">1</span>)</span>
-<span id="cb12-101"><a href="#cb12-101" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
-<span id="cb12-102"><a href="#cb12-102" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as.data.frame</span>()</span>
-<span id="cb12-103"><a href="#cb12-103" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb12-104"><a href="#cb12-104" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-43"><a href="#cb12-43" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-44"><a href="#cb12-44" aria-hidden="true" tabindex="-1"></a><span class="fu">## Data setup</span></span>
+<span id="cb12-45"><a href="#cb12-45" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-46"><a href="#cb12-46" aria-hidden="true" tabindex="-1"></a>The real <span class="in">`haartdat`</span> cohort (introduced in the <span class="co">[</span><span class="ot">Running Case Study</span><span class="co">](00-case-study.qmd)</span>) follows 1,200 patients over irregularly spaced visits, but it contains only 31 deaths spread across up to 38 visits. That extreme outcome sparsity makes a short-horizon longitudinal estimator unstable, so for a fully reproducible end-to-end run we use a **simulated extension of the cohort**: a balanced three-visit panel calibrated to the same clinical story (CD4 drives both treatment initiation and mortality, and HAART raises subsequent CD4). The simulation preserves the feature that matters pedagogically here, treatment-confounder feedback, while guaranteeing the estimator has enough events and enough low-CD4-untreated person-time to estimate the contrast.</span>
+<span id="cb12-47"><a href="#cb12-47" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-50"><a href="#cb12-50" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb12-51"><a href="#cb12-51" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-simulate</span></span>
+<span id="cb12-52"><a href="#cb12-52" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
+<span id="cb12-53"><a href="#cb12-53" aria-hidden="true" tabindex="-1"></a><span class="co">#| message: false</span></span>
+<span id="cb12-54"><a href="#cb12-54" aria-hidden="true" tabindex="-1"></a><span class="co">#| warning: false</span></span>
+<span id="cb12-55"><a href="#cb12-55" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
+<span id="cb12-56"><a href="#cb12-56" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(lmtp)</span>
+<span id="cb12-57"><a href="#cb12-57" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-58"><a href="#cb12-58" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2024</span>)</span>
+<span id="cb12-59"><a href="#cb12-59" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">700</span></span>
+<span id="cb12-60"><a href="#cb12-60" aria-hidden="true" tabindex="-1"></a>cd4_threshold <span class="ot">&lt;-</span> <span class="dv">350</span>  <span class="co"># cells/µL: the initiation rule we will evaluate</span></span>
+<span id="cb12-61"><a href="#cb12-61" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-62"><a href="#cb12-62" aria-hidden="true" tabindex="-1"></a><span class="co"># Baseline covariates</span></span>
+<span id="cb12-63"><a href="#cb12-63" aria-hidden="true" tabindex="-1"></a>age <span class="ot">&lt;-</span> <span class="fu">round</span>(<span class="fu">rnorm</span>(n, <span class="dv">40</span>, <span class="dv">9</span>))</span>
+<span id="cb12-64"><a href="#cb12-64" aria-hidden="true" tabindex="-1"></a>sex <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fl">0.45</span>)</span>
+<span id="cb12-65"><a href="#cb12-65" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-66"><a href="#cb12-66" aria-hidden="true" tabindex="-1"></a><span class="co"># Visit 1: CD4, then treatment (more likely to start if CD4 is low)</span></span>
+<span id="cb12-67"><a href="#cb12-67" aria-hidden="true" tabindex="-1"></a>L_1 <span class="ot">&lt;-</span> <span class="fu">pmax</span>(<span class="dv">50</span>, <span class="fu">rnorm</span>(n, <span class="dv">420</span>, <span class="dv">140</span>))</span>
+<span id="cb12-68"><a href="#cb12-68" aria-hidden="true" tabindex="-1"></a>A_1 <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(<span class="sc">-</span><span class="fl">0.5</span> <span class="sc">+</span> <span class="fl">1.2</span> <span class="sc">*</span> (L_1 <span class="sc">&lt;</span> cd4_threshold) <span class="sc">+</span> <span class="fl">0.01</span> <span class="sc">*</span> (<span class="dv">40</span> <span class="sc">-</span> age)))</span>
+<span id="cb12-69"><a href="#cb12-69" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-70"><a href="#cb12-70" aria-hidden="true" tabindex="-1"></a><span class="co"># Visit 2: CD4 responds to treatment; HAART is absorbing (once on, stays on)</span></span>
+<span id="cb12-71"><a href="#cb12-71" aria-hidden="true" tabindex="-1"></a>L_2 <span class="ot">&lt;-</span> <span class="fu">pmax</span>(<span class="dv">50</span>, L_1 <span class="sc">+</span> <span class="fu">ifelse</span>(A_1 <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">60</span>, <span class="sc">-</span><span class="dv">30</span>) <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, <span class="dv">80</span>))</span>
+<span id="cb12-72"><a href="#cb12-72" aria-hidden="true" tabindex="-1"></a>A_2 <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(A_1 <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">1</span>, <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(<span class="sc">-</span><span class="fl">0.5</span> <span class="sc">+</span> <span class="fl">1.2</span> <span class="sc">*</span> (L_2 <span class="sc">&lt;</span> cd4_threshold))))</span>
+<span id="cb12-73"><a href="#cb12-73" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-74"><a href="#cb12-74" aria-hidden="true" tabindex="-1"></a><span class="co"># Visit 3</span></span>
+<span id="cb12-75"><a href="#cb12-75" aria-hidden="true" tabindex="-1"></a>L_3 <span class="ot">&lt;-</span> <span class="fu">pmax</span>(<span class="dv">50</span>, L_2 <span class="sc">+</span> <span class="fu">ifelse</span>(A_2 <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">60</span>, <span class="sc">-</span><span class="dv">30</span>) <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, <span class="dv">80</span>))</span>
+<span id="cb12-76"><a href="#cb12-76" aria-hidden="true" tabindex="-1"></a>A_3 <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(A_2 <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">1</span>, <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(<span class="sc">-</span><span class="fl">0.5</span> <span class="sc">+</span> <span class="fl">1.2</span> <span class="sc">*</span> (L_3 <span class="sc">&lt;</span> cd4_threshold))))</span>
+<span id="cb12-77"><a href="#cb12-77" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-78"><a href="#cb12-78" aria-hidden="true" tabindex="-1"></a><span class="co"># Death by end of follow-up: driven by low CD4 and lack of treatment</span></span>
+<span id="cb12-79"><a href="#cb12-79" aria-hidden="true" tabindex="-1"></a>lp <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">1.6</span> <span class="sc">+</span> <span class="fl">1.4</span> <span class="sc">*</span> (L_3 <span class="sc">&lt;</span> <span class="dv">250</span>) <span class="sc">+</span> <span class="fl">0.8</span> <span class="sc">*</span> (L_2 <span class="sc">&lt;</span> <span class="dv">250</span>) <span class="sc">-</span> <span class="fl">0.7</span> <span class="sc">*</span> (A_1 <span class="sc">+</span> A_2 <span class="sc">+</span> A_3) <span class="sc">/</span> <span class="dv">3</span></span>
+<span id="cb12-80"><a href="#cb12-80" aria-hidden="true" tabindex="-1"></a>died <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(lp))</span>
+<span id="cb12-81"><a href="#cb12-81" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-82"><a href="#cb12-82" aria-hidden="true" tabindex="-1"></a>dat_wide <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb12-83"><a href="#cb12-83" aria-hidden="true" tabindex="-1"></a>  age, sex,</span>
+<span id="cb12-84"><a href="#cb12-84" aria-hidden="true" tabindex="-1"></a>  L_1, L_2, L_3,   <span class="co"># time-varying CD4 (confounder), measured before treatment each visit</span></span>
+<span id="cb12-85"><a href="#cb12-85" aria-hidden="true" tabindex="-1"></a>  A_1, A_2, A_3,   <span class="co"># HAART indicator at each visit (absorbing)</span></span>
+<span id="cb12-86"><a href="#cb12-86" aria-hidden="true" tabindex="-1"></a>  <span class="at">Y =</span> died</span>
+<span id="cb12-87"><a href="#cb12-87" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb12-88"><a href="#cb12-88" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-89"><a href="#cb12-89" aria-hidden="true" tabindex="-1"></a>dat_wide <span class="sc">|&gt;</span></span>
+<span id="cb12-90"><a href="#cb12-90" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(</span>
+<span id="cb12-91"><a href="#cb12-91" aria-hidden="true" tabindex="-1"></a>    <span class="at">patients =</span> <span class="fu">n</span>(),</span>
+<span id="cb12-92"><a href="#cb12-92" aria-hidden="true" tabindex="-1"></a>    <span class="at">deaths =</span> <span class="fu">sum</span>(Y),</span>
+<span id="cb12-93"><a href="#cb12-93" aria-hidden="true" tabindex="-1"></a>    <span class="at">pct_died =</span> <span class="fu">round</span>(<span class="dv">100</span> <span class="sc">*</span> <span class="fu">mean</span>(Y), <span class="dv">1</span>),</span>
+<span id="cb12-94"><a href="#cb12-94" aria-hidden="true" tabindex="-1"></a>    <span class="at">pct_treated_by_v3 =</span> <span class="fu">round</span>(<span class="dv">100</span> <span class="sc">*</span> <span class="fu">mean</span>(A_3), <span class="dv">1</span>)</span>
+<span id="cb12-95"><a href="#cb12-95" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb12-96"><a href="#cb12-96" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as.data.frame</span>()</span>
+<span id="cb12-97"><a href="#cb12-97" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb12-98"><a href="#cb12-98" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-99"><a href="#cb12-99" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-100"><a href="#cb12-100" aria-hidden="true" tabindex="-1"></a><span class="fu">### Defining the dynamic rule</span></span>
+<span id="cb12-101"><a href="#cb12-101" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-102"><a href="#cb12-102" aria-hidden="true" tabindex="-1"></a>The modified treatment policy we evaluate is: **initiate HAART at the first visit where CD4 count falls below 350 cells/µL, for patients not already on treatment.** Once initiated, HAART continues for all subsequent visits (the absorbing property).</span>
+<span id="cb12-103"><a href="#cb12-103" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-104"><a href="#cb12-104" aria-hidden="true" tabindex="-1"></a>In <span class="in">`lmtp`</span>, the shift function receives the full data frame and the name of the *current* treatment node. We parse the visit index from that name, look at all CD4 measurements up to and including that visit, and set the treatment to 1 if CD4 has ever fallen below the threshold (or the patient was already treated). This makes the rule absorbing by construction.</span>
 <span id="cb12-105"><a href="#cb12-105" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-106"><a href="#cb12-106" aria-hidden="true" tabindex="-1"></a><span class="fu">### Defining the dynamic rule</span></span>
-<span id="cb12-107"><a href="#cb12-107" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-108"><a href="#cb12-108" aria-hidden="true" tabindex="-1"></a>The modified treatment policy we evaluate is: **initiate HAART at the first visit where CD4 count falls below 350 cells/µL, for patients not already on treatment.** Once initiated, HAART continues for all subsequent visits (the absorbing property).</span>
-<span id="cb12-109"><a href="#cb12-109" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-110"><a href="#cb12-110" aria-hidden="true" tabindex="-1"></a>In <span class="in">`lmtp`</span>, the shift function receives the full data frame and the name of the *current* treatment node. We parse the visit index from that name, look at all CD4 measurements up to and including that visit, and set the treatment to 1 if CD4 has ever fallen below the threshold (or the patient was already treated). This makes the rule absorbing by construction.</span>
-<span id="cb12-111"><a href="#cb12-111" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-114"><a href="#cb12-114" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb12-115"><a href="#cb12-115" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-shift</span></span>
-<span id="cb12-116"><a href="#cb12-116" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
-<span id="cb12-117"><a href="#cb12-117" aria-hidden="true" tabindex="-1"></a>shift_cd4_rule <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) {</span>
-<span id="cb12-118"><a href="#cb12-118" aria-hidden="true" tabindex="-1"></a>  t <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(<span class="fu">sub</span>(<span class="st">"A_"</span>, <span class="st">""</span>, trt))         <span class="co"># visit index for this node</span></span>
-<span id="cb12-119"><a href="#cb12-119" aria-hidden="true" tabindex="-1"></a>  L_cols <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"L_"</span>, <span class="fu">seq_len</span>(t))           <span class="co"># CD4 at this and all prior visits</span></span>
-<span id="cb12-120"><a href="#cb12-120" aria-hidden="true" tabindex="-1"></a>  ever_low <span class="ot">&lt;-</span> <span class="fu">Reduce</span>(<span class="st">`</span><span class="at">|</span><span class="st">`</span>, <span class="fu">lapply</span>(L_cols, <span class="cf">function</span>(cc) data[[cc]] <span class="sc">&lt;</span> <span class="dv">350</span>))</span>
-<span id="cb12-121"><a href="#cb12-121" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as.numeric</span>(data[[trt]] <span class="sc">==</span> <span class="dv">1</span> <span class="sc">|</span> ever_low)</span>
-<span id="cb12-122"><a href="#cb12-122" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb12-123"><a href="#cb12-123" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb12-124"><a href="#cb12-124" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-125"><a href="#cb12-125" aria-hidden="true" tabindex="-1"></a>This function has the <span class="in">`(data, trt)`</span> signature that <span class="in">`lmtp`</span> expects. Because it modifies the treatment value based on the patient's evolving CD4 (rather than a fixed assignment), it defines a *modified treatment policy* rather than a static intervention, which is why we pass <span class="in">`mtp = TRUE`</span> below.</span>
-<span id="cb12-126"><a href="#cb12-126" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-127"><a href="#cb12-127" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-128"><a href="#cb12-128" aria-hidden="true" tabindex="-1"></a><span class="fu">### Specifying the LMTP node structure</span></span>
-<span id="cb12-129"><a href="#cb12-129" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-130"><a href="#cb12-130" aria-hidden="true" tabindex="-1"></a><span class="in">`lmtp`</span> needs the treatment nodes in temporal order, a list of the time-varying covariates measured before each treatment node, and the baseline covariates. Our simulated frame is already in the wide, one-row-per-patient format <span class="in">`lmtp`</span> expects.</span>
-<span id="cb12-131"><a href="#cb12-131" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-134"><a href="#cb12-134" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb12-135"><a href="#cb12-135" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-nodes</span></span>
-<span id="cb12-136"><a href="#cb12-136" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
-<span id="cb12-137"><a href="#cb12-137" aria-hidden="true" tabindex="-1"></a>trt_vars  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"A_1"</span>, <span class="st">"A_2"</span>, <span class="st">"A_3"</span>)        <span class="co"># treatment in temporal order</span></span>
-<span id="cb12-138"><a href="#cb12-138" aria-hidden="true" tabindex="-1"></a>time_vary <span class="ot">&lt;-</span> <span class="fu">list</span>(<span class="st">"L_1"</span>, <span class="st">"L_2"</span>, <span class="st">"L_3"</span>)     <span class="co"># time-varying confounder at each visit</span></span>
-<span id="cb12-139"><a href="#cb12-139" aria-hidden="true" tabindex="-1"></a>baseline  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"age"</span>, <span class="st">"sex"</span>)               <span class="co"># fixed baseline covariates</span></span>
-<span id="cb12-140"><a href="#cb12-140" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb12-141"><a href="#cb12-141" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-142"><a href="#cb12-142" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-143"><a href="#cb12-143" aria-hidden="true" tabindex="-1"></a><span class="fu">## Estimation with LMTP</span></span>
-<span id="cb12-144"><a href="#cb12-144" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-145"><a href="#cb12-145" aria-hidden="true" tabindex="-1"></a>With the data prepared and the shift function defined, estimation follows the standard <span class="in">`lmtp`</span> workflow: estimate the counterfactual mortality risk under the dynamic rule, estimate it under the natural course (no intervention, <span class="in">`shift = NULL`</span>), and contrast the two.</span>
-<span id="cb12-146"><a href="#cb12-146" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-149"><a href="#cb12-149" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb12-150"><a href="#cb12-150" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-estimate</span></span>
-<span id="cb12-151"><a href="#cb12-151" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
-<span id="cb12-152"><a href="#cb12-152" aria-hidden="true" tabindex="-1"></a><span class="co">#| message: false</span></span>
-<span id="cb12-153"><a href="#cb12-153" aria-hidden="true" tabindex="-1"></a><span class="co">#| warning: false</span></span>
-<span id="cb12-154"><a href="#cb12-154" aria-hidden="true" tabindex="-1"></a><span class="co">#| cache: true</span></span>
-<span id="cb12-155"><a href="#cb12-155" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-156"><a href="#cb12-156" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">42</span>)</span>
-<span id="cb12-157"><a href="#cb12-157" aria-hidden="true" tabindex="-1"></a>fit_rule <span class="ot">&lt;-</span> <span class="fu">lmtp_tmle</span>(</span>
-<span id="cb12-158"><a href="#cb12-158" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat_wide,</span>
-<span id="cb12-159"><a href="#cb12-159" aria-hidden="true" tabindex="-1"></a>  <span class="at">trt =</span> trt_vars,</span>
-<span id="cb12-160"><a href="#cb12-160" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome =</span> <span class="st">"Y"</span>,</span>
-<span id="cb12-161"><a href="#cb12-161" aria-hidden="true" tabindex="-1"></a>  <span class="at">baseline =</span> baseline,</span>
-<span id="cb12-162"><a href="#cb12-162" aria-hidden="true" tabindex="-1"></a>  <span class="at">time_vary =</span> time_vary,</span>
-<span id="cb12-163"><a href="#cb12-163" aria-hidden="true" tabindex="-1"></a>  <span class="at">shift =</span> shift_cd4_rule,</span>
-<span id="cb12-164"><a href="#cb12-164" aria-hidden="true" tabindex="-1"></a>  <span class="at">mtp =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb12-165"><a href="#cb12-165" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome_type =</span> <span class="st">"binomial"</span>,</span>
-<span id="cb12-166"><a href="#cb12-166" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_outcome =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
-<span id="cb12-167"><a href="#cb12-167" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_trt =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
-<span id="cb12-168"><a href="#cb12-168" aria-hidden="true" tabindex="-1"></a>  <span class="at">folds =</span> <span class="dv">5</span></span>
-<span id="cb12-169"><a href="#cb12-169" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb12-170"><a href="#cb12-170" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-171"><a href="#cb12-171" aria-hidden="true" tabindex="-1"></a>fit_natural <span class="ot">&lt;-</span> <span class="fu">lmtp_tmle</span>(</span>
-<span id="cb12-172"><a href="#cb12-172" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat_wide,</span>
-<span id="cb12-173"><a href="#cb12-173" aria-hidden="true" tabindex="-1"></a>  <span class="at">trt =</span> trt_vars,</span>
-<span id="cb12-174"><a href="#cb12-174" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome =</span> <span class="st">"Y"</span>,</span>
-<span id="cb12-175"><a href="#cb12-175" aria-hidden="true" tabindex="-1"></a>  <span class="at">baseline =</span> baseline,</span>
-<span id="cb12-176"><a href="#cb12-176" aria-hidden="true" tabindex="-1"></a>  <span class="at">time_vary =</span> time_vary,</span>
-<span id="cb12-177"><a href="#cb12-177" aria-hidden="true" tabindex="-1"></a>  <span class="at">shift =</span> <span class="cn">NULL</span>,                 <span class="co"># natural course: no intervention</span></span>
-<span id="cb12-178"><a href="#cb12-178" aria-hidden="true" tabindex="-1"></a>  <span class="at">mtp =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb12-179"><a href="#cb12-179" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome_type =</span> <span class="st">"binomial"</span>,</span>
-<span id="cb12-180"><a href="#cb12-180" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_outcome =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
-<span id="cb12-181"><a href="#cb12-181" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_trt =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
-<span id="cb12-182"><a href="#cb12-182" aria-hidden="true" tabindex="-1"></a>  <span class="at">folds =</span> <span class="dv">5</span></span>
-<span id="cb12-183"><a href="#cb12-183" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb12-108"><a href="#cb12-108" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb12-109"><a href="#cb12-109" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-shift</span></span>
+<span id="cb12-110"><a href="#cb12-110" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
+<span id="cb12-111"><a href="#cb12-111" aria-hidden="true" tabindex="-1"></a>shift_cd4_rule <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) {</span>
+<span id="cb12-112"><a href="#cb12-112" aria-hidden="true" tabindex="-1"></a>  t <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(<span class="fu">sub</span>(<span class="st">"A_"</span>, <span class="st">""</span>, trt))         <span class="co"># visit index for this node</span></span>
+<span id="cb12-113"><a href="#cb12-113" aria-hidden="true" tabindex="-1"></a>  L_cols <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"L_"</span>, <span class="fu">seq_len</span>(t))           <span class="co"># CD4 at this and all prior visits</span></span>
+<span id="cb12-114"><a href="#cb12-114" aria-hidden="true" tabindex="-1"></a>  ever_low <span class="ot">&lt;-</span> <span class="fu">Reduce</span>(<span class="st">`</span><span class="at">|</span><span class="st">`</span>, <span class="fu">lapply</span>(L_cols, <span class="cf">function</span>(cc) data[[cc]] <span class="sc">&lt;</span> <span class="dv">350</span>))</span>
+<span id="cb12-115"><a href="#cb12-115" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as.numeric</span>(data[[trt]] <span class="sc">==</span> <span class="dv">1</span> <span class="sc">|</span> ever_low)</span>
+<span id="cb12-116"><a href="#cb12-116" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb12-117"><a href="#cb12-117" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb12-118"><a href="#cb12-118" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-119"><a href="#cb12-119" aria-hidden="true" tabindex="-1"></a>This function has the <span class="in">`(data, trt)`</span> signature that <span class="in">`lmtp`</span> expects. Because it modifies the treatment value based on the patient's evolving CD4 (rather than a fixed assignment), it defines a *modified treatment policy* rather than a static intervention, which is why we pass <span class="in">`mtp = TRUE`</span> below.</span>
+<span id="cb12-120"><a href="#cb12-120" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-121"><a href="#cb12-121" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-122"><a href="#cb12-122" aria-hidden="true" tabindex="-1"></a><span class="fu">### Specifying the LMTP node structure</span></span>
+<span id="cb12-123"><a href="#cb12-123" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-124"><a href="#cb12-124" aria-hidden="true" tabindex="-1"></a><span class="in">`lmtp`</span> needs the treatment nodes in temporal order, a list of the time-varying covariates measured before each treatment node, and the baseline covariates. Our simulated frame is already in the wide, one-row-per-patient format <span class="in">`lmtp`</span> expects.</span>
+<span id="cb12-125"><a href="#cb12-125" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-128"><a href="#cb12-128" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb12-129"><a href="#cb12-129" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-nodes</span></span>
+<span id="cb12-130"><a href="#cb12-130" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
+<span id="cb12-131"><a href="#cb12-131" aria-hidden="true" tabindex="-1"></a>trt_vars  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"A_1"</span>, <span class="st">"A_2"</span>, <span class="st">"A_3"</span>)        <span class="co"># treatment in temporal order</span></span>
+<span id="cb12-132"><a href="#cb12-132" aria-hidden="true" tabindex="-1"></a>time_vary <span class="ot">&lt;-</span> <span class="fu">list</span>(<span class="st">"L_1"</span>, <span class="st">"L_2"</span>, <span class="st">"L_3"</span>)     <span class="co"># time-varying confounder at each visit</span></span>
+<span id="cb12-133"><a href="#cb12-133" aria-hidden="true" tabindex="-1"></a>baseline  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"age"</span>, <span class="st">"sex"</span>)               <span class="co"># fixed baseline covariates</span></span>
+<span id="cb12-134"><a href="#cb12-134" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb12-135"><a href="#cb12-135" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-136"><a href="#cb12-136" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-137"><a href="#cb12-137" aria-hidden="true" tabindex="-1"></a><span class="fu">## Estimation with LMTP</span></span>
+<span id="cb12-138"><a href="#cb12-138" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-139"><a href="#cb12-139" aria-hidden="true" tabindex="-1"></a>With the data prepared and the shift function defined, estimation follows the same <span class="in">`lmtp`</span> workflow used in @sec-adherence-shift: estimate the counterfactual mortality risk under the dynamic rule, estimate it under the natural course (<span class="in">`shift = NULL`</span>), and contrast the two.</span>
+<span id="cb12-140"><a href="#cb12-140" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-143"><a href="#cb12-143" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb12-144"><a href="#cb12-144" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-estimate</span></span>
+<span id="cb12-145"><a href="#cb12-145" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
+<span id="cb12-146"><a href="#cb12-146" aria-hidden="true" tabindex="-1"></a><span class="co">#| message: false</span></span>
+<span id="cb12-147"><a href="#cb12-147" aria-hidden="true" tabindex="-1"></a><span class="co">#| warning: false</span></span>
+<span id="cb12-148"><a href="#cb12-148" aria-hidden="true" tabindex="-1"></a><span class="co">#| cache: true</span></span>
+<span id="cb12-149"><a href="#cb12-149" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-150"><a href="#cb12-150" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">42</span>)</span>
+<span id="cb12-151"><a href="#cb12-151" aria-hidden="true" tabindex="-1"></a>fit_rule <span class="ot">&lt;-</span> <span class="fu">lmtp_tmle</span>(</span>
+<span id="cb12-152"><a href="#cb12-152" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat_wide,</span>
+<span id="cb12-153"><a href="#cb12-153" aria-hidden="true" tabindex="-1"></a>  <span class="at">trt =</span> trt_vars,</span>
+<span id="cb12-154"><a href="#cb12-154" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome =</span> <span class="st">"Y"</span>,</span>
+<span id="cb12-155"><a href="#cb12-155" aria-hidden="true" tabindex="-1"></a>  <span class="at">baseline =</span> baseline,</span>
+<span id="cb12-156"><a href="#cb12-156" aria-hidden="true" tabindex="-1"></a>  <span class="at">time_vary =</span> time_vary,</span>
+<span id="cb12-157"><a href="#cb12-157" aria-hidden="true" tabindex="-1"></a>  <span class="at">shift =</span> shift_cd4_rule,</span>
+<span id="cb12-158"><a href="#cb12-158" aria-hidden="true" tabindex="-1"></a>  <span class="at">mtp =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb12-159"><a href="#cb12-159" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome_type =</span> <span class="st">"binomial"</span>,</span>
+<span id="cb12-160"><a href="#cb12-160" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_outcome =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
+<span id="cb12-161"><a href="#cb12-161" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_trt =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
+<span id="cb12-162"><a href="#cb12-162" aria-hidden="true" tabindex="-1"></a>  <span class="at">folds =</span> <span class="dv">5</span></span>
+<span id="cb12-163"><a href="#cb12-163" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb12-164"><a href="#cb12-164" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-165"><a href="#cb12-165" aria-hidden="true" tabindex="-1"></a>fit_natural <span class="ot">&lt;-</span> <span class="fu">lmtp_tmle</span>(</span>
+<span id="cb12-166"><a href="#cb12-166" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat_wide,</span>
+<span id="cb12-167"><a href="#cb12-167" aria-hidden="true" tabindex="-1"></a>  <span class="at">trt =</span> trt_vars,</span>
+<span id="cb12-168"><a href="#cb12-168" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome =</span> <span class="st">"Y"</span>,</span>
+<span id="cb12-169"><a href="#cb12-169" aria-hidden="true" tabindex="-1"></a>  <span class="at">baseline =</span> baseline,</span>
+<span id="cb12-170"><a href="#cb12-170" aria-hidden="true" tabindex="-1"></a>  <span class="at">time_vary =</span> time_vary,</span>
+<span id="cb12-171"><a href="#cb12-171" aria-hidden="true" tabindex="-1"></a>  <span class="at">shift =</span> <span class="cn">NULL</span>,                 <span class="co"># natural course: no intervention</span></span>
+<span id="cb12-172"><a href="#cb12-172" aria-hidden="true" tabindex="-1"></a>  <span class="at">mtp =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb12-173"><a href="#cb12-173" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome_type =</span> <span class="st">"binomial"</span>,</span>
+<span id="cb12-174"><a href="#cb12-174" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_outcome =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
+<span id="cb12-175"><a href="#cb12-175" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_trt =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
+<span id="cb12-176"><a href="#cb12-176" aria-hidden="true" tabindex="-1"></a>  <span class="at">folds =</span> <span class="dv">5</span></span>
+<span id="cb12-177"><a href="#cb12-177" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb12-178"><a href="#cb12-178" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-179"><a href="#cb12-179" aria-hidden="true" tabindex="-1"></a>fit_rule</span>
+<span id="cb12-180"><a href="#cb12-180" aria-hidden="true" tabindex="-1"></a>fit_natural</span>
+<span id="cb12-181"><a href="#cb12-181" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb12-182"><a href="#cb12-182" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-183"><a href="#cb12-183" aria-hidden="true" tabindex="-1"></a>The call pattern is the one from @sec-adherence-shift: <span class="in">`lmtp_tmle()`</span> fits a sequentially doubly robust estimator with cross-fitting, calling the shift function at each visit to set the counterfactual treatment, with <span class="in">`mtp = TRUE`</span> because the shifted value depends on the natural one. What is new here is only the rule that shift function encodes.</span>
 <span id="cb12-184"><a href="#cb12-184" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-185"><a href="#cb12-185" aria-hidden="true" tabindex="-1"></a>fit_rule</span>
-<span id="cb12-186"><a href="#cb12-186" aria-hidden="true" tabindex="-1"></a>fit_natural</span>
-<span id="cb12-187"><a href="#cb12-187" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb12-188"><a href="#cb12-188" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-189"><a href="#cb12-189" aria-hidden="true" tabindex="-1"></a>The <span class="in">`lmtp_tmle()`</span> function implements a sequentially doubly robust estimator with cross-fitting. At each time point, it estimates the outcome regression and the treatment/censoring mechanisms, then applies a TMLE-style targeting step. The shift function is called at each time point to determine the counterfactual treatment value, and the <span class="in">`mtp = TRUE`</span> flag tells <span class="in">`lmtp`</span> that the shifted value depends on the natural treatment value.</span>
-<span id="cb12-190"><a href="#cb12-190" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-191"><a href="#cb12-191" aria-hidden="true" tabindex="-1"></a>The contrast turns the two intervention-specific risks into the policy-relevant risk difference:</span>
-<span id="cb12-192"><a href="#cb12-192" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-195"><a href="#cb12-195" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb12-196"><a href="#cb12-196" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-contrast</span></span>
-<span id="cb12-197"><a href="#cb12-197" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
-<span id="cb12-198"><a href="#cb12-198" aria-hidden="true" tabindex="-1"></a><span class="fu">lmtp_contrast</span>(fit_rule, <span class="at">ref =</span> fit_natural, <span class="at">type =</span> <span class="st">"additive"</span>)</span>
-<span id="cb12-199"><a href="#cb12-199" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb12-200"><a href="#cb12-200" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-201"><a href="#cb12-201" aria-hidden="true" tabindex="-1"></a>The <span class="in">`estimate`</span> column is the marginal risk difference: how much the CD4 &lt; 350 initiation rule would change mortality relative to observed practice, with a negative value indicating fewer deaths under the rule.</span>
-<span id="cb12-202"><a href="#cb12-202" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-185"><a href="#cb12-185" aria-hidden="true" tabindex="-1"></a>The contrast turns the two intervention-specific risks into the policy-relevant risk difference:</span>
+<span id="cb12-186"><a href="#cb12-186" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-189"><a href="#cb12-189" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb12-190"><a href="#cb12-190" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-contrast</span></span>
+<span id="cb12-191"><a href="#cb12-191" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
+<span id="cb12-192"><a href="#cb12-192" aria-hidden="true" tabindex="-1"></a><span class="fu">lmtp_contrast</span>(fit_rule, <span class="at">ref =</span> fit_natural, <span class="at">type =</span> <span class="st">"additive"</span>)</span>
+<span id="cb12-193"><a href="#cb12-193" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb12-194"><a href="#cb12-194" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-195"><a href="#cb12-195" aria-hidden="true" tabindex="-1"></a>The <span class="in">`estimate`</span> column is the marginal risk difference: how much the CD4 &lt; 350 initiation rule would change mortality relative to observed practice, with a negative value indicating fewer deaths under the rule.</span>
+<span id="cb12-196"><a href="#cb12-196" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-197"><a href="#cb12-197" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-198"><a href="#cb12-198" aria-hidden="true" tabindex="-1"></a><span class="fu">## Diagnostics and empirical support</span></span>
+<span id="cb12-199"><a href="#cb12-199" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-200"><a href="#cb12-200" aria-hidden="true" tabindex="-1"></a>Before interpreting the results, several diagnostic checks are important.</span>
+<span id="cb12-201"><a href="#cb12-201" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-202"><a href="#cb12-202" aria-hidden="true" tabindex="-1"></a><span class="fu">### Is the dynamic rule well-supported by the data?</span></span>
 <span id="cb12-203"><a href="#cb12-203" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-204"><a href="#cb12-204" aria-hidden="true" tabindex="-1"></a><span class="fu">## Diagnostics and empirical support</span></span>
+<span id="cb12-204"><a href="#cb12-204" aria-hidden="true" tabindex="-1"></a>The rule initiates HAART when CD4 drops below 350. For this to be estimable, we need person-visits where CD4 was below 350 but the patient did *not* start HAART (the counterfactual contrast). If every patient with low CD4 was immediately treated, there is no empirical support for the comparison, and the estimator relies entirely on model extrapolation.</span>
 <span id="cb12-205"><a href="#cb12-205" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-206"><a href="#cb12-206" aria-hidden="true" tabindex="-1"></a>Before interpreting the results, several diagnostic checks are important.</span>
-<span id="cb12-207"><a href="#cb12-207" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-208"><a href="#cb12-208" aria-hidden="true" tabindex="-1"></a><span class="fu">### Is the dynamic rule well-supported by the data?</span></span>
-<span id="cb12-209"><a href="#cb12-209" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-210"><a href="#cb12-210" aria-hidden="true" tabindex="-1"></a>The rule initiates HAART when CD4 drops below 350. For this to be estimable, we need person-visits where CD4 was below 350 but the patient did *not* start HAART (the counterfactual contrast). If every patient with low CD4 was immediately treated, there is no empirical support for the comparison, and the estimator relies entirely on model extrapolation.</span>
-<span id="cb12-211"><a href="#cb12-211" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-214"><a href="#cb12-214" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb12-215"><a href="#cb12-215" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-support</span></span>
-<span id="cb12-216"><a href="#cb12-216" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
-<span id="cb12-217"><a href="#cb12-217" aria-hidden="true" tabindex="-1"></a><span class="co"># Count person-visits where CD4 &lt; 350 but the patient was not (yet) treated:</span></span>
-<span id="cb12-218"><a href="#cb12-218" aria-hidden="true" tabindex="-1"></a><span class="co"># these are the observations the rule would shift, and where support lives.</span></span>
-<span id="cb12-219"><a href="#cb12-219" aria-hidden="true" tabindex="-1"></a>support <span class="ot">&lt;-</span> <span class="fu">with</span>(dat_wide,</span>
-<span id="cb12-220"><a href="#cb12-220" aria-hidden="true" tabindex="-1"></a>  (L_1 <span class="sc">&lt;</span> <span class="dv">350</span> <span class="sc">&amp;</span> A_1 <span class="sc">==</span> <span class="dv">0</span>) <span class="sc">+</span></span>
-<span id="cb12-221"><a href="#cb12-221" aria-hidden="true" tabindex="-1"></a>  (L_2 <span class="sc">&lt;</span> <span class="dv">350</span> <span class="sc">&amp;</span> A_2 <span class="sc">==</span> <span class="dv">0</span>) <span class="sc">+</span></span>
-<span id="cb12-222"><a href="#cb12-222" aria-hidden="true" tabindex="-1"></a>  (L_3 <span class="sc">&lt;</span> <span class="dv">350</span> <span class="sc">&amp;</span> A_3 <span class="sc">==</span> <span class="dv">0</span>)</span>
-<span id="cb12-223"><a href="#cb12-223" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb12-224"><a href="#cb12-224" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
-<span id="cb12-225"><a href="#cb12-225" aria-hidden="true" tabindex="-1"></a>  <span class="at">shiftable_person_visits =</span> <span class="fu">sum</span>(support),</span>
-<span id="cb12-226"><a href="#cb12-226" aria-hidden="true" tabindex="-1"></a>  <span class="at">patients_with_any_shift =</span> <span class="fu">sum</span>(support <span class="sc">&gt;</span> <span class="dv">0</span>)</span>
-<span id="cb12-227"><a href="#cb12-227" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb12-228"><a href="#cb12-228" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb12-208"><a href="#cb12-208" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb12-209"><a href="#cb12-209" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-support</span></span>
+<span id="cb12-210"><a href="#cb12-210" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
+<span id="cb12-211"><a href="#cb12-211" aria-hidden="true" tabindex="-1"></a><span class="co"># Count person-visits where CD4 &lt; 350 but the patient was not (yet) treated:</span></span>
+<span id="cb12-212"><a href="#cb12-212" aria-hidden="true" tabindex="-1"></a><span class="co"># these are the observations the rule would shift, and where support lives.</span></span>
+<span id="cb12-213"><a href="#cb12-213" aria-hidden="true" tabindex="-1"></a>support <span class="ot">&lt;-</span> <span class="fu">with</span>(dat_wide,</span>
+<span id="cb12-214"><a href="#cb12-214" aria-hidden="true" tabindex="-1"></a>  (L_1 <span class="sc">&lt;</span> <span class="dv">350</span> <span class="sc">&amp;</span> A_1 <span class="sc">==</span> <span class="dv">0</span>) <span class="sc">+</span></span>
+<span id="cb12-215"><a href="#cb12-215" aria-hidden="true" tabindex="-1"></a>  (L_2 <span class="sc">&lt;</span> <span class="dv">350</span> <span class="sc">&amp;</span> A_2 <span class="sc">==</span> <span class="dv">0</span>) <span class="sc">+</span></span>
+<span id="cb12-216"><a href="#cb12-216" aria-hidden="true" tabindex="-1"></a>  (L_3 <span class="sc">&lt;</span> <span class="dv">350</span> <span class="sc">&amp;</span> A_3 <span class="sc">==</span> <span class="dv">0</span>)</span>
+<span id="cb12-217"><a href="#cb12-217" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb12-218"><a href="#cb12-218" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
+<span id="cb12-219"><a href="#cb12-219" aria-hidden="true" tabindex="-1"></a>  <span class="at">shiftable_person_visits =</span> <span class="fu">sum</span>(support),</span>
+<span id="cb12-220"><a href="#cb12-220" aria-hidden="true" tabindex="-1"></a>  <span class="at">patients_with_any_shift =</span> <span class="fu">sum</span>(support <span class="sc">&gt;</span> <span class="dv">0</span>)</span>
+<span id="cb12-221"><a href="#cb12-221" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb12-222"><a href="#cb12-222" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb12-223"><a href="#cb12-223" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-224"><a href="#cb12-224" aria-hidden="true" tabindex="-1"></a>If the rule would shift very few observations (most patients with low CD4 are already treated), the analysis has limited power. If the rule would shift many observations but the natural treatment probability is near 1 in that stratum, positivity is thin and the estimate is fragile.</span>
+<span id="cb12-225"><a href="#cb12-225" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-226"><a href="#cb12-226" aria-hidden="true" tabindex="-1"></a><span class="fu">### Propensity score overlap</span></span>
+<span id="cb12-227"><a href="#cb12-227" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-228"><a href="#cb12-228" aria-hidden="true" tabindex="-1"></a>The treatment mechanism at each visit should show adequate overlap. Estimated probabilities of treatment near 0 or 1 at any visit indicate positivity concerns that compound across time points. The block below fits the per-visit initiation model among patients still at risk of initiating (those not already on HAART) and reports the range of fitted probabilities at each visit.</span>
 <span id="cb12-229"><a href="#cb12-229" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-230"><a href="#cb12-230" aria-hidden="true" tabindex="-1"></a>If the rule would shift very few observations (most patients with low CD4 are already treated), the analysis has limited power. If the rule would shift many observations but the natural treatment probability is near 1 in that stratum, positivity is thin and the estimate is fragile.</span>
-<span id="cb12-231"><a href="#cb12-231" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-232"><a href="#cb12-232" aria-hidden="true" tabindex="-1"></a><span class="fu">### Propensity score overlap</span></span>
-<span id="cb12-233"><a href="#cb12-233" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-234"><a href="#cb12-234" aria-hidden="true" tabindex="-1"></a>The treatment mechanism at each visit should show adequate overlap. Estimated probabilities of treatment near 0 or 1 at any visit indicate positivity concerns that compound across time points. The block below fits the per-visit initiation model among patients still at risk of initiating (those not already on HAART) and reports the range of fitted probabilities at each visit.</span>
-<span id="cb12-235"><a href="#cb12-235" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-238"><a href="#cb12-238" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb12-239"><a href="#cb12-239" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-overlap</span></span>
-<span id="cb12-240"><a href="#cb12-240" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
-<span id="cb12-241"><a href="#cb12-241" aria-hidden="true" tabindex="-1"></a><span class="co"># Treatment-initiation probability at each visit, among patients still at risk</span></span>
-<span id="cb12-242"><a href="#cb12-242" aria-hidden="true" tabindex="-1"></a><span class="co"># of initiating. Values near 0 or 1 flag positivity strain; because the</span></span>
-<span id="cb12-243"><a href="#cb12-243" aria-hidden="true" tabindex="-1"></a><span class="co"># longitudinal estimand chains across visits, thin overlap at any single visit</span></span>
-<span id="cb12-244"><a href="#cb12-244" aria-hidden="true" tabindex="-1"></a><span class="co"># propagates into the contrast.</span></span>
-<span id="cb12-245"><a href="#cb12-245" aria-hidden="true" tabindex="-1"></a>g1 <span class="ot">&lt;-</span> <span class="fu">predict</span>(<span class="fu">glm</span>(A_1 <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> L_1, binomial, dat_wide), <span class="at">type =</span> <span class="st">"response"</span>)</span>
-<span id="cb12-246"><a href="#cb12-246" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-247"><a href="#cb12-247" aria-hidden="true" tabindex="-1"></a>at_risk2 <span class="ot">&lt;-</span> dat_wide<span class="sc">$</span>A_1 <span class="sc">==</span> <span class="dv">0</span></span>
-<span id="cb12-248"><a href="#cb12-248" aria-hidden="true" tabindex="-1"></a>g2 <span class="ot">&lt;-</span> <span class="fu">predict</span>(<span class="fu">glm</span>(A_2 <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> L_2, binomial, dat_wide[at_risk2, ]),</span>
-<span id="cb12-249"><a href="#cb12-249" aria-hidden="true" tabindex="-1"></a>              <span class="at">type =</span> <span class="st">"response"</span>)</span>
-<span id="cb12-250"><a href="#cb12-250" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-251"><a href="#cb12-251" aria-hidden="true" tabindex="-1"></a>at_risk3 <span class="ot">&lt;-</span> dat_wide<span class="sc">$</span>A_2 <span class="sc">==</span> <span class="dv">0</span></span>
-<span id="cb12-252"><a href="#cb12-252" aria-hidden="true" tabindex="-1"></a>g3 <span class="ot">&lt;-</span> <span class="fu">predict</span>(<span class="fu">glm</span>(A_3 <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> L_3, binomial, dat_wide[at_risk3, ]),</span>
-<span id="cb12-253"><a href="#cb12-253" aria-hidden="true" tabindex="-1"></a>              <span class="at">type =</span> <span class="st">"response"</span>)</span>
-<span id="cb12-254"><a href="#cb12-254" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-255"><a href="#cb12-255" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
-<span id="cb12-256"><a href="#cb12-256" aria-hidden="true" tabindex="-1"></a>  <span class="at">visit     =</span> <span class="fu">c</span>(<span class="st">"A_1"</span>, <span class="st">"A_2"</span>, <span class="st">"A_3"</span>),</span>
-<span id="cb12-257"><a href="#cb12-257" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_at_risk =</span> <span class="fu">c</span>(<span class="fu">nrow</span>(dat_wide), <span class="fu">sum</span>(at_risk2), <span class="fu">sum</span>(at_risk3)),</span>
-<span id="cb12-258"><a href="#cb12-258" aria-hidden="true" tabindex="-1"></a>  <span class="at">g_min     =</span> <span class="fu">round</span>(<span class="fu">c</span>(<span class="fu">min</span>(g1), <span class="fu">min</span>(g2), <span class="fu">min</span>(g3)), <span class="dv">3</span>),</span>
-<span id="cb12-259"><a href="#cb12-259" aria-hidden="true" tabindex="-1"></a>  <span class="at">g_max     =</span> <span class="fu">round</span>(<span class="fu">c</span>(<span class="fu">max</span>(g1), <span class="fu">max</span>(g2), <span class="fu">max</span>(g3)), <span class="dv">3</span>)</span>
-<span id="cb12-260"><a href="#cb12-260" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb12-261"><a href="#cb12-261" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb12-262"><a href="#cb12-262" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-263"><a href="#cb12-263" aria-hidden="true" tabindex="-1"></a><span class="fu">### Effective sample size</span></span>
-<span id="cb12-264"><a href="#cb12-264" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-265"><a href="#cb12-265" aria-hidden="true" tabindex="-1"></a>In longitudinal settings, the effective sample size can shrink rapidly because the cumulative product of inverse-probability weights grows with the number of visits. Even with TMLE-based estimation (which avoids explicit weight products), near-positivity violations at individual time points can inflate the influence of a few observations. The visit-1 weights below illustrate the idea; the effective sample size is the squared sum of weights over the sum of squared weights, and it falls further once weights are multiplied across visits.</span>
-<span id="cb12-266"><a href="#cb12-266" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-269"><a href="#cb12-269" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb12-270"><a href="#cb12-270" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-ess</span></span>
-<span id="cb12-271"><a href="#cb12-271" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
-<span id="cb12-272"><a href="#cb12-272" aria-hidden="true" tabindex="-1"></a><span class="co"># Inverse-probability weights for the observed (natural-course) treatment at</span></span>
-<span id="cb12-273"><a href="#cb12-273" aria-hidden="true" tabindex="-1"></a><span class="co"># visit 1, and the resulting effective sample size. An ESS well below the</span></span>
-<span id="cb12-274"><a href="#cb12-274" aria-hidden="true" tabindex="-1"></a><span class="co"># nominal n means a few person-histories dominate the estimate.</span></span>
-<span id="cb12-275"><a href="#cb12-275" aria-hidden="true" tabindex="-1"></a>w1   <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(dat_wide<span class="sc">$</span>A_1 <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">1</span> <span class="sc">/</span> g1, <span class="dv">1</span> <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">-</span> g1))</span>
-<span id="cb12-276"><a href="#cb12-276" aria-hidden="true" tabindex="-1"></a>ess1 <span class="ot">&lt;-</span> <span class="fu">sum</span>(w1)<span class="sc">^</span><span class="dv">2</span> <span class="sc">/</span> <span class="fu">sum</span>(w1<span class="sc">^</span><span class="dv">2</span>)</span>
-<span id="cb12-277"><a href="#cb12-277" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-278"><a href="#cb12-278" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
-<span id="cb12-279"><a href="#cb12-279" aria-hidden="true" tabindex="-1"></a>  <span class="at">nominal_n     =</span> <span class="fu">nrow</span>(dat_wide),</span>
-<span id="cb12-280"><a href="#cb12-280" aria-hidden="true" tabindex="-1"></a>  <span class="at">max_weight_v1 =</span> <span class="fu">round</span>(<span class="fu">max</span>(w1), <span class="dv">1</span>),</span>
-<span id="cb12-281"><a href="#cb12-281" aria-hidden="true" tabindex="-1"></a>  <span class="at">ess_visit1    =</span> <span class="fu">round</span>(ess1, <span class="dv">1</span>)</span>
-<span id="cb12-282"><a href="#cb12-282" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb12-283"><a href="#cb12-283" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb12-284"><a href="#cb12-284" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-285"><a href="#cb12-285" aria-hidden="true" tabindex="-1"></a>A large gap between <span class="in">`nominal_n`</span> and <span class="in">`ess_visit1`</span>, or a large <span class="in">`max_weight_v1`</span>, at any visit is the longitudinal analogue of the point-treatment positivity problem: the contrast is being carried by a small number of person-histories, and the confidence interval understates the true fragility.</span>
-<span id="cb12-286"><a href="#cb12-286" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-232"><a href="#cb12-232" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb12-233"><a href="#cb12-233" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-overlap</span></span>
+<span id="cb12-234"><a href="#cb12-234" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
+<span id="cb12-235"><a href="#cb12-235" aria-hidden="true" tabindex="-1"></a><span class="co"># Treatment-initiation probability at each visit, among patients still at risk</span></span>
+<span id="cb12-236"><a href="#cb12-236" aria-hidden="true" tabindex="-1"></a><span class="co"># of initiating. Values near 0 or 1 flag positivity strain; because the</span></span>
+<span id="cb12-237"><a href="#cb12-237" aria-hidden="true" tabindex="-1"></a><span class="co"># longitudinal estimand chains across visits, thin overlap at any single visit</span></span>
+<span id="cb12-238"><a href="#cb12-238" aria-hidden="true" tabindex="-1"></a><span class="co"># propagates into the contrast.</span></span>
+<span id="cb12-239"><a href="#cb12-239" aria-hidden="true" tabindex="-1"></a>g1 <span class="ot">&lt;-</span> <span class="fu">predict</span>(<span class="fu">glm</span>(A_1 <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> L_1, binomial, dat_wide), <span class="at">type =</span> <span class="st">"response"</span>)</span>
+<span id="cb12-240"><a href="#cb12-240" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-241"><a href="#cb12-241" aria-hidden="true" tabindex="-1"></a>at_risk2 <span class="ot">&lt;-</span> dat_wide<span class="sc">$</span>A_1 <span class="sc">==</span> <span class="dv">0</span></span>
+<span id="cb12-242"><a href="#cb12-242" aria-hidden="true" tabindex="-1"></a>g2 <span class="ot">&lt;-</span> <span class="fu">predict</span>(<span class="fu">glm</span>(A_2 <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> L_2, binomial, dat_wide[at_risk2, ]),</span>
+<span id="cb12-243"><a href="#cb12-243" aria-hidden="true" tabindex="-1"></a>              <span class="at">type =</span> <span class="st">"response"</span>)</span>
+<span id="cb12-244"><a href="#cb12-244" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-245"><a href="#cb12-245" aria-hidden="true" tabindex="-1"></a>at_risk3 <span class="ot">&lt;-</span> dat_wide<span class="sc">$</span>A_2 <span class="sc">==</span> <span class="dv">0</span></span>
+<span id="cb12-246"><a href="#cb12-246" aria-hidden="true" tabindex="-1"></a>g3 <span class="ot">&lt;-</span> <span class="fu">predict</span>(<span class="fu">glm</span>(A_3 <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> L_3, binomial, dat_wide[at_risk3, ]),</span>
+<span id="cb12-247"><a href="#cb12-247" aria-hidden="true" tabindex="-1"></a>              <span class="at">type =</span> <span class="st">"response"</span>)</span>
+<span id="cb12-248"><a href="#cb12-248" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-249"><a href="#cb12-249" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
+<span id="cb12-250"><a href="#cb12-250" aria-hidden="true" tabindex="-1"></a>  <span class="at">visit     =</span> <span class="fu">c</span>(<span class="st">"A_1"</span>, <span class="st">"A_2"</span>, <span class="st">"A_3"</span>),</span>
+<span id="cb12-251"><a href="#cb12-251" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_at_risk =</span> <span class="fu">c</span>(<span class="fu">nrow</span>(dat_wide), <span class="fu">sum</span>(at_risk2), <span class="fu">sum</span>(at_risk3)),</span>
+<span id="cb12-252"><a href="#cb12-252" aria-hidden="true" tabindex="-1"></a>  <span class="at">g_min     =</span> <span class="fu">round</span>(<span class="fu">c</span>(<span class="fu">min</span>(g1), <span class="fu">min</span>(g2), <span class="fu">min</span>(g3)), <span class="dv">3</span>),</span>
+<span id="cb12-253"><a href="#cb12-253" aria-hidden="true" tabindex="-1"></a>  <span class="at">g_max     =</span> <span class="fu">round</span>(<span class="fu">c</span>(<span class="fu">max</span>(g1), <span class="fu">max</span>(g2), <span class="fu">max</span>(g3)), <span class="dv">3</span>)</span>
+<span id="cb12-254"><a href="#cb12-254" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb12-255"><a href="#cb12-255" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb12-256"><a href="#cb12-256" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-257"><a href="#cb12-257" aria-hidden="true" tabindex="-1"></a><span class="fu">### Effective sample size</span></span>
+<span id="cb12-258"><a href="#cb12-258" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-259"><a href="#cb12-259" aria-hidden="true" tabindex="-1"></a>In longitudinal settings, the effective sample size can shrink rapidly because the cumulative product of inverse-probability weights grows with the number of visits. Even with TMLE-based estimation (which avoids explicit weight products), near-positivity violations at individual time points can inflate the influence of a few observations. The visit-1 weights below illustrate the idea; the effective sample size is the squared sum of weights over the sum of squared weights, and it falls further once weights are multiplied across visits.</span>
+<span id="cb12-260"><a href="#cb12-260" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-263"><a href="#cb12-263" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb12-264"><a href="#cb12-264" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-ess</span></span>
+<span id="cb12-265"><a href="#cb12-265" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
+<span id="cb12-266"><a href="#cb12-266" aria-hidden="true" tabindex="-1"></a><span class="co"># Inverse-probability weights for the observed (natural-course) treatment at</span></span>
+<span id="cb12-267"><a href="#cb12-267" aria-hidden="true" tabindex="-1"></a><span class="co"># visit 1, and the resulting effective sample size. An ESS well below the</span></span>
+<span id="cb12-268"><a href="#cb12-268" aria-hidden="true" tabindex="-1"></a><span class="co"># nominal n means a few person-histories dominate the estimate.</span></span>
+<span id="cb12-269"><a href="#cb12-269" aria-hidden="true" tabindex="-1"></a>w1   <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(dat_wide<span class="sc">$</span>A_1 <span class="sc">==</span> <span class="dv">1</span>, <span class="dv">1</span> <span class="sc">/</span> g1, <span class="dv">1</span> <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">-</span> g1))</span>
+<span id="cb12-270"><a href="#cb12-270" aria-hidden="true" tabindex="-1"></a>ess1 <span class="ot">&lt;-</span> <span class="fu">sum</span>(w1)<span class="sc">^</span><span class="dv">2</span> <span class="sc">/</span> <span class="fu">sum</span>(w1<span class="sc">^</span><span class="dv">2</span>)</span>
+<span id="cb12-271"><a href="#cb12-271" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-272"><a href="#cb12-272" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
+<span id="cb12-273"><a href="#cb12-273" aria-hidden="true" tabindex="-1"></a>  <span class="at">nominal_n     =</span> <span class="fu">nrow</span>(dat_wide),</span>
+<span id="cb12-274"><a href="#cb12-274" aria-hidden="true" tabindex="-1"></a>  <span class="at">max_weight_v1 =</span> <span class="fu">round</span>(<span class="fu">max</span>(w1), <span class="dv">1</span>),</span>
+<span id="cb12-275"><a href="#cb12-275" aria-hidden="true" tabindex="-1"></a>  <span class="at">ess_visit1    =</span> <span class="fu">round</span>(ess1, <span class="dv">1</span>)</span>
+<span id="cb12-276"><a href="#cb12-276" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb12-277"><a href="#cb12-277" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb12-278"><a href="#cb12-278" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-279"><a href="#cb12-279" aria-hidden="true" tabindex="-1"></a>A large gap between <span class="in">`nominal_n`</span> and <span class="in">`ess_visit1`</span>, or a large <span class="in">`max_weight_v1`</span>, at any visit is the longitudinal analogue of the point-treatment positivity problem: the contrast is being carried by a small number of person-histories, and the confidence interval understates the true fragility.</span>
+<span id="cb12-280"><a href="#cb12-280" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-281"><a href="#cb12-281" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-282"><a href="#cb12-282" aria-hidden="true" tabindex="-1"></a><span class="fu">## Interpretation</span></span>
+<span id="cb12-283"><a href="#cb12-283" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-284"><a href="#cb12-284" aria-hidden="true" tabindex="-1"></a>The contrast from <span class="in">`lmtp_contrast()`</span> estimates the risk difference in mortality under the CD4 &lt; 350 initiation rule versus the natural course. A negative value indicates that the rule would reduce mortality.</span>
+<span id="cb12-285"><a href="#cb12-285" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-286"><a href="#cb12-286" aria-hidden="true" tabindex="-1"></a>Several points matter for interpretation:</span>
 <span id="cb12-287"><a href="#cb12-287" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-288"><a href="#cb12-288" aria-hidden="true" tabindex="-1"></a><span class="fu">## Interpretation</span></span>
+<span id="cb12-288"><a href="#cb12-288" aria-hidden="true" tabindex="-1"></a>**The estimand is policy-relevant.** Unlike a static "always treat" intervention, which may be clinically impossible, this rule corresponds to something a clinician could actually follow. The estimate answers: how many deaths per 100 patients would be prevented if HAART were initiated at CD4 &lt; 350 rather than at the discretion of individual clinicians?</span>
 <span id="cb12-289"><a href="#cb12-289" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-290"><a href="#cb12-290" aria-hidden="true" tabindex="-1"></a>The contrast from <span class="in">`lmtp_contrast()`</span> estimates the risk difference in mortality under the CD4 &lt; 350 initiation rule versus the natural course. A negative value indicates that the rule would reduce mortality.</span>
+<span id="cb12-290"><a href="#cb12-290" aria-hidden="true" tabindex="-1"></a>**The estimate depends on identification assumptions.** Sequential exchangeability (no unmeasured time-varying confounders), positivity at each visit, and consistency of the dynamic rule must all hold. If unmeasured factors (substance use, housing instability, clinic-specific prescribing norms) affect both treatment timing and mortality, the estimate is biased regardless of the estimator.</span>
 <span id="cb12-291"><a href="#cb12-291" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-292"><a href="#cb12-292" aria-hidden="true" tabindex="-1"></a>Several points matter for interpretation:</span>
+<span id="cb12-292"><a href="#cb12-292" aria-hidden="true" tabindex="-1"></a>**Support limitations constrain the estimate.** If the rule is very different from observed practice (for example, if most patients with CD4 &lt; 350 were already treated), the estimate relies on extrapolation. Sensitivity to the rule threshold (e.g., comparing CD4 &lt; 250 vs CD4 &lt; 350 vs CD4 &lt; 500) can help assess whether the result is robust or driven by sparse data in a particular region.</span>
 <span id="cb12-293"><a href="#cb12-293" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-294"><a href="#cb12-294" aria-hidden="true" tabindex="-1"></a>**The estimand is policy-relevant.** Unlike a static "always treat" intervention, which may be clinically impossible, this rule corresponds to something a clinician could actually follow. The estimate answers: how many deaths per 100 patients would be prevented if HAART were initiated at CD4 &lt; 350 rather than at the discretion of individual clinicians?</span>
-<span id="cb12-295"><a href="#cb12-295" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-296"><a href="#cb12-296" aria-hidden="true" tabindex="-1"></a>**The estimate depends on identification assumptions.** Sequential exchangeability (no unmeasured time-varying confounders), positivity at each visit, and consistency of the dynamic rule must all hold. If unmeasured factors (substance use, housing instability, clinic-specific prescribing norms) affect both treatment timing and mortality, the estimate is biased regardless of the estimator.</span>
-<span id="cb12-297"><a href="#cb12-297" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-298"><a href="#cb12-298" aria-hidden="true" tabindex="-1"></a>**Support limitations constrain the estimate.** If the rule is very different from observed practice (for example, if most patients with CD4 &lt; 350 were already treated), the estimate relies on extrapolation. Sensitivity to the rule threshold (e.g., comparing CD4 &lt; 250 vs CD4 &lt; 350 vs CD4 &lt; 500) can help assess whether the result is robust or driven by sparse data in a particular region.</span>
-<span id="cb12-299"><a href="#cb12-299" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-294"><a href="#cb12-294" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-295"><a href="#cb12-295" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sensitivity and robustness checks</span></span>
+<span id="cb12-296"><a href="#cb12-296" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-297"><a href="#cb12-297" aria-hidden="true" tabindex="-1"></a><span class="fu">### Alternative rule thresholds</span></span>
+<span id="cb12-298"><a href="#cb12-298" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-299"><a href="#cb12-299" aria-hidden="true" tabindex="-1"></a>Running the analysis at multiple CD4 thresholds provides a dose-response perspective on early vs. late initiation. The helper below rebuilds the shift function for a given threshold and returns the contrast against the natural course.</span>
 <span id="cb12-300"><a href="#cb12-300" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-301"><a href="#cb12-301" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sensitivity and robustness checks</span></span>
-<span id="cb12-302"><a href="#cb12-302" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-303"><a href="#cb12-303" aria-hidden="true" tabindex="-1"></a><span class="fu">### Alternative rule thresholds</span></span>
-<span id="cb12-304"><a href="#cb12-304" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-305"><a href="#cb12-305" aria-hidden="true" tabindex="-1"></a>Running the analysis at multiple CD4 thresholds provides a dose-response perspective on early vs. late initiation. The helper below rebuilds the shift function for a given threshold and returns the contrast against the natural course.</span>
-<span id="cb12-306"><a href="#cb12-306" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-309"><a href="#cb12-309" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb12-310"><a href="#cb12-310" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-threshold-sweep</span></span>
-<span id="cb12-311"><a href="#cb12-311" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
-<span id="cb12-312"><a href="#cb12-312" aria-hidden="true" tabindex="-1"></a><span class="co">#| message: false</span></span>
-<span id="cb12-313"><a href="#cb12-313" aria-hidden="true" tabindex="-1"></a><span class="co">#| warning: false</span></span>
-<span id="cb12-314"><a href="#cb12-314" aria-hidden="true" tabindex="-1"></a><span class="co">#| cache: true</span></span>
-<span id="cb12-315"><a href="#cb12-315" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-316"><a href="#cb12-316" aria-hidden="true" tabindex="-1"></a>contrast_at <span class="ot">&lt;-</span> <span class="cf">function</span>(thresh) {</span>
-<span id="cb12-317"><a href="#cb12-317" aria-hidden="true" tabindex="-1"></a>  shift_t <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) {</span>
-<span id="cb12-318"><a href="#cb12-318" aria-hidden="true" tabindex="-1"></a>    t <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(<span class="fu">sub</span>(<span class="st">"A_"</span>, <span class="st">""</span>, trt))</span>
-<span id="cb12-319"><a href="#cb12-319" aria-hidden="true" tabindex="-1"></a>    L_cols <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"L_"</span>, <span class="fu">seq_len</span>(t))</span>
-<span id="cb12-320"><a href="#cb12-320" aria-hidden="true" tabindex="-1"></a>    ever_low <span class="ot">&lt;-</span> <span class="fu">Reduce</span>(<span class="st">`</span><span class="at">|</span><span class="st">`</span>, <span class="fu">lapply</span>(L_cols, <span class="cf">function</span>(cc) data[[cc]] <span class="sc">&lt;</span> thresh))</span>
-<span id="cb12-321"><a href="#cb12-321" aria-hidden="true" tabindex="-1"></a>    <span class="fu">as.numeric</span>(data[[trt]] <span class="sc">==</span> <span class="dv">1</span> <span class="sc">|</span> ever_low)</span>
-<span id="cb12-322"><a href="#cb12-322" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb12-323"><a href="#cb12-323" aria-hidden="true" tabindex="-1"></a>  <span class="fu">set.seed</span>(<span class="dv">42</span>)</span>
-<span id="cb12-324"><a href="#cb12-324" aria-hidden="true" tabindex="-1"></a>  fit_t <span class="ot">&lt;-</span> <span class="fu">lmtp_tmle</span>(</span>
-<span id="cb12-325"><a href="#cb12-325" aria-hidden="true" tabindex="-1"></a>    <span class="at">data =</span> dat_wide, <span class="at">trt =</span> trt_vars, <span class="at">outcome =</span> <span class="st">"Y"</span>,</span>
-<span id="cb12-326"><a href="#cb12-326" aria-hidden="true" tabindex="-1"></a>    <span class="at">baseline =</span> baseline, <span class="at">time_vary =</span> time_vary,</span>
-<span id="cb12-327"><a href="#cb12-327" aria-hidden="true" tabindex="-1"></a>    <span class="at">shift =</span> shift_t, <span class="at">mtp =</span> <span class="cn">TRUE</span>, <span class="at">outcome_type =</span> <span class="st">"binomial"</span>,</span>
-<span id="cb12-328"><a href="#cb12-328" aria-hidden="true" tabindex="-1"></a>    <span class="at">learners_outcome =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
-<span id="cb12-329"><a href="#cb12-329" aria-hidden="true" tabindex="-1"></a>    <span class="at">learners_trt =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>), <span class="at">folds =</span> <span class="dv">2</span></span>
-<span id="cb12-330"><a href="#cb12-330" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb12-331"><a href="#cb12-331" aria-hidden="true" tabindex="-1"></a>  ct <span class="ot">&lt;-</span> <span class="fu">lmtp_contrast</span>(fit_t, <span class="at">ref =</span> fit_natural, <span class="at">type =</span> <span class="st">"additive"</span>)</span>
-<span id="cb12-332"><a href="#cb12-332" aria-hidden="true" tabindex="-1"></a>  <span class="fu">data.frame</span>(<span class="at">threshold =</span> thresh,</span>
-<span id="cb12-333"><a href="#cb12-333" aria-hidden="true" tabindex="-1"></a>             <span class="at">risk_diff =</span> <span class="fu">round</span>(ct<span class="sc">$</span>estimates<span class="sc">$</span>estimate, <span class="dv">4</span>),</span>
-<span id="cb12-334"><a href="#cb12-334" aria-hidden="true" tabindex="-1"></a>             <span class="at">conf_low =</span> <span class="fu">round</span>(ct<span class="sc">$</span>estimates<span class="sc">$</span>conf.low, <span class="dv">4</span>),</span>
-<span id="cb12-335"><a href="#cb12-335" aria-hidden="true" tabindex="-1"></a>             <span class="at">conf_high =</span> <span class="fu">round</span>(ct<span class="sc">$</span>estimates<span class="sc">$</span>conf.high, <span class="dv">4</span>))</span>
-<span id="cb12-336"><a href="#cb12-336" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb12-337"><a href="#cb12-337" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-338"><a href="#cb12-338" aria-hidden="true" tabindex="-1"></a><span class="fu">do.call</span>(rbind, <span class="fu">lapply</span>(<span class="fu">c</span>(<span class="dv">250</span>, <span class="dv">350</span>, <span class="dv">500</span>), contrast_at))</span>
-<span id="cb12-339"><a href="#cb12-339" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb12-303"><a href="#cb12-303" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb12-304"><a href="#cb12-304" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-threshold-sweep</span></span>
+<span id="cb12-305"><a href="#cb12-305" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
+<span id="cb12-306"><a href="#cb12-306" aria-hidden="true" tabindex="-1"></a><span class="co">#| message: false</span></span>
+<span id="cb12-307"><a href="#cb12-307" aria-hidden="true" tabindex="-1"></a><span class="co">#| warning: false</span></span>
+<span id="cb12-308"><a href="#cb12-308" aria-hidden="true" tabindex="-1"></a><span class="co">#| cache: true</span></span>
+<span id="cb12-309"><a href="#cb12-309" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-310"><a href="#cb12-310" aria-hidden="true" tabindex="-1"></a>contrast_at <span class="ot">&lt;-</span> <span class="cf">function</span>(thresh) {</span>
+<span id="cb12-311"><a href="#cb12-311" aria-hidden="true" tabindex="-1"></a>  shift_t <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) {</span>
+<span id="cb12-312"><a href="#cb12-312" aria-hidden="true" tabindex="-1"></a>    t <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(<span class="fu">sub</span>(<span class="st">"A_"</span>, <span class="st">""</span>, trt))</span>
+<span id="cb12-313"><a href="#cb12-313" aria-hidden="true" tabindex="-1"></a>    L_cols <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"L_"</span>, <span class="fu">seq_len</span>(t))</span>
+<span id="cb12-314"><a href="#cb12-314" aria-hidden="true" tabindex="-1"></a>    ever_low <span class="ot">&lt;-</span> <span class="fu">Reduce</span>(<span class="st">`</span><span class="at">|</span><span class="st">`</span>, <span class="fu">lapply</span>(L_cols, <span class="cf">function</span>(cc) data[[cc]] <span class="sc">&lt;</span> thresh))</span>
+<span id="cb12-315"><a href="#cb12-315" aria-hidden="true" tabindex="-1"></a>    <span class="fu">as.numeric</span>(data[[trt]] <span class="sc">==</span> <span class="dv">1</span> <span class="sc">|</span> ever_low)</span>
+<span id="cb12-316"><a href="#cb12-316" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb12-317"><a href="#cb12-317" aria-hidden="true" tabindex="-1"></a>  <span class="fu">set.seed</span>(<span class="dv">42</span>)</span>
+<span id="cb12-318"><a href="#cb12-318" aria-hidden="true" tabindex="-1"></a>  fit_t <span class="ot">&lt;-</span> <span class="fu">lmtp_tmle</span>(</span>
+<span id="cb12-319"><a href="#cb12-319" aria-hidden="true" tabindex="-1"></a>    <span class="at">data =</span> dat_wide, <span class="at">trt =</span> trt_vars, <span class="at">outcome =</span> <span class="st">"Y"</span>,</span>
+<span id="cb12-320"><a href="#cb12-320" aria-hidden="true" tabindex="-1"></a>    <span class="at">baseline =</span> baseline, <span class="at">time_vary =</span> time_vary,</span>
+<span id="cb12-321"><a href="#cb12-321" aria-hidden="true" tabindex="-1"></a>    <span class="at">shift =</span> shift_t, <span class="at">mtp =</span> <span class="cn">TRUE</span>, <span class="at">outcome_type =</span> <span class="st">"binomial"</span>,</span>
+<span id="cb12-322"><a href="#cb12-322" aria-hidden="true" tabindex="-1"></a>    <span class="at">learners_outcome =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
+<span id="cb12-323"><a href="#cb12-323" aria-hidden="true" tabindex="-1"></a>    <span class="at">learners_trt =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>), <span class="at">folds =</span> <span class="dv">2</span></span>
+<span id="cb12-324"><a href="#cb12-324" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb12-325"><a href="#cb12-325" aria-hidden="true" tabindex="-1"></a>  ct <span class="ot">&lt;-</span> <span class="fu">lmtp_contrast</span>(fit_t, <span class="at">ref =</span> fit_natural, <span class="at">type =</span> <span class="st">"additive"</span>)</span>
+<span id="cb12-326"><a href="#cb12-326" aria-hidden="true" tabindex="-1"></a>  <span class="fu">data.frame</span>(<span class="at">threshold =</span> thresh,</span>
+<span id="cb12-327"><a href="#cb12-327" aria-hidden="true" tabindex="-1"></a>             <span class="at">risk_diff =</span> <span class="fu">round</span>(ct<span class="sc">$</span>estimates<span class="sc">$</span>estimate, <span class="dv">4</span>),</span>
+<span id="cb12-328"><a href="#cb12-328" aria-hidden="true" tabindex="-1"></a>             <span class="at">conf_low =</span> <span class="fu">round</span>(ct<span class="sc">$</span>estimates<span class="sc">$</span>conf.low, <span class="dv">4</span>),</span>
+<span id="cb12-329"><a href="#cb12-329" aria-hidden="true" tabindex="-1"></a>             <span class="at">conf_high =</span> <span class="fu">round</span>(ct<span class="sc">$</span>estimates<span class="sc">$</span>conf.high, <span class="dv">4</span>))</span>
+<span id="cb12-330"><a href="#cb12-330" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb12-331"><a href="#cb12-331" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-332"><a href="#cb12-332" aria-hidden="true" tabindex="-1"></a><span class="fu">do.call</span>(rbind, <span class="fu">lapply</span>(<span class="fu">c</span>(<span class="dv">250</span>, <span class="dv">350</span>, <span class="dv">500</span>), contrast_at))</span>
+<span id="cb12-333"><a href="#cb12-333" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb12-334"><a href="#cb12-334" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-335"><a href="#cb12-335" aria-hidden="true" tabindex="-1"></a>If the estimated benefit increases smoothly with earlier initiation, this supports the clinical intuition. If the estimate becomes unstable or reverses at very early thresholds, this likely reflects positivity violations rather than a genuine clinical effect reversal.</span>
+<span id="cb12-336"><a href="#cb12-336" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-337"><a href="#cb12-337" aria-hidden="true" tabindex="-1"></a><span class="fu">### Nuisance model sensitivity</span></span>
+<span id="cb12-338"><a href="#cb12-338" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-339"><a href="#cb12-339" aria-hidden="true" tabindex="-1"></a>The <span class="in">`lmtp`</span> estimator is sequentially doubly robust, but in finite samples, the choice of learner library matters. Running the analysis with different Super Learner libraries (e.g., GLM-only vs. a richer library including random forests and LASSO) assesses model sensitivity. Large changes in the estimate across libraries suggest that the nuisance functions are poorly estimated and the result should be interpreted cautiously.</span>
 <span id="cb12-340"><a href="#cb12-340" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-341"><a href="#cb12-341" aria-hidden="true" tabindex="-1"></a>If the estimated benefit increases smoothly with earlier initiation, this supports the clinical intuition. If the estimate becomes unstable or reverses at very early thresholds, this likely reflects positivity violations rather than a genuine clinical effect reversal.</span>
-<span id="cb12-342"><a href="#cb12-342" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-343"><a href="#cb12-343" aria-hidden="true" tabindex="-1"></a><span class="fu">### Nuisance model sensitivity</span></span>
-<span id="cb12-344"><a href="#cb12-344" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-345"><a href="#cb12-345" aria-hidden="true" tabindex="-1"></a>The <span class="in">`lmtp`</span> estimator is sequentially doubly robust, but in finite samples, the choice of learner library matters. Running the analysis with different Super Learner libraries (e.g., GLM-only vs. a richer library including random forests and LASSO) assesses model sensitivity. Large changes in the estimate across libraries suggest that the nuisance functions are poorly estimated and the result should be interpreted cautiously.</span>
-<span id="cb12-346"><a href="#cb12-346" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-341"><a href="#cb12-341" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-342"><a href="#cb12-342" aria-hidden="true" tabindex="-1"></a><span class="fu">## Key lessons</span></span>
+<span id="cb12-343"><a href="#cb12-343" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-344"><a href="#cb12-344" aria-hidden="true" tabindex="-1"></a>This analysis integrates every major concept from the handbook into a single applied example:</span>
+<span id="cb12-345"><a href="#cb12-345" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-346"><a href="#cb12-346" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**The causal question comes first.** The dynamic rule was defined before any model was fit. The estimand, a marginal risk difference under a threshold-based initiation policy, was chosen because it answers a question that clinicians and guideline developers care about.</span>
 <span id="cb12-347"><a href="#cb12-347" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-348"><a href="#cb12-348" aria-hidden="true" tabindex="-1"></a><span class="fu">## Key lessons</span></span>
+<span id="cb12-348"><a href="#cb12-348" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**Longitudinal methods are necessary.** The treatment-confounder feedback between HAART and CD4 means that no cross-sectional analysis can correctly estimate the effect of a dynamic rule. The <span class="in">`lmtp`</span> framework handles this by modeling the treatment, covariate, and censoring processes sequentially at each visit.</span>
 <span id="cb12-349"><a href="#cb12-349" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-350"><a href="#cb12-350" aria-hidden="true" tabindex="-1"></a>This analysis integrates every major concept from the handbook into a single applied example:</span>
+<span id="cb12-350"><a href="#cb12-350" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Diagnostics matter as much as estimation.** Whether the dynamic rule is well-supported by the data, whether positivity holds at each time point, and whether the influence of individual observations is bounded all determine whether the estimate is credible. A precisely estimated quantity from a poorly supported intervention is not useful.</span>
 <span id="cb12-351"><a href="#cb12-351" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-352"><a href="#cb12-352" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**The causal question comes first.** The dynamic rule was defined before any model was fit. The estimand, a marginal risk difference under a threshold-based initiation policy, was chosen because it answers a question that clinicians and guideline developers care about.</span>
+<span id="cb12-352"><a href="#cb12-352" aria-hidden="true" tabindex="-1"></a><span class="ss">4. </span>**Interpretation requires restraint.** The estimate is a causal claim only if the identification assumptions hold. In observational HIV cohort data, unmeasured confounding from clinical judgment, adherence patterns, and social determinants of health is a real concern. Sensitivity analysis and negative controls are not optional additions. They are part of the analysis.</span>
 <span id="cb12-353"><a href="#cb12-353" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-354"><a href="#cb12-354" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**Longitudinal methods are necessary.** The treatment-confounder feedback between HAART and CD4 means that no cross-sectional analysis can correctly estimate the effect of a dynamic rule. The <span class="in">`lmtp`</span> framework handles this by modeling the treatment, covariate, and censoring processes sequentially at each visit.</span>
-<span id="cb12-355"><a href="#cb12-355" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-356"><a href="#cb12-356" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Diagnostics matter as much as estimation.** Whether the dynamic rule is well-supported by the data, whether positivity holds at each time point, and whether the influence of individual observations is bounded all determine whether the estimate is credible. A precisely estimated quantity from a poorly supported intervention is not useful.</span>
-<span id="cb12-357"><a href="#cb12-357" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-358"><a href="#cb12-358" aria-hidden="true" tabindex="-1"></a><span class="ss">4. </span>**Interpretation requires restraint.** The estimate is a causal claim only if the identification assumptions hold. In observational HIV cohort data, unmeasured confounding from clinical judgment, adherence patterns, and social determinants of health is a real concern. Sensitivity analysis and negative controls are not optional additions. They are part of the analysis.</span>
-<span id="cb12-359"><a href="#cb12-359" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-360"><a href="#cb12-360" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-361"><a href="#cb12-361" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and further reading</span></span>
-<span id="cb12-362"><a href="#cb12-362" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-363"><a href="#cb12-363" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>@diaz2021lmtp introduces the LMTP framework for realistic longitudinal interventions that depend on the natural treatment value.</span>
-<span id="cb12-364"><a href="#cb12-364" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>@petersen2014causal and @dang2023causal develop the Causal Roadmap and its extension to real-world evidence.</span>
-<span id="cb12-365"><a href="#cb12-365" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`lmtp`</span> R package: <span class="co">[</span><span class="ot">CRAN</span><span class="co">](https://cran.r-project.org/package=lmtp)</span></span>
+<span id="cb12-354"><a href="#cb12-354" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-355"><a href="#cb12-355" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and further reading</span></span>
+<span id="cb12-356"><a href="#cb12-356" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-357"><a href="#cb12-357" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>@diaz2021lmtp introduces the LMTP framework for realistic longitudinal interventions that depend on the natural treatment value.</span>
+<span id="cb12-358"><a href="#cb12-358" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>@petersen2014causal and @dang2023causal develop the Causal Roadmap and its extension to real-world evidence.</span>
+<span id="cb12-359"><a href="#cb12-359" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`lmtp`</span> R package: <span class="co">[</span><span class="ot">CRAN</span><span class="co">](https://cran.r-project.org/package=lmtp)</span></span>
 </code><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></pre></div>
 </div></div></div></div></div>
 </div> <!-- /content -->

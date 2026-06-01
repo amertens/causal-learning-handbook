@@ -583,6 +583,25 @@ window.Quarto = {
 <i class="callout-icon"></i>
 </div>
 <div class="callout-title-container flex-fill">
+Three ways to use the efficient influence function
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>AIPW and TMLE are two of three standard strategies for turning the same efficient influence function into an estimator. All three are asymptotically equivalent and share the same standard error; they differ in finite samples.</p>
+<ul>
+<li><strong>One-step (AIPW).</strong> Start from the g-computation plug-in and add the average of the influence-function correction. Easiest to code, but the correction is unbounded, so under extreme propensity scores the estimate can fall outside the parameter space.</li>
+<li><strong>Estimating equation.</strong> Solve the influence-function estimating equation for the parameter directly. Flexible, but like the one-step it is not a substitution estimator, so it carries no built-in guarantee that the estimate stays in range.</li>
+<li><strong>Substitution (TMLE).</strong> Update the outcome model until the plug-in itself solves the equation. More machinery to implement, but the estimate is a mean of valid predictions, so it respects bounds, re-aggregates cleanly to other scales, and pairs naturally with cross-fitting.</li>
+</ul>
+<p>On large samples with good overlap the three agree. The differences appear in finite samples and under poor overlap, which is why TMLE is the usual default for bounded outcomes.</p>
+</div>
+</div>
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
 What is an influence function? (plain version)
 </div>
 </div>
@@ -1779,467 +1798,479 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 <span id="cb14-34"><a href="#cb14-34" aria-hidden="true" tabindex="-1"></a>Both routes arrive at an estimator with the same large-sample behaviour. The structural difference (a sum versus a substitution) is what generates the practical differences we will revisit at the end of the chapter: TMLE estimates respect the bounds of the outcome scale (e.g., probabilities stay in $<span class="co">[</span><span class="ot">0, 1</span><span class="co">]</span>$), are interpretable as means of valid counterfactual predictions, and integrate naturally with cross-validated machine learning. AIPW is simpler to code and equally valid when propensity scores are well-behaved.</span>
 <span id="cb14-35"><a href="#cb14-35" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb14-36"><a href="#cb14-36" aria-hidden="true" tabindex="-1"></a>::: {.callout-note}</span>
-<span id="cb14-37"><a href="#cb14-37" aria-hidden="true" tabindex="-1"></a><span class="fu">## What is an influence function? (plain version)</span></span>
+<span id="cb14-37"><a href="#cb14-37" aria-hidden="true" tabindex="-1"></a><span class="fu">## Three ways to use the efficient influence function</span></span>
 <span id="cb14-38"><a href="#cb14-38" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-39"><a href="#cb14-39" aria-hidden="true" tabindex="-1"></a>Almost any estimator in this book can be rewritten, to a close approximation, as a simple average of one number per patient. That per-patient number is the patient's value of the **influence function**: it says how far, and in which direction, that single patient pulls the final estimate. Two consequences are all an applied reader needs. The spread of those per-patient pulls is what sets the standard error: take their standard deviation and divide by the square root of the sample size. And an estimator reaches the smallest possible standard error when its influence function is the *efficient* one; TMLE earns that efficiency by nudging the fitted models until the pulls average to zero.</span>
+<span id="cb14-39"><a href="#cb14-39" aria-hidden="true" tabindex="-1"></a>AIPW and TMLE are two of three standard strategies for turning the same efficient influence function into an estimator. All three are asymptotically equivalent and share the same standard error; they differ in finite samples.</span>
 <span id="cb14-40"><a href="#cb14-40" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-41"><a href="#cb14-41" aria-hidden="true" tabindex="-1"></a>Every patient casts a vote on the final estimate. Most votes are quiet, but a few loud ones set the margin of error. A two-patient picture makes it concrete. Imagine the estimate is a risk difference and we have computed each patient's influence value. An ordinary patient, well matched on covariates with a predictable outcome, might have an influence value near $0$, so dropping them barely moves the estimate. A high-leverage patient, say a treated patient whose propensity score was only $0.03$ (very unlikely to be treated) and who then had the outcome, might have an influence value of $+18$: that one patient hauls the estimate upward, and a handful like them widen the confidence interval. The standard error is just the standard deviation of these per-patient values over the square root of $n$, so a few large values inflate it. The inference code later in this chapter computes exactly these per-patient numbers.</span>
-<span id="cb14-42"><a href="#cb14-42" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb14-43"><a href="#cb14-43" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-44"><a href="#cb14-44" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb14-45"><a href="#cb14-45" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-46"><a href="#cb14-46" aria-hidden="true" tabindex="-1"></a><span class="fu"># AIPW: The One-Step Doubly Robust Estimator</span></span>
+<span id="cb14-41"><a href="#cb14-41" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**One-step (AIPW).** Start from the g-computation plug-in and add the average of the influence-function correction. Easiest to code, but the correction is unbounded, so under extreme propensity scores the estimate can fall outside the parameter space.</span>
+<span id="cb14-42"><a href="#cb14-42" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Estimating equation.** Solve the influence-function estimating equation for the parameter directly. Flexible, but like the one-step it is not a substitution estimator, so it carries no built-in guarantee that the estimate stays in range.</span>
+<span id="cb14-43"><a href="#cb14-43" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Substitution (TMLE).** Update the outcome model until the plug-in itself solves the equation. More machinery to implement, but the estimate is a mean of valid predictions, so it respects bounds, re-aggregates cleanly to other scales, and pairs naturally with cross-fitting.</span>
+<span id="cb14-44"><a href="#cb14-44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-45"><a href="#cb14-45" aria-hidden="true" tabindex="-1"></a>On large samples with good overlap the three agree. The differences appear in finite samples and under poor overlap, which is why TMLE is the usual default for bounded outcomes.</span>
+<span id="cb14-46"><a href="#cb14-46" aria-hidden="true" tabindex="-1"></a>:::</span>
 <span id="cb14-47"><a href="#cb14-47" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-48"><a href="#cb14-48" aria-hidden="true" tabindex="-1"></a>:::{.callout-note}</span>
-<span id="cb14-49"><a href="#cb14-49" aria-hidden="true" tabindex="-1"></a><span class="fu">## What Makes AIPW "Doubly Robust"?</span></span>
+<span id="cb14-48"><a href="#cb14-48" aria-hidden="true" tabindex="-1"></a>::: {.callout-note}</span>
+<span id="cb14-49"><a href="#cb14-49" aria-hidden="true" tabindex="-1"></a><span class="fu">## What is an influence function? (plain version)</span></span>
 <span id="cb14-50"><a href="#cb14-50" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-51"><a href="#cb14-51" aria-hidden="true" tabindex="-1"></a>AIPW augments the G-computation estimator with an inverse-probability-weighted residual correction. The construction guarantees that:</span>
+<span id="cb14-51"><a href="#cb14-51" aria-hidden="true" tabindex="-1"></a>Almost any estimator in this book can be rewritten, to a close approximation, as a simple average of one number per patient. That per-patient number is the patient's value of the **influence function**: it says how far, and in which direction, that single patient pulls the final estimate. Two consequences are all an applied reader needs. The spread of those per-patient pulls is what sets the standard error: take their standard deviation and divide by the square root of the sample size. And an estimator reaches the smallest possible standard error when its influence function is the *efficient* one; TMLE earns that efficiency by nudging the fitted models until the pulls average to zero.</span>
 <span id="cb14-52"><a href="#cb14-52" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-53"><a href="#cb14-53" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>If the **treatment model** is correctly specified (and positivity holds), the IPW correction yields a consistent estimate of the causal effect even when the outcome model is wrong</span>
-<span id="cb14-54"><a href="#cb14-54" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>If the **outcome model** is correctly specified, the correction term has mean zero and the G-computation component does the work</span>
-<span id="cb14-55"><a href="#cb14-55" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>If **both** are correctly specified (and nuisances converge fast enough), the estimator achieves the **semiparametric efficiency bound**, the smallest possible asymptotic variance among regular asymptotically linear estimators</span>
-<span id="cb14-56"><a href="#cb14-56" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-57"><a href="#cb14-57" aria-hidden="true" tabindex="-1"></a>This is the *one-step* idea from semiparametric theory: take a plug-in estimator, add the empirical mean of the EIF correction, and the result is a $\sqrt{n}$-consistent estimator that solves the EIF estimating equation <span class="co">[</span><span class="ot">@robins1994estimation; @bang2005doubly</span><span class="co">]</span>.</span>
-<span id="cb14-58"><a href="#cb14-58" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-59"><a href="#cb14-59" aria-hidden="true" tabindex="-1"></a>Note that "doubly robust" is a *consistency* property: it guarantees the estimator converges to the truth as $n \to \infty$ under the stated conditions, not that it is unbiased in finite samples.</span>
-<span id="cb14-60"><a href="#cb14-60" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb14-61"><a href="#cb14-61" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-62"><a href="#cb14-62" aria-hidden="true" tabindex="-1"></a><span class="fu">## Formula</span></span>
-<span id="cb14-63"><a href="#cb14-63" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-64"><a href="#cb14-64" aria-hidden="true" tabindex="-1"></a>Let:</span>
-<span id="cb14-65"><a href="#cb14-65" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-66"><a href="#cb14-66" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>$g(W) = P(A = 1 \mid W)$ be the propensity score</span>
-<span id="cb14-67"><a href="#cb14-67" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>$m(a, W) = E<span class="co">[</span><span class="ot">Y \mid A = a, W</span><span class="co">]</span>$ be the outcome regression</span>
+<span id="cb14-53"><a href="#cb14-53" aria-hidden="true" tabindex="-1"></a>Every patient casts a vote on the final estimate. Most votes are quiet, but a few loud ones set the margin of error. A two-patient picture makes it concrete. Imagine the estimate is a risk difference and we have computed each patient's influence value. An ordinary patient, well matched on covariates with a predictable outcome, might have an influence value near $0$, so dropping them barely moves the estimate. A high-leverage patient, say a treated patient whose propensity score was only $0.03$ (very unlikely to be treated) and who then had the outcome, might have an influence value of $+18$: that one patient hauls the estimate upward, and a handful like them widen the confidence interval. The standard error is just the standard deviation of these per-patient values over the square root of $n$, so a few large values inflate it. The inference code later in this chapter computes exactly these per-patient numbers.</span>
+<span id="cb14-54"><a href="#cb14-54" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb14-55"><a href="#cb14-55" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-56"><a href="#cb14-56" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-57"><a href="#cb14-57" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-58"><a href="#cb14-58" aria-hidden="true" tabindex="-1"></a><span class="fu"># AIPW: The One-Step Doubly Robust Estimator</span></span>
+<span id="cb14-59"><a href="#cb14-59" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-60"><a href="#cb14-60" aria-hidden="true" tabindex="-1"></a>:::{.callout-note}</span>
+<span id="cb14-61"><a href="#cb14-61" aria-hidden="true" tabindex="-1"></a><span class="fu">## What Makes AIPW "Doubly Robust"?</span></span>
+<span id="cb14-62"><a href="#cb14-62" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-63"><a href="#cb14-63" aria-hidden="true" tabindex="-1"></a>AIPW augments the G-computation estimator with an inverse-probability-weighted residual correction. The construction guarantees that:</span>
+<span id="cb14-64"><a href="#cb14-64" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-65"><a href="#cb14-65" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>If the **treatment model** is correctly specified (and positivity holds), the IPW correction yields a consistent estimate of the causal effect even when the outcome model is wrong</span>
+<span id="cb14-66"><a href="#cb14-66" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>If the **outcome model** is correctly specified, the correction term has mean zero and the G-computation component does the work</span>
+<span id="cb14-67"><a href="#cb14-67" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>If **both** are correctly specified (and nuisances converge fast enough), the estimator achieves the **semiparametric efficiency bound**, the smallest possible asymptotic variance among regular asymptotically linear estimators</span>
 <span id="cb14-68"><a href="#cb14-68" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-69"><a href="#cb14-69" aria-hidden="true" tabindex="-1"></a>Then:</span>
+<span id="cb14-69"><a href="#cb14-69" aria-hidden="true" tabindex="-1"></a>This is the *one-step* idea from semiparametric theory: take a plug-in estimator, add the empirical mean of the EIF correction, and the result is a $\sqrt{n}$-consistent estimator that solves the EIF estimating equation <span class="co">[</span><span class="ot">@robins1994estimation; @bang2005doubly</span><span class="co">]</span>.</span>
 <span id="cb14-70"><a href="#cb14-70" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-71"><a href="#cb14-71" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb14-72"><a href="#cb14-72" aria-hidden="true" tabindex="-1"></a>\hat{\mu}_1 = \frac{1}{n} \sum_i \left<span class="co">[</span><span class="ot"> m(1, W_i) + \frac{A_i}{g(W_i)} \big(Y_i - m(1, W_i)\big) \right</span><span class="co">]</span></span>
-<span id="cb14-73"><a href="#cb14-73" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb14-74"><a href="#cb14-74" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-75"><a href="#cb14-75" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb14-76"><a href="#cb14-76" aria-hidden="true" tabindex="-1"></a>\hat{\mu}_0 = \frac{1}{n} \sum_i \left<span class="co">[</span><span class="ot"> m(0, W_i) + \frac{1 - A_i}{1 - g(W_i)} \big(Y_i - m(0, W_i)\big) \right</span><span class="co">]</span></span>
-<span id="cb14-77"><a href="#cb14-77" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb14-78"><a href="#cb14-78" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-79"><a href="#cb14-79" aria-hidden="true" tabindex="-1"></a>ATE = $\hat{\mu}_1 - \hat{\mu}_0$</span>
+<span id="cb14-71"><a href="#cb14-71" aria-hidden="true" tabindex="-1"></a>Note that "doubly robust" is a *consistency* property: it guarantees the estimator converges to the truth as $n \to \infty$ under the stated conditions, not that it is unbiased in finite samples.</span>
+<span id="cb14-72"><a href="#cb14-72" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb14-73"><a href="#cb14-73" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-74"><a href="#cb14-74" aria-hidden="true" tabindex="-1"></a><span class="fu">## Formula</span></span>
+<span id="cb14-75"><a href="#cb14-75" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-76"><a href="#cb14-76" aria-hidden="true" tabindex="-1"></a>Let:</span>
+<span id="cb14-77"><a href="#cb14-77" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-78"><a href="#cb14-78" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>$g(W) = P(A = 1 \mid W)$ be the propensity score</span>
+<span id="cb14-79"><a href="#cb14-79" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>$m(a, W) = E<span class="co">[</span><span class="ot">Y \mid A = a, W</span><span class="co">]</span>$ be the outcome regression</span>
 <span id="cb14-80"><a href="#cb14-80" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-81"><a href="#cb14-81" aria-hidden="true" tabindex="-1"></a>The structure is *G-computation plus an EIF correction*: the first term, $m(a, W_i)$, is the outcome-model prediction (the G-computation ingredient); the second term is an IPW-weighted residual that corrects any bias in the outcome model. If $m$ is correct, the residuals average to zero and the correction vanishes (we recover G-computation). If $m$ is wrong but $g$ is correct, the IPW correction fixes the bias (we recover IPTW-style behaviour). The "augmentation" in AIPW's name refers exactly to adding this correction to the G-computation plug-in.</span>
+<span id="cb14-81"><a href="#cb14-81" aria-hidden="true" tabindex="-1"></a>Then:</span>
 <span id="cb14-82"><a href="#cb14-82" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-83"><a href="#cb14-83" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb14-84"><a href="#cb14-84" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-85"><a href="#cb14-85" aria-hidden="true" tabindex="-1"></a><span class="fu"># HIV Antiretroviral Therapy Cohort</span></span>
+<span id="cb14-83"><a href="#cb14-83" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-84"><a href="#cb14-84" aria-hidden="true" tabindex="-1"></a>\hat{\mu}_1 = \frac{1}{n} \sum_i \left<span class="co">[</span><span class="ot"> m(1, W_i) + \frac{A_i}{g(W_i)} \big(Y_i - m(1, W_i)\big) \right</span><span class="co">]</span></span>
+<span id="cb14-85"><a href="#cb14-85" aria-hidden="true" tabindex="-1"></a>$$</span>
 <span id="cb14-86"><a href="#cb14-86" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-87"><a href="#cb14-87" aria-hidden="true" tabindex="-1"></a>We use the same point-treatment HAART cohort from @sec-gcomputation and @sec-iptw so that all three estimators (G-computation, IPTW, AIPW/TMLE) can be compared on identical data. The treatment is <span class="in">`ever_haart`</span> (1 = initiated HAART at any point, 0 = never), the outcome is <span class="in">`died`</span>, and we adjust for baseline age, sex, and baseline square-root CD4 count.</span>
-<span id="cb14-88"><a href="#cb14-88" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-91"><a href="#cb14-91" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-92"><a href="#cb14-92" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
-<span id="cb14-93"><a href="#cb14-93" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
-<span id="cb14-94"><a href="#cb14-94" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
-<span id="cb14-95"><a href="#cb14-95" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-96"><a href="#cb14-96" aria-hidden="true" tabindex="-1"></a><span class="fu">download.file</span>(<span class="st">"https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R"</span>, <span class="st">"load-haart-cohort.R"</span>)</span>
-<span id="cb14-97"><a href="#cb14-97" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"load-haart-cohort.R"</span>)</span>
-<span id="cb14-98"><a href="#cb14-98" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> <span class="fu">as_tibble</span>(haart_baseline)</span>
-<span id="cb14-99"><a href="#cb14-99" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="fu">nrow</span>(dat)</span>
-<span id="cb14-100"><a href="#cb14-100" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-101"><a href="#cb14-101" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-102"><a href="#cb14-102" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb14-103"><a href="#cb14-103" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-104"><a href="#cb14-104" aria-hidden="true" tabindex="-1"></a><span class="fu"># Fit Outcome and Propensity Score Models</span></span>
-<span id="cb14-105"><a href="#cb14-105" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-108"><a href="#cb14-108" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-109"><a href="#cb14-109" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
-<span id="cb14-110"><a href="#cb14-110" aria-hidden="true" tabindex="-1"></a>Qmod <span class="ot">&lt;-</span> <span class="fu">glm</span>(died <span class="sc">~</span> ever_haart <span class="sc">+</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
-<span id="cb14-111"><a href="#cb14-111" aria-hidden="true" tabindex="-1"></a>            <span class="at">family =</span> binomial, <span class="at">data =</span> dat)</span>
-<span id="cb14-112"><a href="#cb14-112" aria-hidden="true" tabindex="-1"></a>gmod <span class="ot">&lt;-</span> <span class="fu">glm</span>(ever_haart <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
-<span id="cb14-113"><a href="#cb14-113" aria-hidden="true" tabindex="-1"></a>            <span class="at">family =</span> binomial, <span class="at">data =</span> dat)</span>
-<span id="cb14-114"><a href="#cb14-114" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-115"><a href="#cb14-115" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> dat <span class="sc">%&gt;%</span></span>
-<span id="cb14-116"><a href="#cb14-116" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
-<span id="cb14-117"><a href="#cb14-117" aria-hidden="true" tabindex="-1"></a>    <span class="at">ps =</span> <span class="fu">predict</span>(gmod, <span class="at">type =</span> <span class="st">"response"</span>),</span>
-<span id="cb14-118"><a href="#cb14-118" aria-hidden="true" tabindex="-1"></a>    <span class="at">Q1 =</span> <span class="fu">predict</span>(Qmod, <span class="at">newdata =</span> <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">1</span>), <span class="at">type =</span> <span class="st">"response"</span>),</span>
-<span id="cb14-119"><a href="#cb14-119" aria-hidden="true" tabindex="-1"></a>    <span class="at">Q0 =</span> <span class="fu">predict</span>(Qmod, <span class="at">newdata =</span> <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">0</span>), <span class="at">type =</span> <span class="st">"response"</span>)</span>
-<span id="cb14-120"><a href="#cb14-120" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb14-121"><a href="#cb14-121" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-122"><a href="#cb14-122" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-123"><a href="#cb14-123" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb14-124"><a href="#cb14-124" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-125"><a href="#cb14-125" aria-hidden="true" tabindex="-1"></a><span class="fu"># Compute AIPW Estimator</span></span>
+<span id="cb14-87"><a href="#cb14-87" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-88"><a href="#cb14-88" aria-hidden="true" tabindex="-1"></a>\hat{\mu}_0 = \frac{1}{n} \sum_i \left<span class="co">[</span><span class="ot"> m(0, W_i) + \frac{1 - A_i}{1 - g(W_i)} \big(Y_i - m(0, W_i)\big) \right</span><span class="co">]</span></span>
+<span id="cb14-89"><a href="#cb14-89" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-90"><a href="#cb14-90" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-91"><a href="#cb14-91" aria-hidden="true" tabindex="-1"></a>ATE = $\hat{\mu}_1 - \hat{\mu}_0$</span>
+<span id="cb14-92"><a href="#cb14-92" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-93"><a href="#cb14-93" aria-hidden="true" tabindex="-1"></a>The structure is *G-computation plus an EIF correction*: the first term, $m(a, W_i)$, is the outcome-model prediction (the G-computation ingredient); the second term is an IPW-weighted residual that corrects any bias in the outcome model. If $m$ is correct, the residuals average to zero and the correction vanishes (we recover G-computation). If $m$ is wrong but $g$ is correct, the IPW correction fixes the bias (we recover IPTW-style behaviour). The "augmentation" in AIPW's name refers exactly to adding this correction to the G-computation plug-in.</span>
+<span id="cb14-94"><a href="#cb14-94" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-95"><a href="#cb14-95" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-96"><a href="#cb14-96" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-97"><a href="#cb14-97" aria-hidden="true" tabindex="-1"></a><span class="fu"># HIV Antiretroviral Therapy Cohort</span></span>
+<span id="cb14-98"><a href="#cb14-98" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-99"><a href="#cb14-99" aria-hidden="true" tabindex="-1"></a>We use the same point-treatment HAART cohort from @sec-gcomputation and @sec-iptw so that all three estimators (G-computation, IPTW, AIPW/TMLE) can be compared on identical data. The treatment is <span class="in">`ever_haart`</span> (1 = initiated HAART at any point, 0 = never), the outcome is <span class="in">`died`</span>, and we adjust for baseline age, sex, and baseline square-root CD4 count.</span>
+<span id="cb14-100"><a href="#cb14-100" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-103"><a href="#cb14-103" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-104"><a href="#cb14-104" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
+<span id="cb14-105"><a href="#cb14-105" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
+<span id="cb14-106"><a href="#cb14-106" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
+<span id="cb14-107"><a href="#cb14-107" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-108"><a href="#cb14-108" aria-hidden="true" tabindex="-1"></a><span class="fu">download.file</span>(<span class="st">"https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R"</span>, <span class="st">"load-haart-cohort.R"</span>)</span>
+<span id="cb14-109"><a href="#cb14-109" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"load-haart-cohort.R"</span>)</span>
+<span id="cb14-110"><a href="#cb14-110" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> <span class="fu">as_tibble</span>(haart_baseline)</span>
+<span id="cb14-111"><a href="#cb14-111" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="fu">nrow</span>(dat)</span>
+<span id="cb14-112"><a href="#cb14-112" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-113"><a href="#cb14-113" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-114"><a href="#cb14-114" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-115"><a href="#cb14-115" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-116"><a href="#cb14-116" aria-hidden="true" tabindex="-1"></a><span class="fu"># Fit Outcome and Propensity Score Models</span></span>
+<span id="cb14-117"><a href="#cb14-117" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-120"><a href="#cb14-120" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-121"><a href="#cb14-121" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
+<span id="cb14-122"><a href="#cb14-122" aria-hidden="true" tabindex="-1"></a>Qmod <span class="ot">&lt;-</span> <span class="fu">glm</span>(died <span class="sc">~</span> ever_haart <span class="sc">+</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
+<span id="cb14-123"><a href="#cb14-123" aria-hidden="true" tabindex="-1"></a>            <span class="at">family =</span> binomial, <span class="at">data =</span> dat)</span>
+<span id="cb14-124"><a href="#cb14-124" aria-hidden="true" tabindex="-1"></a>gmod <span class="ot">&lt;-</span> <span class="fu">glm</span>(ever_haart <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
+<span id="cb14-125"><a href="#cb14-125" aria-hidden="true" tabindex="-1"></a>            <span class="at">family =</span> binomial, <span class="at">data =</span> dat)</span>
 <span id="cb14-126"><a href="#cb14-126" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-129"><a href="#cb14-129" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-130"><a href="#cb14-130" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
-<span id="cb14-131"><a href="#cb14-131" aria-hidden="true" tabindex="-1"></a>aipw_est <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, {</span>
-<span id="cb14-132"><a href="#cb14-132" aria-hidden="true" tabindex="-1"></a>  mu1 <span class="ot">&lt;-</span> <span class="fu">mean</span>( Q1 <span class="sc">+</span> ever_haart <span class="sc">*</span> (died <span class="sc">-</span> Q1) <span class="sc">/</span> ps )</span>
-<span id="cb14-133"><a href="#cb14-133" aria-hidden="true" tabindex="-1"></a>  mu0 <span class="ot">&lt;-</span> <span class="fu">mean</span>( Q0 <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">-</span> ever_haart) <span class="sc">*</span> (died <span class="sc">-</span> Q0) <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">-</span> ps) )</span>
-<span id="cb14-134"><a href="#cb14-134" aria-hidden="true" tabindex="-1"></a>  ate <span class="ot">&lt;-</span> mu1 <span class="sc">-</span> mu0</span>
-<span id="cb14-135"><a href="#cb14-135" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(<span class="at">mu1 =</span> mu1, <span class="at">mu0 =</span> mu0, <span class="at">ate =</span> ate)</span>
-<span id="cb14-136"><a href="#cb14-136" aria-hidden="true" tabindex="-1"></a>})</span>
-<span id="cb14-137"><a href="#cb14-137" aria-hidden="true" tabindex="-1"></a>aipw_est</span>
-<span id="cb14-138"><a href="#cb14-138" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-139"><a href="#cb14-139" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-140"><a href="#cb14-140" aria-hidden="true" tabindex="-1"></a>Each AIPW component starts with the outcome-model prediction and adds a weighted residual correction. For instance, <span class="in">`Q1 + ever_haart * (died - Q1) / ps`</span> corrects $m(1, W)$ by upweighting the residual $(\text{died} - Q1)$ for treated individuals. This structure gives AIPW its doubly robust property: even if $Q$ is wrong, the IPW correction fixes the bias (and vice versa).</span>
-<span id="cb14-141"><a href="#cb14-141" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-142"><a href="#cb14-142" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb14-143"><a href="#cb14-143" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-144"><a href="#cb14-144" aria-hidden="true" tabindex="-1"></a><span class="fu"># TMLE: The Substitution Doubly Robust Estimator</span></span>
-<span id="cb14-145"><a href="#cb14-145" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-146"><a href="#cb14-146" aria-hidden="true" tabindex="-1"></a>TMLE solves the same EIF estimating equation as AIPW, but it does so by **modifying $Q$** rather than by adding an external correction. After a small targeted update guided by the propensity score (the "clever covariate"), the substitution estimator $\frac{1}{n}\sum_i <span class="co">[</span><span class="ot">Q^*(1, W_i) - Q^*(0, W_i)</span><span class="co">]</span>$ already solves the EIF equation by construction.</span>
-<span id="cb14-147"><a href="#cb14-147" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-148"><a href="#cb14-148" aria-hidden="true" tabindex="-1"></a>This substitution structure has three practical consequences:</span>
-<span id="cb14-149"><a href="#cb14-149" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-150"><a href="#cb14-150" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>Predicted probabilities always stay in $<span class="co">[</span><span class="ot">0, 1</span><span class="co">]</span>$ (the AIPW correction can push the sum outside the parameter space when propensity scores are extreme)</span>
-<span id="cb14-151"><a href="#cb14-151" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>The estimator is a mean of valid counterfactual predictions, so you can stratify, transform, and re-aggregate without re-deriving anything</span>
-<span id="cb14-152"><a href="#cb14-152" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>It integrates naturally with ensemble machine learning (Super Learner), and CV-TMLE provides valid inference under regularity conditions even when nuisances are estimated with flexible learners <span class="co">[</span><span class="ot">@zheng2011crossvalidated</span><span class="co">]</span></span>
+<span id="cb14-127"><a href="#cb14-127" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> dat <span class="sc">%&gt;%</span></span>
+<span id="cb14-128"><a href="#cb14-128" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
+<span id="cb14-129"><a href="#cb14-129" aria-hidden="true" tabindex="-1"></a>    <span class="at">ps =</span> <span class="fu">predict</span>(gmod, <span class="at">type =</span> <span class="st">"response"</span>),</span>
+<span id="cb14-130"><a href="#cb14-130" aria-hidden="true" tabindex="-1"></a>    <span class="at">Q1 =</span> <span class="fu">predict</span>(Qmod, <span class="at">newdata =</span> <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">1</span>), <span class="at">type =</span> <span class="st">"response"</span>),</span>
+<span id="cb14-131"><a href="#cb14-131" aria-hidden="true" tabindex="-1"></a>    <span class="at">Q0 =</span> <span class="fu">predict</span>(Qmod, <span class="at">newdata =</span> <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">0</span>), <span class="at">type =</span> <span class="st">"response"</span>)</span>
+<span id="cb14-132"><a href="#cb14-132" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb14-133"><a href="#cb14-133" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-134"><a href="#cb14-134" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-135"><a href="#cb14-135" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-136"><a href="#cb14-136" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-137"><a href="#cb14-137" aria-hidden="true" tabindex="-1"></a><span class="fu"># Compute AIPW Estimator</span></span>
+<span id="cb14-138"><a href="#cb14-138" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-141"><a href="#cb14-141" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-142"><a href="#cb14-142" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
+<span id="cb14-143"><a href="#cb14-143" aria-hidden="true" tabindex="-1"></a>aipw_est <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, {</span>
+<span id="cb14-144"><a href="#cb14-144" aria-hidden="true" tabindex="-1"></a>  mu1 <span class="ot">&lt;-</span> <span class="fu">mean</span>( Q1 <span class="sc">+</span> ever_haart <span class="sc">*</span> (died <span class="sc">-</span> Q1) <span class="sc">/</span> ps )</span>
+<span id="cb14-145"><a href="#cb14-145" aria-hidden="true" tabindex="-1"></a>  mu0 <span class="ot">&lt;-</span> <span class="fu">mean</span>( Q0 <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">-</span> ever_haart) <span class="sc">*</span> (died <span class="sc">-</span> Q0) <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">-</span> ps) )</span>
+<span id="cb14-146"><a href="#cb14-146" aria-hidden="true" tabindex="-1"></a>  ate <span class="ot">&lt;-</span> mu1 <span class="sc">-</span> mu0</span>
+<span id="cb14-147"><a href="#cb14-147" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(<span class="at">mu1 =</span> mu1, <span class="at">mu0 =</span> mu0, <span class="at">ate =</span> ate)</span>
+<span id="cb14-148"><a href="#cb14-148" aria-hidden="true" tabindex="-1"></a>})</span>
+<span id="cb14-149"><a href="#cb14-149" aria-hidden="true" tabindex="-1"></a>aipw_est</span>
+<span id="cb14-150"><a href="#cb14-150" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-151"><a href="#cb14-151" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-152"><a href="#cb14-152" aria-hidden="true" tabindex="-1"></a>Each AIPW component starts with the outcome-model prediction and adds a weighted residual correction. For instance, <span class="in">`Q1 + ever_haart * (died - Q1) / ps`</span> corrects $m(1, W)$ by upweighting the residual $(\text{died} - Q1)$ for treated individuals. This structure gives AIPW its doubly robust property: even if $Q$ is wrong, the IPW correction fixes the bias (and vice versa).</span>
 <span id="cb14-153"><a href="#cb14-153" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb14-154"><a href="#cb14-154" aria-hidden="true" tabindex="-1"></a>---</span>
 <span id="cb14-155"><a href="#cb14-155" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-156"><a href="#cb14-156" aria-hidden="true" tabindex="-1"></a><span class="fu"># TMLE Step-by-Step</span></span>
+<span id="cb14-156"><a href="#cb14-156" aria-hidden="true" tabindex="-1"></a><span class="fu"># TMLE: The Substitution Doubly Robust Estimator</span></span>
 <span id="cb14-157"><a href="#cb14-157" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-158"><a href="#cb14-158" aria-hidden="true" tabindex="-1"></a>**Step 1: Fit the initial outcome model (Q).** Fit a model for $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$ and generate initial predictions under both treatment values for each individual: $Q_n^0(1, W_i)$ (predicted outcome if treated) and $Q_n^0(0, W_i)$ (predicted outcome if untreated). These predictions are "initial" because they have not yet been targeted toward the causal parameter of interest.</span>
+<span id="cb14-158"><a href="#cb14-158" aria-hidden="true" tabindex="-1"></a>TMLE solves the same EIF estimating equation as AIPW, but it does so by **modifying $Q$** rather than by adding an external correction. After a small targeted update guided by the propensity score (the "clever covariate"), the substitution estimator $\frac{1}{n}\sum_i <span class="co">[</span><span class="ot">Q^*(1, W_i) - Q^*(0, W_i)</span><span class="co">]</span>$ already solves the EIF equation by construction.</span>
 <span id="cb14-159"><a href="#cb14-159" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-162"><a href="#cb14-162" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-163"><a href="#cb14-163" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
-<span id="cb14-164"><a href="#cb14-164" aria-hidden="true" tabindex="-1"></a>logit <span class="ot">&lt;-</span> <span class="cf">function</span>(p) <span class="fu">log</span>(p<span class="sc">/</span>(<span class="dv">1</span><span class="sc">-</span>p))</span>
-<span id="cb14-165"><a href="#cb14-165" aria-hidden="true" tabindex="-1"></a>expit <span class="ot">&lt;-</span> <span class="cf">function</span>(x) <span class="dv">1</span><span class="sc">/</span>(<span class="dv">1</span><span class="sc">+</span><span class="fu">exp</span>(<span class="sc">-</span>x))</span>
-<span id="cb14-166"><a href="#cb14-166" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-167"><a href="#cb14-167" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 1: Initial Q predictions at observed A</span></span>
-<span id="cb14-168"><a href="#cb14-168" aria-hidden="true" tabindex="-1"></a>Qinit <span class="ot">&lt;-</span> <span class="fu">predict</span>(Qmod, <span class="at">type=</span><span class="st">"response"</span>)</span>
-<span id="cb14-169"><a href="#cb14-169" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-170"><a href="#cb14-170" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-171"><a href="#cb14-171" aria-hidden="true" tabindex="-1"></a>**Step 2: Estimate the propensity score.** The propensity score $g(W) = P(A = 1 \mid W)$ is needed to construct the clever covariate in the next step. We already fit this model above.</span>
-<span id="cb14-172"><a href="#cb14-172" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-175"><a href="#cb14-175" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-176"><a href="#cb14-176" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
-<span id="cb14-177"><a href="#cb14-177" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 2: Propensity scores (already estimated)</span></span>
-<span id="cb14-178"><a href="#cb14-178" aria-hidden="true" tabindex="-1"></a>ps <span class="ot">&lt;-</span> dat<span class="sc">$</span>ps</span>
-<span id="cb14-179"><a href="#cb14-179" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-180"><a href="#cb14-180" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-181"><a href="#cb14-181" aria-hidden="true" tabindex="-1"></a>:::{.callout-note}</span>
-<span id="cb14-182"><a href="#cb14-182" aria-hidden="true" tabindex="-1"></a><span class="fu">## Definition: The Clever Covariate</span></span>
-<span id="cb14-183"><a href="#cb14-183" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-184"><a href="#cb14-184" aria-hidden="true" tabindex="-1"></a>The **[clever covariate](notation.qmd)** $H(A, W)$ is the key ingredient that makes TMLE "targeted." It is derived from the efficient influence function for the ATE:</span>
-<span id="cb14-185"><a href="#cb14-185" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-186"><a href="#cb14-186" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb14-187"><a href="#cb14-187" aria-hidden="true" tabindex="-1"></a>H(A, W) = \frac{A}{g(W)} - \frac{1 - A}{1 - g(W)}</span>
-<span id="cb14-188"><a href="#cb14-188" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb14-189"><a href="#cb14-189" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-190"><a href="#cb14-190" aria-hidden="true" tabindex="-1"></a>For computing the counterfactual means, we also need the treatment-specific components:</span>
-<span id="cb14-191"><a href="#cb14-191" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-192"><a href="#cb14-192" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>$H_1(W) = \frac{1}{g(W)}$ (for the treated potential outcome)</span>
-<span id="cb14-193"><a href="#cb14-193" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>$H_0(W) = \frac{-1}{1 - g(W)}$ (for the control potential outcome)</span>
-<span id="cb14-194"><a href="#cb14-194" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-195"><a href="#cb14-195" aria-hidden="true" tabindex="-1"></a>Think of it as a nudge that pushes hardest exactly where the outcome model is most vulnerable, the patients who got a treatment almost no one like them received. More precisely, the clever covariate is large when the received treatment was unlikely given the covariates: a small $g(W)$ for a treated patient, or a small $1 - g(W)$ for an untreated one. Those are exactly the patients where the outcome model is most likely to be wrong, because few similar patients received the same treatment, so the update leans hardest on them. In this way the clever covariate directs the fluctuation to reduce bias for the specific causal estimand we care about, the ATE.</span>
-<span id="cb14-196"><a href="#cb14-196" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb14-160"><a href="#cb14-160" aria-hidden="true" tabindex="-1"></a>This substitution structure has three practical consequences:</span>
+<span id="cb14-161"><a href="#cb14-161" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-162"><a href="#cb14-162" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>Predicted probabilities always stay in $<span class="co">[</span><span class="ot">0, 1</span><span class="co">]</span>$ (the AIPW correction can push the sum outside the parameter space when propensity scores are extreme)</span>
+<span id="cb14-163"><a href="#cb14-163" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>The estimator is a mean of valid counterfactual predictions, so you can stratify, transform, and re-aggregate without re-deriving anything</span>
+<span id="cb14-164"><a href="#cb14-164" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>It integrates naturally with ensemble machine learning (Super Learner), and CV-TMLE provides valid inference under regularity conditions even when nuisances are estimated with flexible learners <span class="co">[</span><span class="ot">@zheng2011crossvalidated</span><span class="co">]</span></span>
+<span id="cb14-165"><a href="#cb14-165" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-166"><a href="#cb14-166" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-167"><a href="#cb14-167" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-168"><a href="#cb14-168" aria-hidden="true" tabindex="-1"></a><span class="fu"># TMLE Step-by-Step</span></span>
+<span id="cb14-169"><a href="#cb14-169" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-170"><a href="#cb14-170" aria-hidden="true" tabindex="-1"></a>**Step 1: Fit the initial outcome model (Q).** Fit a model for $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$ and generate initial predictions under both treatment values for each individual: $Q_n^0(1, W_i)$ (predicted outcome if treated) and $Q_n^0(0, W_i)$ (predicted outcome if untreated). These predictions are "initial" because they have not yet been targeted toward the causal parameter of interest.</span>
+<span id="cb14-171"><a href="#cb14-171" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-174"><a href="#cb14-174" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-175"><a href="#cb14-175" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
+<span id="cb14-176"><a href="#cb14-176" aria-hidden="true" tabindex="-1"></a>logit <span class="ot">&lt;-</span> <span class="cf">function</span>(p) <span class="fu">log</span>(p<span class="sc">/</span>(<span class="dv">1</span><span class="sc">-</span>p))</span>
+<span id="cb14-177"><a href="#cb14-177" aria-hidden="true" tabindex="-1"></a>expit <span class="ot">&lt;-</span> <span class="cf">function</span>(x) <span class="dv">1</span><span class="sc">/</span>(<span class="dv">1</span><span class="sc">+</span><span class="fu">exp</span>(<span class="sc">-</span>x))</span>
+<span id="cb14-178"><a href="#cb14-178" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-179"><a href="#cb14-179" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 1: Initial Q predictions at observed A</span></span>
+<span id="cb14-180"><a href="#cb14-180" aria-hidden="true" tabindex="-1"></a>Qinit <span class="ot">&lt;-</span> <span class="fu">predict</span>(Qmod, <span class="at">type=</span><span class="st">"response"</span>)</span>
+<span id="cb14-181"><a href="#cb14-181" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-182"><a href="#cb14-182" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-183"><a href="#cb14-183" aria-hidden="true" tabindex="-1"></a>**Step 2: Estimate the propensity score.** The propensity score $g(W) = P(A = 1 \mid W)$ is needed to construct the clever covariate in the next step. We already fit this model above.</span>
+<span id="cb14-184"><a href="#cb14-184" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-187"><a href="#cb14-187" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-188"><a href="#cb14-188" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
+<span id="cb14-189"><a href="#cb14-189" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 2: Propensity scores (already estimated)</span></span>
+<span id="cb14-190"><a href="#cb14-190" aria-hidden="true" tabindex="-1"></a>ps <span class="ot">&lt;-</span> dat<span class="sc">$</span>ps</span>
+<span id="cb14-191"><a href="#cb14-191" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-192"><a href="#cb14-192" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-193"><a href="#cb14-193" aria-hidden="true" tabindex="-1"></a>:::{.callout-note}</span>
+<span id="cb14-194"><a href="#cb14-194" aria-hidden="true" tabindex="-1"></a><span class="fu">## Definition: The Clever Covariate</span></span>
+<span id="cb14-195"><a href="#cb14-195" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-196"><a href="#cb14-196" aria-hidden="true" tabindex="-1"></a>The **[clever covariate](notation.qmd)** $H(A, W)$ is the key ingredient that makes TMLE "targeted." It is derived from the efficient influence function for the ATE:</span>
 <span id="cb14-197"><a href="#cb14-197" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-200"><a href="#cb14-200" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-201"><a href="#cb14-201" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
-<span id="cb14-202"><a href="#cb14-202" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 3: Clever covariate at observed treatment</span></span>
-<span id="cb14-203"><a href="#cb14-203" aria-hidden="true" tabindex="-1"></a>H <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, ever_haart<span class="sc">/</span>ps <span class="sc">-</span> (<span class="dv">1</span><span class="sc">-</span>ever_haart)<span class="sc">/</span>(<span class="dv">1</span><span class="sc">-</span>ps))  <span class="co"># &lt;1&gt;</span></span>
-<span id="cb14-204"><a href="#cb14-204" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-205"><a href="#cb14-205" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>$H(A,W)$ is derived from the efficient influence function for the ATE. For treated observations ($A=1$) it equals $1/g(W)$; for controls ($A=0$) it equals $-1/(1-g(W))$. This combined form simultaneously handles both arms and directs the fluctuation step specifically toward the ATE estimand rather than any other parameter.</span>
+<span id="cb14-198"><a href="#cb14-198" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-199"><a href="#cb14-199" aria-hidden="true" tabindex="-1"></a>H(A, W) = \frac{A}{g(W)} - \frac{1 - A}{1 - g(W)}</span>
+<span id="cb14-200"><a href="#cb14-200" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-201"><a href="#cb14-201" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-202"><a href="#cb14-202" aria-hidden="true" tabindex="-1"></a>For computing the counterfactual means, we also need the treatment-specific components:</span>
+<span id="cb14-203"><a href="#cb14-203" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-204"><a href="#cb14-204" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>$H_1(W) = \frac{1}{g(W)}$ (for the treated potential outcome)</span>
+<span id="cb14-205"><a href="#cb14-205" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>$H_0(W) = \frac{-1}{1 - g(W)}$ (for the control potential outcome)</span>
 <span id="cb14-206"><a href="#cb14-206" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-207"><a href="#cb14-207" aria-hidden="true" tabindex="-1"></a>**Step 4: Fit the fluctuation model and update predictions.** This is the critical "targeting" step, and it is where TMLE structurally diverges from AIPW. Instead of *adding* the EIF correction to the G-computation estimate (the AIPW recipe), we use the propensity score (via the clever covariate) to *update Q* until the correction term vanishes inside the substitution estimator.</span>
-<span id="cb14-208"><a href="#cb14-208" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-209"><a href="#cb14-209" aria-hidden="true" tabindex="-1"></a>We fit a logistic regression of $Y$ on $H$ with the initial logit-predictions as an offset:</span>
-<span id="cb14-210"><a href="#cb14-210" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-211"><a href="#cb14-211" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb14-212"><a href="#cb14-212" aria-hidden="true" tabindex="-1"></a>\text{logit}(E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>) = \text{logit}(Q_n^0(A, W)) + \epsilon \cdot H(A, W)</span>
-<span id="cb14-213"><a href="#cb14-213" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb14-214"><a href="#cb14-214" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-215"><a href="#cb14-215" aria-hidden="true" tabindex="-1"></a>The estimated $\hat{\epsilon}$ is then used to **update** (fluctuate) the initial predictions. This fluctuation must be applied to the counterfactual predictions $Q_n^0(1, W)$ and $Q_n^0(0, W)$ using their respective clever covariates $H_1$ and $H_0$. This step ensures the final estimates solve the efficient influence function equation, which is what gives TMLE its optimal statistical properties.</span>
-<span id="cb14-216"><a href="#cb14-216" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-217"><a href="#cb14-217" aria-hidden="true" tabindex="-1"></a>The targeting step is not trying to improve prediction in general. It is adjusting the initial outcome predictions specifically to reduce bias for the ATE. A well-calibrated prediction model might predict individual outcomes accurately but still produce a biased ATE when predictions are averaged. The fluctuation step corrects for exactly this discrepancy by incorporating information from the propensity score.</span>
+<span id="cb14-207"><a href="#cb14-207" aria-hidden="true" tabindex="-1"></a>Think of it as a nudge that pushes hardest exactly where the outcome model is most vulnerable, the patients who got a treatment almost no one like them received. More precisely, the clever covariate is large when the received treatment was unlikely given the covariates: a small $g(W)$ for a treated patient, or a small $1 - g(W)$ for an untreated one. Those are exactly the patients where the outcome model is most likely to be wrong, because few similar patients received the same treatment, so the update leans hardest on them. In this way the clever covariate directs the fluctuation to reduce bias for the specific causal estimand we care about, the ATE.</span>
+<span id="cb14-208"><a href="#cb14-208" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb14-209"><a href="#cb14-209" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-212"><a href="#cb14-212" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-213"><a href="#cb14-213" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
+<span id="cb14-214"><a href="#cb14-214" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 3: Clever covariate at observed treatment</span></span>
+<span id="cb14-215"><a href="#cb14-215" aria-hidden="true" tabindex="-1"></a>H <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, ever_haart<span class="sc">/</span>ps <span class="sc">-</span> (<span class="dv">1</span><span class="sc">-</span>ever_haart)<span class="sc">/</span>(<span class="dv">1</span><span class="sc">-</span>ps))  <span class="co"># &lt;1&gt;</span></span>
+<span id="cb14-216"><a href="#cb14-216" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-217"><a href="#cb14-217" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>$H(A,W)$ is derived from the efficient influence function for the ATE. For treated observations ($A=1$) it equals $1/g(W)$; for controls ($A=0$) it equals $-1/(1-g(W))$. This combined form simultaneously handles both arms and directs the fluctuation step specifically toward the ATE estimand rather than any other parameter.</span>
 <span id="cb14-218"><a href="#cb14-218" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-221"><a href="#cb14-221" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-222"><a href="#cb14-222" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
-<span id="cb14-223"><a href="#cb14-223" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 4: Fluctuation model</span></span>
-<span id="cb14-224"><a href="#cb14-224" aria-hidden="true" tabindex="-1"></a>epsilon <span class="ot">&lt;-</span> <span class="fu">glm</span>(dat<span class="sc">$</span>died <span class="sc">~</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">+</span> <span class="fu">offset</span>(<span class="fu">logit</span>(Qinit)) <span class="sc">+</span> H,  <span class="co"># &lt;1&gt;</span></span>
-<span id="cb14-225"><a href="#cb14-225" aria-hidden="true" tabindex="-1"></a>               <span class="at">family =</span> binomial)<span class="sc">$</span>coef                     <span class="co"># &lt;2&gt;</span></span>
-<span id="cb14-226"><a href="#cb14-226" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-227"><a href="#cb14-227" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>The <span class="in">`-1`</span> suppresses the intercept; <span class="in">`offset(logit(Qinit))`</span> fixes the initial Q predictions on the logit scale so only the coefficient on <span class="in">`H`</span> (the fluctuation parameter ε) is estimated</span>
-<span id="cb14-228"><a href="#cb14-228" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>Logistic family keeps the update on the probability scale; <span class="in">`.coef`</span> extracts the single ε; a small number close to zero means the initial Q needed little correction</span>
-<span id="cb14-229"><a href="#cb14-229" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-230"><a href="#cb14-230" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb14-231"><a href="#cb14-231" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-232"><a href="#cb14-232" aria-hidden="true" tabindex="-1"></a><span class="fu"># Counterfactual Predictions for TMLE</span></span>
-<span id="cb14-233"><a href="#cb14-233" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-236"><a href="#cb14-236" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-237"><a href="#cb14-237" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
-<span id="cb14-238"><a href="#cb14-238" aria-hidden="true" tabindex="-1"></a><span class="co"># Get initial (pre-fluctuation) predictions under each treatment</span></span>
-<span id="cb14-239"><a href="#cb14-239" aria-hidden="true" tabindex="-1"></a>Q1_init <span class="ot">&lt;-</span> <span class="fu">predict</span>(Qmod, <span class="at">newdata =</span> <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">1</span>), <span class="at">type=</span><span class="st">"response"</span>)</span>
-<span id="cb14-240"><a href="#cb14-240" aria-hidden="true" tabindex="-1"></a>Q0_init <span class="ot">&lt;-</span> <span class="fu">predict</span>(Qmod, <span class="at">newdata =</span> <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">0</span>), <span class="at">type=</span><span class="st">"response"</span>)</span>
+<span id="cb14-219"><a href="#cb14-219" aria-hidden="true" tabindex="-1"></a>**Step 4: Fit the fluctuation model and update predictions.** This is the critical "targeting" step, and it is where TMLE structurally diverges from AIPW. Instead of *adding* the EIF correction to the G-computation estimate (the AIPW recipe), we use the propensity score (via the clever covariate) to *update Q* until the correction term vanishes inside the substitution estimator.</span>
+<span id="cb14-220"><a href="#cb14-220" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-221"><a href="#cb14-221" aria-hidden="true" tabindex="-1"></a>We fit a logistic regression of $Y$ on $H$ with the initial logit-predictions as an offset:</span>
+<span id="cb14-222"><a href="#cb14-222" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-223"><a href="#cb14-223" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-224"><a href="#cb14-224" aria-hidden="true" tabindex="-1"></a>\text{logit}(E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>) = \text{logit}(Q_n^0(A, W)) + \epsilon \cdot H(A, W)</span>
+<span id="cb14-225"><a href="#cb14-225" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-226"><a href="#cb14-226" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-227"><a href="#cb14-227" aria-hidden="true" tabindex="-1"></a>The estimated $\hat{\epsilon}$ is then used to **update** (fluctuate) the initial predictions. This fluctuation must be applied to the counterfactual predictions $Q_n^0(1, W)$ and $Q_n^0(0, W)$ using their respective clever covariates $H_1$ and $H_0$. This step ensures the final estimates solve the efficient influence function equation, which is what gives TMLE its optimal statistical properties.</span>
+<span id="cb14-228"><a href="#cb14-228" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-229"><a href="#cb14-229" aria-hidden="true" tabindex="-1"></a>The targeting step is not trying to improve prediction in general. It is adjusting the initial outcome predictions specifically to reduce bias for the ATE. A well-calibrated prediction model might predict individual outcomes accurately but still produce a biased ATE when predictions are averaged. The fluctuation step corrects for exactly this discrepancy by incorporating information from the propensity score.</span>
+<span id="cb14-230"><a href="#cb14-230" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-233"><a href="#cb14-233" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-234"><a href="#cb14-234" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
+<span id="cb14-235"><a href="#cb14-235" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 4: Fluctuation model</span></span>
+<span id="cb14-236"><a href="#cb14-236" aria-hidden="true" tabindex="-1"></a>epsilon <span class="ot">&lt;-</span> <span class="fu">glm</span>(dat<span class="sc">$</span>died <span class="sc">~</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">+</span> <span class="fu">offset</span>(<span class="fu">logit</span>(Qinit)) <span class="sc">+</span> H,  <span class="co"># &lt;1&gt;</span></span>
+<span id="cb14-237"><a href="#cb14-237" aria-hidden="true" tabindex="-1"></a>               <span class="at">family =</span> binomial)<span class="sc">$</span>coef                     <span class="co"># &lt;2&gt;</span></span>
+<span id="cb14-238"><a href="#cb14-238" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-239"><a href="#cb14-239" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>The <span class="in">`-1`</span> suppresses the intercept; <span class="in">`offset(logit(Qinit))`</span> fixes the initial Q predictions on the logit scale so only the coefficient on <span class="in">`H`</span> (the fluctuation parameter ε) is estimated</span>
+<span id="cb14-240"><a href="#cb14-240" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>Logistic family keeps the update on the probability scale; <span class="in">`.coef`</span> extracts the single ε; a small number close to zero means the initial Q needed little correction</span>
 <span id="cb14-241"><a href="#cb14-241" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-242"><a href="#cb14-242" aria-hidden="true" tabindex="-1"></a><span class="co"># Clever covariates for counterfactual treatment values</span></span>
-<span id="cb14-243"><a href="#cb14-243" aria-hidden="true" tabindex="-1"></a>H1 <span class="ot">&lt;-</span> <span class="dv">1</span> <span class="sc">/</span> ps          <span class="co"># &lt;1&gt;</span></span>
-<span id="cb14-244"><a href="#cb14-244" aria-hidden="true" tabindex="-1"></a>H0 <span class="ot">&lt;-</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">-</span> ps)   <span class="co"># &lt;1&gt;</span></span>
+<span id="cb14-242"><a href="#cb14-242" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-243"><a href="#cb14-243" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-244"><a href="#cb14-244" aria-hidden="true" tabindex="-1"></a><span class="fu"># Counterfactual Predictions for TMLE</span></span>
 <span id="cb14-245"><a href="#cb14-245" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-246"><a href="#cb14-246" aria-hidden="true" tabindex="-1"></a><span class="co"># Apply the fluctuation to counterfactual predictions</span></span>
-<span id="cb14-247"><a href="#cb14-247" aria-hidden="true" tabindex="-1"></a>Q1_star <span class="ot">&lt;-</span> <span class="fu">plogis</span>(<span class="fu">logit</span>(Q1_init) <span class="sc">+</span> epsilon <span class="sc">*</span> H1)  <span class="co"># &lt;2&gt;</span></span>
-<span id="cb14-248"><a href="#cb14-248" aria-hidden="true" tabindex="-1"></a>Q0_star <span class="ot">&lt;-</span> <span class="fu">plogis</span>(<span class="fu">logit</span>(Q0_init) <span class="sc">+</span> epsilon <span class="sc">*</span> H0)  <span class="co"># &lt;2&gt;</span></span>
-<span id="cb14-249"><a href="#cb14-249" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-250"><a href="#cb14-250" aria-hidden="true" tabindex="-1"></a><span class="co"># TMLE ATE estimate</span></span>
-<span id="cb14-251"><a href="#cb14-251" aria-hidden="true" tabindex="-1"></a>tmle_ate <span class="ot">&lt;-</span> <span class="fu">mean</span>(Q1_star) <span class="sc">-</span> <span class="fu">mean</span>(Q0_star)  <span class="co"># &lt;3&gt;</span></span>
-<span id="cb14-252"><a href="#cb14-252" aria-hidden="true" tabindex="-1"></a>tmle_ate</span>
-<span id="cb14-253"><a href="#cb14-253" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-254"><a href="#cb14-254" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>Treatment-arm-specific clever covariates: $H_1(W) = 1/g(W)$ targets the treated potential outcome; $H_0(W) = -1/(1-g(W))$ targets the control potential outcome. These must be evaluated at the *counterfactual* treatment value, not the observed one.</span>
-<span id="cb14-255"><a href="#cb14-255" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>Apply the fluctuation on the logit scale, then <span class="in">`plogis()`</span> maps back to probability; guaranteeing all targeted predictions stay in $<span class="co">[</span><span class="ot">0,1</span><span class="co">]</span>$, unlike AIPW which can violate these bounds</span>
-<span id="cb14-256"><a href="#cb14-256" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>The TMLE **substitution estimator**: simply take the sample mean of each arm's targeted predictions. No explicit weighting needed; the clever covariate already incorporated the propensity score.</span>
+<span id="cb14-248"><a href="#cb14-248" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-249"><a href="#cb14-249" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
+<span id="cb14-250"><a href="#cb14-250" aria-hidden="true" tabindex="-1"></a><span class="co"># Get initial (pre-fluctuation) predictions under each treatment</span></span>
+<span id="cb14-251"><a href="#cb14-251" aria-hidden="true" tabindex="-1"></a>Q1_init <span class="ot">&lt;-</span> <span class="fu">predict</span>(Qmod, <span class="at">newdata =</span> <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">1</span>), <span class="at">type=</span><span class="st">"response"</span>)</span>
+<span id="cb14-252"><a href="#cb14-252" aria-hidden="true" tabindex="-1"></a>Q0_init <span class="ot">&lt;-</span> <span class="fu">predict</span>(Qmod, <span class="at">newdata =</span> <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">0</span>), <span class="at">type=</span><span class="st">"response"</span>)</span>
+<span id="cb14-253"><a href="#cb14-253" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-254"><a href="#cb14-254" aria-hidden="true" tabindex="-1"></a><span class="co"># Clever covariates for counterfactual treatment values</span></span>
+<span id="cb14-255"><a href="#cb14-255" aria-hidden="true" tabindex="-1"></a>H1 <span class="ot">&lt;-</span> <span class="dv">1</span> <span class="sc">/</span> ps          <span class="co"># &lt;1&gt;</span></span>
+<span id="cb14-256"><a href="#cb14-256" aria-hidden="true" tabindex="-1"></a>H0 <span class="ot">&lt;-</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">-</span> ps)   <span class="co"># &lt;1&gt;</span></span>
 <span id="cb14-257"><a href="#cb14-257" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-258"><a href="#cb14-258" aria-hidden="true" tabindex="-1"></a>The initial outcome and propensity score models do not have to be simple GLMs. They can be estimated with Super Learner, an ensemble machine learning approach covered in the next chapter, which reduces sensitivity to model misspecification.</span>
-<span id="cb14-259"><a href="#cb14-259" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-260"><a href="#cb14-260" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-258"><a href="#cb14-258" aria-hidden="true" tabindex="-1"></a><span class="co"># Apply the fluctuation to counterfactual predictions</span></span>
+<span id="cb14-259"><a href="#cb14-259" aria-hidden="true" tabindex="-1"></a>Q1_star <span class="ot">&lt;-</span> <span class="fu">plogis</span>(<span class="fu">logit</span>(Q1_init) <span class="sc">+</span> epsilon <span class="sc">*</span> H1)  <span class="co"># &lt;2&gt;</span></span>
+<span id="cb14-260"><a href="#cb14-260" aria-hidden="true" tabindex="-1"></a>Q0_star <span class="ot">&lt;-</span> <span class="fu">plogis</span>(<span class="fu">logit</span>(Q0_init) <span class="sc">+</span> epsilon <span class="sc">*</span> H0)  <span class="co"># &lt;2&gt;</span></span>
 <span id="cb14-261"><a href="#cb14-261" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-262"><a href="#cb14-262" aria-hidden="true" tabindex="-1"></a><span class="fu"># TMLE Inference: Standard Errors and Confidence Intervals</span></span>
-<span id="cb14-263"><a href="#cb14-263" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-264"><a href="#cb14-264" aria-hidden="true" tabindex="-1"></a>A major advantage of TMLE is that inference follows directly from the **efficient influence function (EIF)**. Using the clever covariate notation from Section 7, where $H(A, W) = A/g(W) - (1-A)/(1-g(W))$, the EIF for the ATE at the TMLE fit can be written in a single unified form:</span>
-<span id="cb14-265"><a href="#cb14-265" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-266"><a href="#cb14-266" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb14-267"><a href="#cb14-267" aria-hidden="true" tabindex="-1"></a>D_i = H(A_i, W_i)\big(Y_i - Q^*(A_i, W_i)\big) + Q^*(1, W_i) - Q^*(0, W_i) - \hat{\psi}</span>
-<span id="cb14-268"><a href="#cb14-268" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-262"><a href="#cb14-262" aria-hidden="true" tabindex="-1"></a><span class="co"># TMLE ATE estimate</span></span>
+<span id="cb14-263"><a href="#cb14-263" aria-hidden="true" tabindex="-1"></a>tmle_ate <span class="ot">&lt;-</span> <span class="fu">mean</span>(Q1_star) <span class="sc">-</span> <span class="fu">mean</span>(Q0_star)  <span class="co"># &lt;3&gt;</span></span>
+<span id="cb14-264"><a href="#cb14-264" aria-hidden="true" tabindex="-1"></a>tmle_ate</span>
+<span id="cb14-265"><a href="#cb14-265" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-266"><a href="#cb14-266" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>Treatment-arm-specific clever covariates: $H_1(W) = 1/g(W)$ targets the treated potential outcome; $H_0(W) = -1/(1-g(W))$ targets the control potential outcome. These must be evaluated at the *counterfactual* treatment value, not the observed one.</span>
+<span id="cb14-267"><a href="#cb14-267" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>Apply the fluctuation on the logit scale, then <span class="in">`plogis()`</span> maps back to probability; guaranteeing all targeted predictions stay in $<span class="co">[</span><span class="ot">0,1</span><span class="co">]</span>$, unlike AIPW which can violate these bounds</span>
+<span id="cb14-268"><a href="#cb14-268" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>The TMLE **substitution estimator**: simply take the sample mean of each arm's targeted predictions. No explicit weighting needed; the clever covariate already incorporated the propensity score.</span>
 <span id="cb14-269"><a href="#cb14-269" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-270"><a href="#cb14-270" aria-hidden="true" tabindex="-1"></a>Equivalently, expanding $H$ into its treatment-arm-specific components $H_1(W) = 1/g(W)$ and $H_0(W) = -1/(1-g(W))$ (which already include the sign for each arm):</span>
+<span id="cb14-270"><a href="#cb14-270" aria-hidden="true" tabindex="-1"></a>The initial outcome and propensity score models do not have to be simple GLMs. They can be estimated with Super Learner, an ensemble machine learning approach covered in the next chapter, which reduces sensitivity to model misspecification.</span>
 <span id="cb14-271"><a href="#cb14-271" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-272"><a href="#cb14-272" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb14-273"><a href="#cb14-273" aria-hidden="true" tabindex="-1"></a>D_i = \frac{A_i}{e(W_i)}\big(Y_i - Q_1^*(W_i)\big) - \frac{1-A_i}{1-e(W_i)}\big(Y_i - Q_0^*(W_i)\big) + Q_1^*(W_i) - Q_0^*(W_i) - \hat{\psi}</span>
-<span id="cb14-274"><a href="#cb14-274" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-272"><a href="#cb14-272" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-273"><a href="#cb14-273" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-274"><a href="#cb14-274" aria-hidden="true" tabindex="-1"></a><span class="fu"># TMLE Inference: Standard Errors and Confidence Intervals</span></span>
 <span id="cb14-275"><a href="#cb14-275" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-276"><a href="#cb14-276" aria-hidden="true" tabindex="-1"></a>where $\hat{\psi}$ is the TMLE ATE estimate. The variance of the ATE is estimated by the sample variance of the EIF divided by $n$: $\hat{\sigma}^2 = \frac{1}{n}\sum_i D_i^2$.</span>
+<span id="cb14-276"><a href="#cb14-276" aria-hidden="true" tabindex="-1"></a>A major advantage of TMLE is that inference follows directly from the **efficient influence function (EIF)**. Using the clever covariate notation from Section 7, where $H(A, W) = A/g(W) - (1-A)/(1-g(W))$, the EIF for the ATE at the TMLE fit can be written in a single unified form:</span>
 <span id="cb14-277"><a href="#cb14-277" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-278"><a href="#cb14-278" aria-hidden="true" tabindex="-1"></a>The same EIF underlies AIPW's variance estimator, which is the deeper reason both estimators have the same asymptotic distribution. They differ in how they *form* the point estimate, not in the influence function used for inference.</span>
-<span id="cb14-279"><a href="#cb14-279" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-280"><a href="#cb14-280" aria-hidden="true" tabindex="-1"></a>::: {.callout-important}</span>
-<span id="cb14-281"><a href="#cb14-281" aria-hidden="true" tabindex="-1"></a><span class="fu">## When is EIF-based inference valid?</span></span>
-<span id="cb14-282"><a href="#cb14-282" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-283"><a href="#cb14-283" aria-hidden="true" tabindex="-1"></a>The EIF-based variance estimator and resulting Wald-type confidence intervals are asymptotically valid when (i) at least one nuisance model is consistently estimated, (ii) positivity holds, and (iii) certain regularity/rate conditions are met. When **data-adaptive or machine learning** methods are used for nuisance estimation, these conditions require **cross-fitting** (sample-splitting) or **CV-TMLE** to avoid empirical process conditions (Donsker class membership) that flexible learners typically violate. In the <span class="in">`tmle3`</span> and <span class="in">`drtmle`</span> R packages, cross-fitting is available; the classic <span class="in">`tmle`</span> package does not cross-fit by default but remains valid when the Super Learner library is not too aggressive (e.g., excludes highly adaptive learners like HAL without cross-fitting). See @zheng2011crossvalidated for the theoretical foundations.</span>
-<span id="cb14-284"><a href="#cb14-284" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb14-285"><a href="#cb14-285" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-288"><a href="#cb14-288" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-289"><a href="#cb14-289" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
-<span id="cb14-290"><a href="#cb14-290" aria-hidden="true" tabindex="-1"></a><span class="co"># Observed outcomes</span></span>
-<span id="cb14-291"><a href="#cb14-291" aria-hidden="true" tabindex="-1"></a>Y_obs <span class="ot">&lt;-</span> dat<span class="sc">$</span>died</span>
-<span id="cb14-292"><a href="#cb14-292" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-293"><a href="#cb14-293" aria-hidden="true" tabindex="-1"></a><span class="co"># EIF (efficient influence function) components</span></span>
-<span id="cb14-294"><a href="#cb14-294" aria-hidden="true" tabindex="-1"></a><span class="co"># For treated: use Q1_star; for control: use Q0_star</span></span>
-<span id="cb14-295"><a href="#cb14-295" aria-hidden="true" tabindex="-1"></a><span class="co"># But we need Q* at the OBSERVED A for the residual terms</span></span>
-<span id="cb14-296"><a href="#cb14-296" aria-hidden="true" tabindex="-1"></a>Qstar_obs <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(dat<span class="sc">$</span>ever_haart <span class="sc">==</span> <span class="dv">1</span>, Q1_star, Q0_star)  <span class="co"># &lt;1&gt;</span></span>
-<span id="cb14-297"><a href="#cb14-297" aria-hidden="true" tabindex="-1"></a>H_obs <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(dat<span class="sc">$</span>ever_haart <span class="sc">==</span> <span class="dv">1</span>, H1, H0)                 <span class="co"># &lt;1&gt;</span></span>
-<span id="cb14-298"><a href="#cb14-298" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-299"><a href="#cb14-299" aria-hidden="true" tabindex="-1"></a><span class="co"># Efficient influence function for each observation</span></span>
-<span id="cb14-300"><a href="#cb14-300" aria-hidden="true" tabindex="-1"></a>EIC <span class="ot">&lt;-</span> H_obs <span class="sc">*</span> (Y_obs <span class="sc">-</span> Qstar_obs) <span class="sc">+</span> Q1_star <span class="sc">-</span> Q0_star <span class="sc">-</span> tmle_ate  <span class="co"># &lt;2&gt;</span></span>
-<span id="cb14-301"><a href="#cb14-301" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-302"><a href="#cb14-302" aria-hidden="true" tabindex="-1"></a><span class="co"># Standard error and 95% CI</span></span>
-<span id="cb14-303"><a href="#cb14-303" aria-hidden="true" tabindex="-1"></a>tmle_se <span class="ot">&lt;-</span> <span class="fu">sqrt</span>(<span class="fu">var</span>(EIC) <span class="sc">/</span> n)  <span class="co"># &lt;3&gt;</span></span>
-<span id="cb14-304"><a href="#cb14-304" aria-hidden="true" tabindex="-1"></a>ci_lower <span class="ot">&lt;-</span> tmle_ate <span class="sc">-</span> <span class="fl">1.96</span> <span class="sc">*</span> tmle_se</span>
-<span id="cb14-305"><a href="#cb14-305" aria-hidden="true" tabindex="-1"></a>ci_upper <span class="ot">&lt;-</span> tmle_ate <span class="sc">+</span> <span class="fl">1.96</span> <span class="sc">*</span> tmle_se</span>
-<span id="cb14-306"><a href="#cb14-306" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-307"><a href="#cb14-307" aria-hidden="true" tabindex="-1"></a><span class="fu">tibble</span>(</span>
-<span id="cb14-308"><a href="#cb14-308" aria-hidden="true" tabindex="-1"></a>  <span class="at">Estimate =</span> tmle_ate,</span>
-<span id="cb14-309"><a href="#cb14-309" aria-hidden="true" tabindex="-1"></a>  <span class="at">SE =</span> tmle_se,</span>
-<span id="cb14-310"><a href="#cb14-310" aria-hidden="true" tabindex="-1"></a>  <span class="at">CI_lower =</span> ci_lower,</span>
-<span id="cb14-311"><a href="#cb14-311" aria-hidden="true" tabindex="-1"></a>  <span class="at">CI_upper =</span> ci_upper</span>
-<span id="cb14-312"><a href="#cb14-312" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb14-313"><a href="#cb14-313" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-314"><a href="#cb14-314" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>Select the targeted Q prediction and clever covariate at each observation's *observed* treatment value; needed to form the IPW-weighted residual term that corrects for outcome model error</span>
-<span id="cb14-315"><a href="#cb14-315" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>The EIF has two parts: (a) $H(A,W)(Y - Q^*)$; an IPW-weighted residual that corrects any outcome model bias, and (b) $(Q_1^* - Q_0^* - \hat\psi)$; the centered substitution component. When the fluctuation step correctly solved the EIF equation, the sample mean of the EIF is exactly zero.</span>
-<span id="cb14-316"><a href="#cb14-316" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>The EIF variance divided by $n$ yields the semiparametric efficient variance; this is valid even when machine learning is used for nuisance models (with appropriate cross-fitting)</span>
-<span id="cb14-317"><a href="#cb14-317" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-318"><a href="#cb14-318" aria-hidden="true" tabindex="-1"></a>The EIF-based standard error is a key output of TMLE. Because the fluctuation step solves the EIF estimating equation, the resulting confidence interval achieves approximately correct coverage under regularity conditions, even when machine learning is used for the nuisance models (provided cross-fitting or other sample-splitting techniques are employed). If the confidence interval excludes zero, we have evidence that the treatment has a non-null causal effect on the outcome at the 95% confidence level.</span>
-<span id="cb14-319"><a href="#cb14-319" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-320"><a href="#cb14-320" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb14-321"><a href="#cb14-321" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-322"><a href="#cb14-322" aria-hidden="true" tabindex="-1"></a><span class="fu"># AIPW vs TMLE: A Detailed Comparison</span></span>
-<span id="cb14-323"><a href="#cb14-323" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-324"><a href="#cb14-324" aria-hidden="true" tabindex="-1"></a>The chapter opened with the claim that AIPW and TMLE are two roads to the same destination. With both estimators now in hand, we can be precise about what is shared and what is not.</span>
-<span id="cb14-325"><a href="#cb14-325" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-326"><a href="#cb14-326" aria-hidden="true" tabindex="-1"></a><span class="fu">## What is the same</span></span>
-<span id="cb14-327"><a href="#cb14-327" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-328"><a href="#cb14-328" aria-hidden="true" tabindex="-1"></a>Both AIPW and TMLE are constructed from the **same efficient influence function** for the ATE. As a direct consequence:</span>
+<span id="cb14-278"><a href="#cb14-278" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-279"><a href="#cb14-279" aria-hidden="true" tabindex="-1"></a>D_i = H(A_i, W_i)\big(Y_i - Q^*(A_i, W_i)\big) + Q^*(1, W_i) - Q^*(0, W_i) - \hat{\psi}</span>
+<span id="cb14-280"><a href="#cb14-280" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-281"><a href="#cb14-281" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-282"><a href="#cb14-282" aria-hidden="true" tabindex="-1"></a>Equivalently, expanding $H$ into its treatment-arm-specific components $H_1(W) = 1/g(W)$ and $H_0(W) = -1/(1-g(W))$ (which already include the sign for each arm):</span>
+<span id="cb14-283"><a href="#cb14-283" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-284"><a href="#cb14-284" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-285"><a href="#cb14-285" aria-hidden="true" tabindex="-1"></a>D_i = \frac{A_i}{e(W_i)}\big(Y_i - Q_1^*(W_i)\big) - \frac{1-A_i}{1-e(W_i)}\big(Y_i - Q_0^*(W_i)\big) + Q_1^*(W_i) - Q_0^*(W_i) - \hat{\psi}</span>
+<span id="cb14-286"><a href="#cb14-286" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb14-287"><a href="#cb14-287" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-288"><a href="#cb14-288" aria-hidden="true" tabindex="-1"></a>where $\hat{\psi}$ is the TMLE ATE estimate. The variance of the ATE is estimated by the sample variance of the EIF divided by $n$: $\hat{\sigma}^2 = \frac{1}{n}\sum_i D_i^2$.</span>
+<span id="cb14-289"><a href="#cb14-289" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-290"><a href="#cb14-290" aria-hidden="true" tabindex="-1"></a>The same EIF underlies AIPW's variance estimator, which is the deeper reason both estimators have the same asymptotic distribution. They differ in how they *form* the point estimate, not in the influence function used for inference.</span>
+<span id="cb14-291"><a href="#cb14-291" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-292"><a href="#cb14-292" aria-hidden="true" tabindex="-1"></a>::: {.callout-important}</span>
+<span id="cb14-293"><a href="#cb14-293" aria-hidden="true" tabindex="-1"></a><span class="fu">## When is EIF-based inference valid?</span></span>
+<span id="cb14-294"><a href="#cb14-294" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-295"><a href="#cb14-295" aria-hidden="true" tabindex="-1"></a>The EIF-based variance estimator and resulting Wald-type confidence intervals are asymptotically valid when (i) at least one nuisance model is consistently estimated, (ii) positivity holds, and (iii) certain regularity/rate conditions are met. When **data-adaptive or machine learning** methods are used for nuisance estimation, these conditions require **cross-fitting** (sample-splitting) or **CV-TMLE** to avoid empirical process conditions (Donsker class membership) that flexible learners typically violate. In the <span class="in">`tmle3`</span> and <span class="in">`drtmle`</span> R packages, cross-fitting is available; the classic <span class="in">`tmle`</span> package does not cross-fit by default but remains valid when the Super Learner library is not too aggressive (e.g., excludes highly adaptive learners like HAL without cross-fitting). See @zheng2011crossvalidated for the theoretical foundations.</span>
+<span id="cb14-296"><a href="#cb14-296" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb14-297"><a href="#cb14-297" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-300"><a href="#cb14-300" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-301"><a href="#cb14-301" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
+<span id="cb14-302"><a href="#cb14-302" aria-hidden="true" tabindex="-1"></a><span class="co"># Observed outcomes</span></span>
+<span id="cb14-303"><a href="#cb14-303" aria-hidden="true" tabindex="-1"></a>Y_obs <span class="ot">&lt;-</span> dat<span class="sc">$</span>died</span>
+<span id="cb14-304"><a href="#cb14-304" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-305"><a href="#cb14-305" aria-hidden="true" tabindex="-1"></a><span class="co"># EIF (efficient influence function) components</span></span>
+<span id="cb14-306"><a href="#cb14-306" aria-hidden="true" tabindex="-1"></a><span class="co"># For treated: use Q1_star; for control: use Q0_star</span></span>
+<span id="cb14-307"><a href="#cb14-307" aria-hidden="true" tabindex="-1"></a><span class="co"># But we need Q* at the OBSERVED A for the residual terms</span></span>
+<span id="cb14-308"><a href="#cb14-308" aria-hidden="true" tabindex="-1"></a>Qstar_obs <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(dat<span class="sc">$</span>ever_haart <span class="sc">==</span> <span class="dv">1</span>, Q1_star, Q0_star)  <span class="co"># &lt;1&gt;</span></span>
+<span id="cb14-309"><a href="#cb14-309" aria-hidden="true" tabindex="-1"></a>H_obs <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(dat<span class="sc">$</span>ever_haart <span class="sc">==</span> <span class="dv">1</span>, H1, H0)                 <span class="co"># &lt;1&gt;</span></span>
+<span id="cb14-310"><a href="#cb14-310" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-311"><a href="#cb14-311" aria-hidden="true" tabindex="-1"></a><span class="co"># Efficient influence function for each observation</span></span>
+<span id="cb14-312"><a href="#cb14-312" aria-hidden="true" tabindex="-1"></a>EIC <span class="ot">&lt;-</span> H_obs <span class="sc">*</span> (Y_obs <span class="sc">-</span> Qstar_obs) <span class="sc">+</span> Q1_star <span class="sc">-</span> Q0_star <span class="sc">-</span> tmle_ate  <span class="co"># &lt;2&gt;</span></span>
+<span id="cb14-313"><a href="#cb14-313" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-314"><a href="#cb14-314" aria-hidden="true" tabindex="-1"></a><span class="co"># Standard error and 95% CI</span></span>
+<span id="cb14-315"><a href="#cb14-315" aria-hidden="true" tabindex="-1"></a>tmle_se <span class="ot">&lt;-</span> <span class="fu">sqrt</span>(<span class="fu">var</span>(EIC) <span class="sc">/</span> n)  <span class="co"># &lt;3&gt;</span></span>
+<span id="cb14-316"><a href="#cb14-316" aria-hidden="true" tabindex="-1"></a>ci_lower <span class="ot">&lt;-</span> tmle_ate <span class="sc">-</span> <span class="fl">1.96</span> <span class="sc">*</span> tmle_se</span>
+<span id="cb14-317"><a href="#cb14-317" aria-hidden="true" tabindex="-1"></a>ci_upper <span class="ot">&lt;-</span> tmle_ate <span class="sc">+</span> <span class="fl">1.96</span> <span class="sc">*</span> tmle_se</span>
+<span id="cb14-318"><a href="#cb14-318" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-319"><a href="#cb14-319" aria-hidden="true" tabindex="-1"></a><span class="fu">tibble</span>(</span>
+<span id="cb14-320"><a href="#cb14-320" aria-hidden="true" tabindex="-1"></a>  <span class="at">Estimate =</span> tmle_ate,</span>
+<span id="cb14-321"><a href="#cb14-321" aria-hidden="true" tabindex="-1"></a>  <span class="at">SE =</span> tmle_se,</span>
+<span id="cb14-322"><a href="#cb14-322" aria-hidden="true" tabindex="-1"></a>  <span class="at">CI_lower =</span> ci_lower,</span>
+<span id="cb14-323"><a href="#cb14-323" aria-hidden="true" tabindex="-1"></a>  <span class="at">CI_upper =</span> ci_upper</span>
+<span id="cb14-324"><a href="#cb14-324" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb14-325"><a href="#cb14-325" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-326"><a href="#cb14-326" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>Select the targeted Q prediction and clever covariate at each observation's *observed* treatment value; needed to form the IPW-weighted residual term that corrects for outcome model error</span>
+<span id="cb14-327"><a href="#cb14-327" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>The EIF has two parts: (a) $H(A,W)(Y - Q^*)$; an IPW-weighted residual that corrects any outcome model bias, and (b) $(Q_1^* - Q_0^* - \hat\psi)$; the centered substitution component. When the fluctuation step correctly solved the EIF equation, the sample mean of the EIF is exactly zero.</span>
+<span id="cb14-328"><a href="#cb14-328" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>The EIF variance divided by $n$ yields the semiparametric efficient variance; this is valid even when machine learning is used for nuisance models (with appropriate cross-fitting)</span>
 <span id="cb14-329"><a href="#cb14-329" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-330"><a href="#cb14-330" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Doubly robust.** Both are consistent for the ATE if either the outcome model $Q$ or the propensity score $g$ is correctly specified.</span>
-<span id="cb14-331"><a href="#cb14-331" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Semiparametric efficiency.** Both achieve the semiparametric efficiency bound when both nuisances converge fast enough (typically rates of at least $n^{-1/4}$ each, so the product is faster than $n^{-1/2}$).</span>
-<span id="cb14-332"><a href="#cb14-332" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Same asymptotic distribution.** Under regularity conditions, both are asymptotically linear with the *same* influence function (the EIF), so both have the same asymptotic variance and the same EIF-based standard errors.</span>
-<span id="cb14-333"><a href="#cb14-333" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Same nuisance requirements.** Both need an outcome model, a propensity model, positivity, and (when flexible learners are used) cross-fitting to control the empirical process bias from data-adaptive nuisance estimation.</span>
-<span id="cb14-334"><a href="#cb14-334" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-335"><a href="#cb14-335" aria-hidden="true" tabindex="-1"></a>In large samples, on data with well-behaved propensity scores, AIPW and TMLE are essentially indistinguishable. They differ in finite samples, and they differ in their structural form.</span>
-<span id="cb14-336"><a href="#cb14-336" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-337"><a href="#cb14-337" aria-hidden="true" tabindex="-1"></a><span class="fu">## What is different, and why</span></span>
-<span id="cb14-338"><a href="#cb14-338" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-339"><a href="#cb14-339" aria-hidden="true" tabindex="-1"></a>The structural distinction is **additive correction (AIPW) versus substitution / fluctuation (TMLE)**, and almost every practical difference flows from it.</span>
-<span id="cb14-340"><a href="#cb14-340" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-341"><a href="#cb14-341" aria-hidden="true" tabindex="-1"></a>| Property | AIPW | TMLE |</span>
-<span id="cb14-342"><a href="#cb14-342" aria-hidden="true" tabindex="-1"></a>|---|---|---|</span>
-<span id="cb14-343"><a href="#cb14-343" aria-hidden="true" tabindex="-1"></a>| How the EIF equation is solved | Add the empirical EIF correction to G-computation | Update $Q \to Q^*$ until the substitution estimator solves it |</span>
-<span id="cb14-344"><a href="#cb14-344" aria-hidden="true" tabindex="-1"></a>| Form of the estimator | Sum of plug-in + IPW-weighted residual | Mean of $Q^*(1, W) - Q^*(0, W)$ |</span>
-<span id="cb14-345"><a href="#cb14-345" aria-hidden="true" tabindex="-1"></a>| Predictions bounded in $<span class="co">[</span><span class="ot">0, 1</span><span class="co">]</span>$ | No: the IPW correction is unbounded; with extreme $g$, the estimate can exit the parameter space | Yes: logit-scale fluctuation guarantees $Q^* \in <span class="co">[</span><span class="ot">0, 1</span><span class="co">]</span>$ |</span>
-<span id="cb14-346"><a href="#cb14-346" aria-hidden="true" tabindex="-1"></a>| Plug-in interpretability | No: sums of residuals do not decompose cleanly | Yes: every estimate is a mean of valid counterfactual predictions |</span>
-<span id="cb14-347"><a href="#cb14-347" aria-hidden="true" tabindex="-1"></a>| Integration with Super Learner | Works with cross-fitting (DML-style) | Designed alongside Super Learner; CV-TMLE is the standard recipe |</span>
-<span id="cb14-348"><a href="#cb14-348" aria-hidden="true" tabindex="-1"></a>| Implementation complexity | Simple (one formula) | Moderate (initial fit + fluctuation + targeted predictions) |</span>
-<span id="cb14-349"><a href="#cb14-349" aria-hidden="true" tabindex="-1"></a>| Inference (EIF-based SEs) | Yes | Yes |</span>
+<span id="cb14-330"><a href="#cb14-330" aria-hidden="true" tabindex="-1"></a>The EIF-based standard error is a key output of TMLE. Because the fluctuation step solves the EIF estimating equation, the resulting confidence interval achieves approximately correct coverage under regularity conditions, even when machine learning is used for the nuisance models (provided cross-fitting or other sample-splitting techniques are employed). If the confidence interval excludes zero, we have evidence that the treatment has a non-null causal effect on the outcome at the 95% confidence level.</span>
+<span id="cb14-331"><a href="#cb14-331" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-332"><a href="#cb14-332" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-333"><a href="#cb14-333" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-334"><a href="#cb14-334" aria-hidden="true" tabindex="-1"></a><span class="fu"># AIPW vs TMLE: A Detailed Comparison</span></span>
+<span id="cb14-335"><a href="#cb14-335" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-336"><a href="#cb14-336" aria-hidden="true" tabindex="-1"></a>The chapter opened with the claim that AIPW and TMLE are two roads to the same destination. With both estimators now in hand, we can be precise about what is shared and what is not.</span>
+<span id="cb14-337"><a href="#cb14-337" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-338"><a href="#cb14-338" aria-hidden="true" tabindex="-1"></a><span class="fu">## What is the same</span></span>
+<span id="cb14-339"><a href="#cb14-339" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-340"><a href="#cb14-340" aria-hidden="true" tabindex="-1"></a>Both AIPW and TMLE are constructed from the **same efficient influence function** for the ATE. As a direct consequence:</span>
+<span id="cb14-341"><a href="#cb14-341" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-342"><a href="#cb14-342" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Doubly robust.** Both are consistent for the ATE if either the outcome model $Q$ or the propensity score $g$ is correctly specified.</span>
+<span id="cb14-343"><a href="#cb14-343" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Semiparametric efficiency.** Both achieve the semiparametric efficiency bound when both nuisances converge fast enough (typically rates of at least $n^{-1/4}$ each, so the product is faster than $n^{-1/2}$).</span>
+<span id="cb14-344"><a href="#cb14-344" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Same asymptotic distribution.** Under regularity conditions, both are asymptotically linear with the *same* influence function (the EIF), so both have the same asymptotic variance and the same EIF-based standard errors.</span>
+<span id="cb14-345"><a href="#cb14-345" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Same nuisance requirements.** Both need an outcome model, a propensity model, positivity, and (when flexible learners are used) cross-fitting to control the empirical process bias from data-adaptive nuisance estimation.</span>
+<span id="cb14-346"><a href="#cb14-346" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-347"><a href="#cb14-347" aria-hidden="true" tabindex="-1"></a>In large samples, on data with well-behaved propensity scores, AIPW and TMLE are essentially indistinguishable. They differ in finite samples, and they differ in their structural form.</span>
+<span id="cb14-348"><a href="#cb14-348" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-349"><a href="#cb14-349" aria-hidden="true" tabindex="-1"></a><span class="fu">## What is different, and why</span></span>
 <span id="cb14-350"><a href="#cb14-350" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-351"><a href="#cb14-351" aria-hidden="true" tabindex="-1"></a>The most consequential of these is **boundedness**. When some propensity scores are near 0 or 1, the AIPW correction term $\frac{A}{g(W)}(Y - Q(1,W))$ can be large in magnitude and same-signed across many observations. Adding it to the G-computation plug-in can produce probability estimates above 1 or below 0, or risk-difference estimates outside $<span class="co">[</span><span class="ot">-1, 1</span><span class="co">]</span>$. TMLE absorbs the same correction *into* $Q$ on the logit scale, so the substitution estimator is always a mean of valid probabilities. This is a structural guarantee, not a finite-sample lucky break.</span>
+<span id="cb14-351"><a href="#cb14-351" aria-hidden="true" tabindex="-1"></a>The structural distinction is **additive correction (AIPW) versus substitution / fluctuation (TMLE)**, and almost every practical difference flows from it.</span>
 <span id="cb14-352"><a href="#cb14-352" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-353"><a href="#cb14-353" aria-hidden="true" tabindex="-1"></a>The following deliberately small, extreme example exposes the mechanism. Two treated patients had a propensity score of only $0.02$ (they looked very unlikely to be treated) and did have the outcome, so their inverse-probability weights are enormous.</span>
-<span id="cb14-354"><a href="#cb14-354" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-357"><a href="#cb14-357" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-358"><a href="#cb14-358" aria-hidden="true" tabindex="-1"></a>g  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="fl">0.02</span>, <span class="fl">0.02</span>, <span class="fl">0.50</span>, <span class="fl">0.50</span>, <span class="fl">0.98</span>, <span class="fl">0.98</span>)</span>
-<span id="cb14-359"><a href="#cb14-359" aria-hidden="true" tabindex="-1"></a>A  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">1</span>,    <span class="dv">1</span>,    <span class="dv">1</span>,    <span class="dv">0</span>,    <span class="dv">1</span>,    <span class="dv">0</span>)</span>
-<span id="cb14-360"><a href="#cb14-360" aria-hidden="true" tabindex="-1"></a>Y  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">1</span>,    <span class="dv">1</span>,    <span class="dv">0</span>,    <span class="dv">0</span>,    <span class="dv">1</span>,    <span class="dv">0</span>)</span>
-<span id="cb14-361"><a href="#cb14-361" aria-hidden="true" tabindex="-1"></a>Q1 <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="fl">0.30</span>, <span class="fl">0.30</span>, <span class="fl">0.40</span>, <span class="fl">0.40</span>, <span class="fl">0.60</span>, <span class="fl">0.60</span>)   <span class="co"># outcome-model risk under treatment</span></span>
+<span id="cb14-353"><a href="#cb14-353" aria-hidden="true" tabindex="-1"></a>| Property | AIPW | TMLE |</span>
+<span id="cb14-354"><a href="#cb14-354" aria-hidden="true" tabindex="-1"></a>|---|---|---|</span>
+<span id="cb14-355"><a href="#cb14-355" aria-hidden="true" tabindex="-1"></a>| How the EIF equation is solved | Add the empirical EIF correction to G-computation | Update $Q \to Q^*$ until the substitution estimator solves it |</span>
+<span id="cb14-356"><a href="#cb14-356" aria-hidden="true" tabindex="-1"></a>| Form of the estimator | Sum of plug-in + IPW-weighted residual | Mean of $Q^*(1, W) - Q^*(0, W)$ |</span>
+<span id="cb14-357"><a href="#cb14-357" aria-hidden="true" tabindex="-1"></a>| Predictions bounded in $<span class="co">[</span><span class="ot">0, 1</span><span class="co">]</span>$ | No: the IPW correction is unbounded; with extreme $g$, the estimate can exit the parameter space | Yes: logit-scale fluctuation guarantees $Q^* \in <span class="co">[</span><span class="ot">0, 1</span><span class="co">]</span>$ |</span>
+<span id="cb14-358"><a href="#cb14-358" aria-hidden="true" tabindex="-1"></a>| Plug-in interpretability | No: sums of residuals do not decompose cleanly | Yes: every estimate is a mean of valid counterfactual predictions |</span>
+<span id="cb14-359"><a href="#cb14-359" aria-hidden="true" tabindex="-1"></a>| Integration with Super Learner | Works with cross-fitting (DML-style) | Designed alongside Super Learner; CV-TMLE is the standard recipe |</span>
+<span id="cb14-360"><a href="#cb14-360" aria-hidden="true" tabindex="-1"></a>| Implementation complexity | Simple (one formula) | Moderate (initial fit + fluctuation + targeted predictions) |</span>
+<span id="cb14-361"><a href="#cb14-361" aria-hidden="true" tabindex="-1"></a>| Inference (EIF-based SEs) | Yes | Yes |</span>
 <span id="cb14-362"><a href="#cb14-362" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-363"><a href="#cb14-363" aria-hidden="true" tabindex="-1"></a><span class="co"># AIPW estimate of the treated-world mean E[Y(1)]: plug-in plus IPW correction</span></span>
-<span id="cb14-364"><a href="#cb14-364" aria-hidden="true" tabindex="-1"></a>aipw_mu1 <span class="ot">&lt;-</span> <span class="fu">mean</span>(Q1 <span class="sc">+</span> (A <span class="sc">==</span> <span class="dv">1</span>) <span class="sc">/</span> g <span class="sc">*</span> (Y <span class="sc">-</span> Q1))</span>
-<span id="cb14-365"><a href="#cb14-365" aria-hidden="true" tabindex="-1"></a><span class="fu">round</span>(aipw_mu1, <span class="dv">2</span>)</span>
-<span id="cb14-366"><a href="#cb14-366" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-367"><a href="#cb14-367" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-368"><a href="#cb14-368" aria-hidden="true" tabindex="-1"></a>The AIPW estimate of a probability comes out far above 1, which is impossible: the unbounded $A/g(W)$ correction, summed over a few enormous weights, pushed the plug-in outside the parameter space. TMLE folds the same correction into the outcome model on the logit scale, so every updated prediction is <span class="in">`plogis(...)`</span>, a genuine probability strictly between 0 and 1. Averaging numbers that each lie in $<span class="co">[</span><span class="ot">0, 1</span><span class="co">]</span>$ cannot leave $<span class="co">[</span><span class="ot">0, 1</span><span class="co">]</span>$, so the TMLE substitution estimate stays in range no matter how extreme the propensity scores. That single property is the practical reason to prefer TMLE when overlap is poor.</span>
-<span id="cb14-369"><a href="#cb14-369" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-370"><a href="#cb14-370" aria-hidden="true" tabindex="-1"></a><span class="fu">## When to prefer which</span></span>
-<span id="cb14-371"><a href="#cb14-371" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-372"><a href="#cb14-372" aria-hidden="true" tabindex="-1"></a>In practice the choice usually comes down to four questions:</span>
-<span id="cb14-373"><a href="#cb14-373" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-374"><a href="#cb14-374" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Is propensity score overlap clean?** If yes, AIPW is fine and simpler to implement. If no (extreme propensities, small overlap region), prefer TMLE for the boundedness guarantee.</span>
-<span id="cb14-375"><a href="#cb14-375" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Are you using flexible machine learning?** If yes, prefer CV-TMLE (the most mature ML-aware doubly robust workflow). AIPW with sample-splitting (DML) also works but the tooling is less unified with the rest of the Targeted Learning ecosystem.</span>
-<span id="cb14-376"><a href="#cb14-376" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Do you need to stratify or post-process the estimate?** If yes (e.g., subgroup risk differences, transformations to relative scales), prefer TMLE, whose substitution form lets you re-aggregate $Q^*$ directly.</span>
-<span id="cb14-377"><a href="#cb14-377" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Is this a quick prototype or a publishable analysis?** AIPW is excellent for prototyping and for a sanity check next to G-computation and IPTW. For published doubly robust estimates, TMLE is now the field default.</span>
-<span id="cb14-378"><a href="#cb14-378" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-379"><a href="#cb14-379" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb14-380"><a href="#cb14-380" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-381"><a href="#cb14-381" aria-hidden="true" tabindex="-1"></a><span class="fu"># Numerical Side-by-Side on the HAART Cohort</span></span>
-<span id="cb14-382"><a href="#cb14-382" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-383"><a href="#cb14-383" aria-hidden="true" tabindex="-1"></a>Because both estimators target the same EIF on the same data with the same nuisance fits, their point estimates and standard errors should be very close.</span>
-<span id="cb14-384"><a href="#cb14-384" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-387"><a href="#cb14-387" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-388"><a href="#cb14-388" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
-<span id="cb14-389"><a href="#cb14-389" aria-hidden="true" tabindex="-1"></a><span class="co"># AIPW point estimate and EIF-based SE on the same nuisances</span></span>
-<span id="cb14-390"><a href="#cb14-390" aria-hidden="true" tabindex="-1"></a>mu1_aipw <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, <span class="fu">mean</span>( Q1 <span class="sc">+</span> ever_haart <span class="sc">*</span> (died <span class="sc">-</span> Q1) <span class="sc">/</span> ps ))</span>
-<span id="cb14-391"><a href="#cb14-391" aria-hidden="true" tabindex="-1"></a>mu0_aipw <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, <span class="fu">mean</span>( Q0 <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">-</span> ever_haart) <span class="sc">*</span> (died <span class="sc">-</span> Q0) <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">-</span> ps) ))</span>
-<span id="cb14-392"><a href="#cb14-392" aria-hidden="true" tabindex="-1"></a>aipw_ate <span class="ot">&lt;-</span> mu1_aipw <span class="sc">-</span> mu0_aipw</span>
-<span id="cb14-393"><a href="#cb14-393" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-394"><a href="#cb14-394" aria-hidden="true" tabindex="-1"></a><span class="co"># AIPW EIF (uses the un-targeted Q, not Q*)</span></span>
-<span id="cb14-395"><a href="#cb14-395" aria-hidden="true" tabindex="-1"></a>H1_raw <span class="ot">&lt;-</span> <span class="dv">1</span> <span class="sc">/</span> dat<span class="sc">$</span>ps</span>
-<span id="cb14-396"><a href="#cb14-396" aria-hidden="true" tabindex="-1"></a>H0_raw <span class="ot">&lt;-</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">-</span> dat<span class="sc">$</span>ps)</span>
-<span id="cb14-397"><a href="#cb14-397" aria-hidden="true" tabindex="-1"></a>Q_obs  <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, <span class="fu">ifelse</span>(ever_haart <span class="sc">==</span> <span class="dv">1</span>, Q1, Q0))</span>
-<span id="cb14-398"><a href="#cb14-398" aria-hidden="true" tabindex="-1"></a>H_obs_raw <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, <span class="fu">ifelse</span>(ever_haart <span class="sc">==</span> <span class="dv">1</span>, H1_raw, H0_raw))</span>
-<span id="cb14-399"><a href="#cb14-399" aria-hidden="true" tabindex="-1"></a>EIF_aipw <span class="ot">&lt;-</span> H_obs_raw <span class="sc">*</span> (dat<span class="sc">$</span>died <span class="sc">-</span> Q_obs) <span class="sc">+</span> dat<span class="sc">$</span>Q1 <span class="sc">-</span> dat<span class="sc">$</span>Q0 <span class="sc">-</span> aipw_ate</span>
-<span id="cb14-400"><a href="#cb14-400" aria-hidden="true" tabindex="-1"></a>aipw_se  <span class="ot">&lt;-</span> <span class="fu">sqrt</span>(<span class="fu">var</span>(EIF_aipw) <span class="sc">/</span> n)</span>
-<span id="cb14-401"><a href="#cb14-401" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-402"><a href="#cb14-402" aria-hidden="true" tabindex="-1"></a><span class="fu">bind_rows</span>(</span>
-<span id="cb14-403"><a href="#cb14-403" aria-hidden="true" tabindex="-1"></a>  <span class="fu">tibble</span>(<span class="at">Estimator =</span> <span class="st">"AIPW"</span>, <span class="at">ATE =</span> aipw_ate, <span class="at">SE =</span> aipw_se,</span>
-<span id="cb14-404"><a href="#cb14-404" aria-hidden="true" tabindex="-1"></a>         <span class="at">CI_lower =</span> aipw_ate <span class="sc">-</span> <span class="fl">1.96</span> <span class="sc">*</span> aipw_se,</span>
-<span id="cb14-405"><a href="#cb14-405" aria-hidden="true" tabindex="-1"></a>         <span class="at">CI_upper =</span> aipw_ate <span class="sc">+</span> <span class="fl">1.96</span> <span class="sc">*</span> aipw_se),</span>
-<span id="cb14-406"><a href="#cb14-406" aria-hidden="true" tabindex="-1"></a>  <span class="fu">tibble</span>(<span class="at">Estimator =</span> <span class="st">"TMLE"</span>, <span class="at">ATE =</span> tmle_ate, <span class="at">SE =</span> tmle_se,</span>
-<span id="cb14-407"><a href="#cb14-407" aria-hidden="true" tabindex="-1"></a>         <span class="at">CI_lower =</span> ci_lower, <span class="at">CI_upper =</span> ci_upper)</span>
-<span id="cb14-408"><a href="#cb14-408" aria-hidden="true" tabindex="-1"></a>) <span class="sc">|&gt;</span> knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">4</span>, <span class="at">caption =</span> <span class="st">"AIPW and TMLE on the same HAART data and nuisances"</span>)</span>
-<span id="cb14-409"><a href="#cb14-409" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-410"><a href="#cb14-410" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-411"><a href="#cb14-411" aria-hidden="true" tabindex="-1"></a>The two estimates and their standard errors should agree to within roughly the third decimal. They are not identical because the AIPW estimator uses the initial $Q$ inside the substitution component while TMLE uses the targeted $Q^*$, and the fluctuation step gently shifts $Q^*$ away from $Q$ by an amount governed by $\hat\epsilon$. When propensity scores are well-behaved (as they are here), $\hat\epsilon$ is small and the gap is correspondingly small. When some propensity scores are extreme, $\hat\epsilon$ can be larger and the two estimators diverge, a useful diagnostic that the boundedness and stability advantages of TMLE are starting to matter.</span>
-<span id="cb14-412"><a href="#cb14-412" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-413"><a href="#cb14-413" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb14-414"><a href="#cb14-414" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-415"><a href="#cb14-415" aria-hidden="true" tabindex="-1"></a><span class="fu"># Summary</span></span>
-<span id="cb14-416"><a href="#cb14-416" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-417"><a href="#cb14-417" aria-hidden="true" tabindex="-1"></a>:::{.callout-tip}</span>
-<span id="cb14-418"><a href="#cb14-418" aria-hidden="true" tabindex="-1"></a><span class="fu">## Key Takeaways</span></span>
-<span id="cb14-419"><a href="#cb14-419" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-420"><a href="#cb14-420" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>AIPW and TMLE both solve the EIF estimating equation for the ATE; both are doubly robust and both achieve the semiparametric efficiency bound</span>
-<span id="cb14-421"><a href="#cb14-421" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>AIPW = G-computation + EIF correction (a sum); TMLE = G-computation with targeted $Q^* \to$ substitution estimator (a plug-in)</span>
-<span id="cb14-422"><a href="#cb14-422" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The substitution form gives TMLE bounded predictions, plug-in interpretability, and a natural fit with Super Learner / CV-TMLE</span>
-<span id="cb14-423"><a href="#cb14-423" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>AIPW is simpler and equally valid when propensity scores are well-behaved; TMLE is the field default when machine learning is used or propensity scores are extreme</span>
-<span id="cb14-424"><a href="#cb14-424" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Inference for both rests on the same EIF, so their standard errors share the same theoretical justification</span>
-<span id="cb14-425"><a href="#cb14-425" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb14-363"><a href="#cb14-363" aria-hidden="true" tabindex="-1"></a>The most consequential of these is **boundedness**. When some propensity scores are near 0 or 1, the AIPW correction term $\frac{A}{g(W)}(Y - Q(1,W))$ can be large in magnitude and same-signed across many observations. Adding it to the G-computation plug-in can produce probability estimates above 1 or below 0, or risk-difference estimates outside $<span class="co">[</span><span class="ot">-1, 1</span><span class="co">]</span>$. TMLE absorbs the same correction *into* $Q$ on the logit scale, so the substitution estimator is always a mean of valid probabilities. This is a structural guarantee, not a finite-sample lucky break.</span>
+<span id="cb14-364"><a href="#cb14-364" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-365"><a href="#cb14-365" aria-hidden="true" tabindex="-1"></a>The following deliberately small, extreme example exposes the mechanism. Two treated patients had a propensity score of only $0.02$ (they looked very unlikely to be treated) and did have the outcome, so their inverse-probability weights are enormous.</span>
+<span id="cb14-366"><a href="#cb14-366" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-369"><a href="#cb14-369" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-370"><a href="#cb14-370" aria-hidden="true" tabindex="-1"></a>g  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="fl">0.02</span>, <span class="fl">0.02</span>, <span class="fl">0.50</span>, <span class="fl">0.50</span>, <span class="fl">0.98</span>, <span class="fl">0.98</span>)</span>
+<span id="cb14-371"><a href="#cb14-371" aria-hidden="true" tabindex="-1"></a>A  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">1</span>,    <span class="dv">1</span>,    <span class="dv">1</span>,    <span class="dv">0</span>,    <span class="dv">1</span>,    <span class="dv">0</span>)</span>
+<span id="cb14-372"><a href="#cb14-372" aria-hidden="true" tabindex="-1"></a>Y  <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">1</span>,    <span class="dv">1</span>,    <span class="dv">0</span>,    <span class="dv">0</span>,    <span class="dv">1</span>,    <span class="dv">0</span>)</span>
+<span id="cb14-373"><a href="#cb14-373" aria-hidden="true" tabindex="-1"></a>Q1 <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="fl">0.30</span>, <span class="fl">0.30</span>, <span class="fl">0.40</span>, <span class="fl">0.40</span>, <span class="fl">0.60</span>, <span class="fl">0.60</span>)   <span class="co"># outcome-model risk under treatment</span></span>
+<span id="cb14-374"><a href="#cb14-374" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-375"><a href="#cb14-375" aria-hidden="true" tabindex="-1"></a><span class="co"># AIPW estimate of the treated-world mean E[Y(1)]: plug-in plus IPW correction</span></span>
+<span id="cb14-376"><a href="#cb14-376" aria-hidden="true" tabindex="-1"></a>aipw_mu1 <span class="ot">&lt;-</span> <span class="fu">mean</span>(Q1 <span class="sc">+</span> (A <span class="sc">==</span> <span class="dv">1</span>) <span class="sc">/</span> g <span class="sc">*</span> (Y <span class="sc">-</span> Q1))</span>
+<span id="cb14-377"><a href="#cb14-377" aria-hidden="true" tabindex="-1"></a><span class="fu">round</span>(aipw_mu1, <span class="dv">2</span>)</span>
+<span id="cb14-378"><a href="#cb14-378" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-379"><a href="#cb14-379" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-380"><a href="#cb14-380" aria-hidden="true" tabindex="-1"></a>The AIPW estimate of a probability comes out far above 1, which is impossible: the unbounded $A/g(W)$ correction, summed over a few enormous weights, pushed the plug-in outside the parameter space. TMLE folds the same correction into the outcome model on the logit scale, so every updated prediction is <span class="in">`plogis(...)`</span>, a genuine probability strictly between 0 and 1. Averaging numbers that each lie in $<span class="co">[</span><span class="ot">0, 1</span><span class="co">]</span>$ cannot leave $<span class="co">[</span><span class="ot">0, 1</span><span class="co">]</span>$, so the TMLE substitution estimate stays in range no matter how extreme the propensity scores. That single property is the practical reason to prefer TMLE when overlap is poor.</span>
+<span id="cb14-381"><a href="#cb14-381" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-382"><a href="#cb14-382" aria-hidden="true" tabindex="-1"></a><span class="fu">## When to prefer which</span></span>
+<span id="cb14-383"><a href="#cb14-383" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-384"><a href="#cb14-384" aria-hidden="true" tabindex="-1"></a>In practice the choice usually comes down to four questions:</span>
+<span id="cb14-385"><a href="#cb14-385" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-386"><a href="#cb14-386" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Is propensity score overlap clean?** If yes, AIPW is fine and simpler to implement. If no (extreme propensities, small overlap region), prefer TMLE for the boundedness guarantee.</span>
+<span id="cb14-387"><a href="#cb14-387" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Are you using flexible machine learning?** If yes, prefer CV-TMLE (the most mature ML-aware doubly robust workflow). AIPW with sample-splitting (DML) also works but the tooling is less unified with the rest of the Targeted Learning ecosystem.</span>
+<span id="cb14-388"><a href="#cb14-388" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Do you need to stratify or post-process the estimate?** If yes (e.g., subgroup risk differences, transformations to relative scales), prefer TMLE, whose substitution form lets you re-aggregate $Q^*$ directly.</span>
+<span id="cb14-389"><a href="#cb14-389" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Is this a quick prototype or a publishable analysis?** AIPW is excellent for prototyping and for a sanity check next to G-computation and IPTW. For published doubly robust estimates, TMLE is now the field default.</span>
+<span id="cb14-390"><a href="#cb14-390" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-391"><a href="#cb14-391" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-392"><a href="#cb14-392" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-393"><a href="#cb14-393" aria-hidden="true" tabindex="-1"></a><span class="fu"># Numerical Side-by-Side on the HAART Cohort</span></span>
+<span id="cb14-394"><a href="#cb14-394" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-395"><a href="#cb14-395" aria-hidden="true" tabindex="-1"></a>Because both estimators target the same EIF on the same data with the same nuisance fits, their point estimates and standard errors should be very close.</span>
+<span id="cb14-396"><a href="#cb14-396" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-399"><a href="#cb14-399" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-400"><a href="#cb14-400" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
+<span id="cb14-401"><a href="#cb14-401" aria-hidden="true" tabindex="-1"></a><span class="co"># AIPW point estimate and EIF-based SE on the same nuisances</span></span>
+<span id="cb14-402"><a href="#cb14-402" aria-hidden="true" tabindex="-1"></a>mu1_aipw <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, <span class="fu">mean</span>( Q1 <span class="sc">+</span> ever_haart <span class="sc">*</span> (died <span class="sc">-</span> Q1) <span class="sc">/</span> ps ))</span>
+<span id="cb14-403"><a href="#cb14-403" aria-hidden="true" tabindex="-1"></a>mu0_aipw <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, <span class="fu">mean</span>( Q0 <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">-</span> ever_haart) <span class="sc">*</span> (died <span class="sc">-</span> Q0) <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">-</span> ps) ))</span>
+<span id="cb14-404"><a href="#cb14-404" aria-hidden="true" tabindex="-1"></a>aipw_ate <span class="ot">&lt;-</span> mu1_aipw <span class="sc">-</span> mu0_aipw</span>
+<span id="cb14-405"><a href="#cb14-405" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-406"><a href="#cb14-406" aria-hidden="true" tabindex="-1"></a><span class="co"># AIPW EIF (uses the un-targeted Q, not Q*)</span></span>
+<span id="cb14-407"><a href="#cb14-407" aria-hidden="true" tabindex="-1"></a>H1_raw <span class="ot">&lt;-</span> <span class="dv">1</span> <span class="sc">/</span> dat<span class="sc">$</span>ps</span>
+<span id="cb14-408"><a href="#cb14-408" aria-hidden="true" tabindex="-1"></a>H0_raw <span class="ot">&lt;-</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">-</span> dat<span class="sc">$</span>ps)</span>
+<span id="cb14-409"><a href="#cb14-409" aria-hidden="true" tabindex="-1"></a>Q_obs  <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, <span class="fu">ifelse</span>(ever_haart <span class="sc">==</span> <span class="dv">1</span>, Q1, Q0))</span>
+<span id="cb14-410"><a href="#cb14-410" aria-hidden="true" tabindex="-1"></a>H_obs_raw <span class="ot">&lt;-</span> <span class="fu">with</span>(dat, <span class="fu">ifelse</span>(ever_haart <span class="sc">==</span> <span class="dv">1</span>, H1_raw, H0_raw))</span>
+<span id="cb14-411"><a href="#cb14-411" aria-hidden="true" tabindex="-1"></a>EIF_aipw <span class="ot">&lt;-</span> H_obs_raw <span class="sc">*</span> (dat<span class="sc">$</span>died <span class="sc">-</span> Q_obs) <span class="sc">+</span> dat<span class="sc">$</span>Q1 <span class="sc">-</span> dat<span class="sc">$</span>Q0 <span class="sc">-</span> aipw_ate</span>
+<span id="cb14-412"><a href="#cb14-412" aria-hidden="true" tabindex="-1"></a>aipw_se  <span class="ot">&lt;-</span> <span class="fu">sqrt</span>(<span class="fu">var</span>(EIF_aipw) <span class="sc">/</span> n)</span>
+<span id="cb14-413"><a href="#cb14-413" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-414"><a href="#cb14-414" aria-hidden="true" tabindex="-1"></a><span class="fu">bind_rows</span>(</span>
+<span id="cb14-415"><a href="#cb14-415" aria-hidden="true" tabindex="-1"></a>  <span class="fu">tibble</span>(<span class="at">Estimator =</span> <span class="st">"AIPW"</span>, <span class="at">ATE =</span> aipw_ate, <span class="at">SE =</span> aipw_se,</span>
+<span id="cb14-416"><a href="#cb14-416" aria-hidden="true" tabindex="-1"></a>         <span class="at">CI_lower =</span> aipw_ate <span class="sc">-</span> <span class="fl">1.96</span> <span class="sc">*</span> aipw_se,</span>
+<span id="cb14-417"><a href="#cb14-417" aria-hidden="true" tabindex="-1"></a>         <span class="at">CI_upper =</span> aipw_ate <span class="sc">+</span> <span class="fl">1.96</span> <span class="sc">*</span> aipw_se),</span>
+<span id="cb14-418"><a href="#cb14-418" aria-hidden="true" tabindex="-1"></a>  <span class="fu">tibble</span>(<span class="at">Estimator =</span> <span class="st">"TMLE"</span>, <span class="at">ATE =</span> tmle_ate, <span class="at">SE =</span> tmle_se,</span>
+<span id="cb14-419"><a href="#cb14-419" aria-hidden="true" tabindex="-1"></a>         <span class="at">CI_lower =</span> ci_lower, <span class="at">CI_upper =</span> ci_upper)</span>
+<span id="cb14-420"><a href="#cb14-420" aria-hidden="true" tabindex="-1"></a>) <span class="sc">|&gt;</span> knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">4</span>, <span class="at">caption =</span> <span class="st">"AIPW and TMLE on the same HAART data and nuisances"</span>)</span>
+<span id="cb14-421"><a href="#cb14-421" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-422"><a href="#cb14-422" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-423"><a href="#cb14-423" aria-hidden="true" tabindex="-1"></a>The two estimates and their standard errors should agree to within roughly the third decimal. They are not identical because the AIPW estimator uses the initial $Q$ inside the substitution component while TMLE uses the targeted $Q^*$, and the fluctuation step gently shifts $Q^*$ away from $Q$ by an amount governed by $\hat\epsilon$. When propensity scores are well-behaved (as they are here), $\hat\epsilon$ is small and the gap is correspondingly small. When some propensity scores are extreme, $\hat\epsilon$ can be larger and the two estimators diverge, a useful diagnostic that the boundedness and stability advantages of TMLE are starting to matter.</span>
+<span id="cb14-424"><a href="#cb14-424" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-425"><a href="#cb14-425" aria-hidden="true" tabindex="-1"></a>---</span>
 <span id="cb14-426"><a href="#cb14-426" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-429"><a href="#cb14-429" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-430"><a href="#cb14-430" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
-<span id="cb14-431"><a href="#cb14-431" aria-hidden="true" tabindex="-1"></a><span class="fu">sessionInfo</span>()</span>
-<span id="cb14-432"><a href="#cb14-432" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-433"><a href="#cb14-433" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-434"><a href="#cb14-434" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb14-435"><a href="#cb14-435" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-436"><a href="#cb14-436" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
-<span id="cb14-437"><a href="#cb14-437" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-438"><a href="#cb14-438" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb14-439"><a href="#cb14-439" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. What does "doubly robust" mean in practice? Does it mean you can ignore model specification entirely?&lt;/strong&gt;&lt;/summary&gt;</span>
-<span id="cb14-440"><a href="#cb14-440" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-441"><a href="#cb14-441" aria-hidden="true" tabindex="-1"></a>No. "Doubly robust" means the estimator is consistent if *either* the treatment model or the outcome model is correctly specified, but not necessarily if both are wrong. It does not give you license to ignore model specification. If both nuisance models are badly misspecified, the estimator can be biased. In practice, you should still try to specify both models as carefully as possible. The double robustness property is an insurance policy, not a substitute for thoughtful modeling.</span>
-<span id="cb14-442"><a href="#cb14-442" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-443"><a href="#cb14-443" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
-<span id="cb14-444"><a href="#cb14-444" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-445"><a href="#cb14-445" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb14-446"><a href="#cb14-446" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q2. Why does TMLE use a "clever covariate" derived from the propensity score, and what happens if propensity scores are extreme?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb14-427"><a href="#cb14-427" aria-hidden="true" tabindex="-1"></a><span class="fu"># Summary</span></span>
+<span id="cb14-428"><a href="#cb14-428" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-429"><a href="#cb14-429" aria-hidden="true" tabindex="-1"></a>:::{.callout-tip}</span>
+<span id="cb14-430"><a href="#cb14-430" aria-hidden="true" tabindex="-1"></a><span class="fu">## Key Takeaways</span></span>
+<span id="cb14-431"><a href="#cb14-431" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-432"><a href="#cb14-432" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>AIPW and TMLE both solve the EIF estimating equation for the ATE; both are doubly robust and both achieve the semiparametric efficiency bound</span>
+<span id="cb14-433"><a href="#cb14-433" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>AIPW = G-computation + EIF correction (a sum); TMLE = G-computation with targeted $Q^* \to$ substitution estimator (a plug-in)</span>
+<span id="cb14-434"><a href="#cb14-434" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>The substitution form gives TMLE bounded predictions, plug-in interpretability, and a natural fit with Super Learner / CV-TMLE</span>
+<span id="cb14-435"><a href="#cb14-435" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>AIPW is simpler and equally valid when propensity scores are well-behaved; TMLE is the field default when machine learning is used or propensity scores are extreme</span>
+<span id="cb14-436"><a href="#cb14-436" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Inference for both rests on the same EIF, so their standard errors share the same theoretical justification</span>
+<span id="cb14-437"><a href="#cb14-437" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb14-438"><a href="#cb14-438" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-441"><a href="#cb14-441" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-442"><a href="#cb14-442" aria-hidden="true" tabindex="-1"></a><span class="co">#| interactive: true</span></span>
+<span id="cb14-443"><a href="#cb14-443" aria-hidden="true" tabindex="-1"></a><span class="fu">sessionInfo</span>()</span>
+<span id="cb14-444"><a href="#cb14-444" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-445"><a href="#cb14-445" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-446"><a href="#cb14-446" aria-hidden="true" tabindex="-1"></a>---</span>
 <span id="cb14-447"><a href="#cb14-447" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-448"><a href="#cb14-448" aria-hidden="true" tabindex="-1"></a>The clever covariate $H(A, W) = A / g(W) - (1 - A) / (1 - g(W))$ is derived from the efficient influence function for the ATE. It directs the fluctuation of the initial outcome model toward the specific causal parameter of interest, ensuring that the final estimate solves the EIF estimating equation. If propensity scores are extreme (near 0 or 1), the clever covariate becomes very large, which can destabilize the fluctuation step. This is why practical positivity (adequate overlap in propensity score distributions) is important for TMLE just as it is for IPTW.</span>
+<span id="cb14-448"><a href="#cb14-448" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
 <span id="cb14-449"><a href="#cb14-449" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-450"><a href="#cb14-450" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
-<span id="cb14-451"><a href="#cb14-451" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-452"><a href="#cb14-452" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb14-453"><a href="#cb14-453" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q3. Your TMLE estimate of a risk probability is 0.85. Could AIPW have produced an estimate above 1.0 for the same data?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb14-450"><a href="#cb14-450" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb14-451"><a href="#cb14-451" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. What does "doubly robust" mean in practice? Does it mean you can ignore model specification entirely?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb14-452"><a href="#cb14-452" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-453"><a href="#cb14-453" aria-hidden="true" tabindex="-1"></a>No. "Doubly robust" means the estimator is consistent if *either* the treatment model or the outcome model is correctly specified, but not necessarily if both are wrong. It does not give you license to ignore model specification. If both nuisance models are badly misspecified, the estimator can be biased. In practice, you should still try to specify both models as carefully as possible. The double robustness property is an insurance policy, not a substitute for thoughtful modeling.</span>
 <span id="cb14-454"><a href="#cb14-454" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-455"><a href="#cb14-455" aria-hidden="true" tabindex="-1"></a>Yes, and this is the *structural* reason TMLE is generally preferred for bounded outcomes, not merely a numerical curiosity. AIPW is a sum: the G-computation plug-in plus an unbounded IPW-weighted residual correction. When propensity scores are extreme, the correction can be large enough to push the sum outside the parameter space. TMLE absorbs the same correction into $Q$ on the logit scale, so the substitution estimator is the mean of valid probabilities and stays in $[0, 1]$ by construction. The two estimators target the same EIF; they differ in *how* they keep the result inside the parameter space.</span>
+<span id="cb14-455"><a href="#cb14-455" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
 <span id="cb14-456"><a href="#cb14-456" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-457"><a href="#cb14-457" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
-<span id="cb14-458"><a href="#cb14-458" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-459"><a href="#cb14-459" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb14-460"><a href="#cb14-460" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q4. Will AIPW and TMLE always give similar answers in practice?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb14-457"><a href="#cb14-457" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb14-458"><a href="#cb14-458" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q2. Why does TMLE use a "clever covariate" derived from the propensity score, and what happens if propensity scores are extreme?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb14-459"><a href="#cb14-459" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-460"><a href="#cb14-460" aria-hidden="true" tabindex="-1"></a>The clever covariate $H(A, W) = A / g(W) - (1 - A) / (1 - g(W))$ is derived from the efficient influence function for the ATE. It directs the fluctuation of the initial outcome model toward the specific causal parameter of interest, ensuring that the final estimate solves the EIF estimating equation. If propensity scores are extreme (near 0 or 1), the clever covariate becomes very large, which can destabilize the fluctuation step. This is why practical positivity (adequate overlap in propensity score distributions) is important for TMLE just as it is for IPTW.</span>
 <span id="cb14-461"><a href="#cb14-461" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-462"><a href="#cb14-462" aria-hidden="true" tabindex="-1"></a>In large samples on data with well-behaved propensity scores, yes; they share the same asymptotic distribution and the same EIF-based standard errors. Visible disagreement between the two estimates usually points to a specific cause: (i) some propensity scores are near 0 or 1, so the AIPW correction is large and the fluctuation parameter $\hat\epsilon$ is non-trivial; (ii) one nuisance is much more wrong than the other, so the boundedness behaviour matters; or (iii) the sample is small and the estimators' finite-sample distributions have not yet converged to the asymptotic one. A meaningful AIPW versus TMLE gap is therefore a useful diagnostic, not a contradiction.</span>
+<span id="cb14-462"><a href="#cb14-462" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
 <span id="cb14-463"><a href="#cb14-463" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-464"><a href="#cb14-464" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
-<span id="cb14-465"><a href="#cb14-465" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-466"><a href="#cb14-466" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb14-467"><a href="#cb14-467" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-468"><a href="#cb14-468" aria-hidden="true" tabindex="-1"></a><span class="fu">## What comes next</span></span>
-<span id="cb14-469"><a href="#cb14-469" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-470"><a href="#cb14-470" aria-hidden="true" tabindex="-1"></a>This chapter presented the theory and mechanics of AIPW and TMLE. Both estimators rely on nuisance models, and the quality of those models directly affects performance. The next chapter introduces Super Learner, the ensemble machine learning tool that makes nuisance estimation flexible and data-adaptive.</span>
-<span id="cb14-471"><a href="#cb14-471" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-472"><a href="#cb14-472" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-464"><a href="#cb14-464" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb14-465"><a href="#cb14-465" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q3. Your TMLE estimate of a risk probability is 0.85. Could AIPW have produced an estimate above 1.0 for the same data?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb14-466"><a href="#cb14-466" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-467"><a href="#cb14-467" aria-hidden="true" tabindex="-1"></a>Yes, and this is the *structural* reason TMLE is generally preferred for bounded outcomes, not merely a numerical curiosity. AIPW is a sum: the G-computation plug-in plus an unbounded IPW-weighted residual correction. When propensity scores are extreme, the correction can be large enough to push the sum outside the parameter space. TMLE absorbs the same correction into $Q$ on the logit scale, so the substitution estimator is the mean of valid probabilities and stays in $[0, 1]$ by construction. The two estimators target the same EIF; they differ in *how* they keep the result inside the parameter space.</span>
+<span id="cb14-468"><a href="#cb14-468" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-469"><a href="#cb14-469" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
+<span id="cb14-470"><a href="#cb14-470" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-471"><a href="#cb14-471" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb14-472"><a href="#cb14-472" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q4. Will AIPW and TMLE always give similar answers in practice?&lt;/strong&gt;&lt;/summary&gt;</span>
 <span id="cb14-473"><a href="#cb14-473" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-474"><a href="#cb14-474" aria-hidden="true" tabindex="-1"></a><span class="fu">## Software Implementation (R)</span></span>
+<span id="cb14-474"><a href="#cb14-474" aria-hidden="true" tabindex="-1"></a>In large samples on data with well-behaved propensity scores, yes; they share the same asymptotic distribution and the same EIF-based standard errors. Visible disagreement between the two estimates usually points to a specific cause: (i) some propensity scores are near 0 or 1, so the AIPW correction is large and the fluctuation parameter $\hat\epsilon$ is non-trivial; (ii) one nuisance is much more wrong than the other, so the boundedness behaviour matters; or (iii) the sample is small and the estimators' finite-sample distributions have not yet converged to the asymptotic one. A meaningful AIPW versus TMLE gap is therefore a useful diagnostic, not a contradiction.</span>
 <span id="cb14-475"><a href="#cb14-475" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-476"><a href="#cb14-476" aria-hidden="true" tabindex="-1"></a>This example demonstrates the **double robustness** property using the <span class="in">`tmle`</span> package. We deliberately misspecify one nuisance model at a time to show that the TMLE estimate remains consistent as long as at least one model is correct.</span>
+<span id="cb14-476"><a href="#cb14-476" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
 <span id="cb14-477"><a href="#cb14-477" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-478"><a href="#cb14-478" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Simulate data with a nonlinear confounder–outcome relationship</span>
-<span id="cb14-479"><a href="#cb14-479" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Scenario A: correct $Q$, wrong $g$ → TMLE consistent</span>
-<span id="cb14-480"><a href="#cb14-480" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Scenario B: wrong $Q$, correct $g$ → TMLE consistent</span>
-<span id="cb14-481"><a href="#cb14-481" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Scenario C: both correct → TMLE efficient</span>
-<span id="cb14-482"><a href="#cb14-482" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Falls back to a manual demonstration if <span class="in">`tmle`</span> is unavailable</span>
+<span id="cb14-478"><a href="#cb14-478" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-479"><a href="#cb14-479" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-480"><a href="#cb14-480" aria-hidden="true" tabindex="-1"></a><span class="fu">## What comes next</span></span>
+<span id="cb14-481"><a href="#cb14-481" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-482"><a href="#cb14-482" aria-hidden="true" tabindex="-1"></a>This chapter presented the theory and mechanics of AIPW and TMLE. Both estimators rely on nuisance models, and the quality of those models directly affects performance. The next chapter introduces Super Learner, the ensemble machine learning tool that makes nuisance estimation flexible and data-adaptive.</span>
 <span id="cb14-483"><a href="#cb14-483" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-486"><a href="#cb14-486" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb14-487"><a href="#cb14-487" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
-<span id="cb14-488"><a href="#cb14-488" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
-<span id="cb14-489"><a href="#cb14-489" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
-<span id="cb14-490"><a href="#cb14-490" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">1000</span></span>
-<span id="cb14-491"><a href="#cb14-491" aria-hidden="true" tabindex="-1"></a>W <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n)</span>
-<span id="cb14-492"><a href="#cb14-492" aria-hidden="true" tabindex="-1"></a>A <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(<span class="fl">0.3</span> <span class="sc">*</span> W <span class="sc">+</span> <span class="fl">0.2</span> <span class="sc">*</span> W<span class="sc">^</span><span class="dv">2</span>))</span>
-<span id="cb14-493"><a href="#cb14-493" aria-hidden="true" tabindex="-1"></a>Y <span class="ot">&lt;-</span> <span class="fl">0.5</span> <span class="sc">*</span> A <span class="sc">+</span> <span class="fu">sin</span>(W) <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="at">sd =</span> <span class="fl">0.3</span>)  <span class="co"># true ATE = 0.5</span></span>
-<span id="cb14-494"><a href="#cb14-494" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-495"><a href="#cb14-495" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="fu">requireNamespace</span>(<span class="st">"tmle"</span>, <span class="at">quietly =</span> <span class="cn">TRUE</span>)) {</span>
-<span id="cb14-496"><a href="#cb14-496" aria-hidden="true" tabindex="-1"></a>  <span class="fu">library</span>(tmle)</span>
-<span id="cb14-497"><a href="#cb14-497" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-498"><a href="#cb14-498" aria-hidden="true" tabindex="-1"></a>  <span class="do">## Scenario A: correct Q model, misspecified g (intercept only)</span></span>
-<span id="cb14-499"><a href="#cb14-499" aria-hidden="true" tabindex="-1"></a>  fit_a <span class="ot">&lt;-</span> <span class="fu">tmle</span>(<span class="at">Y =</span> Y, <span class="at">A =</span> A, <span class="at">W =</span> <span class="fu">data.frame</span>(<span class="at">W =</span> W),  <span class="co"># &lt;1&gt;</span></span>
-<span id="cb14-500"><a href="#cb14-500" aria-hidden="true" tabindex="-1"></a>                <span class="at">Q.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.earth"</span>),  <span class="co"># &lt;2&gt;</span></span>
-<span id="cb14-501"><a href="#cb14-501" aria-hidden="true" tabindex="-1"></a>                <span class="at">g.SL.library  =</span> <span class="st">"SL.mean"</span>)               <span class="co"># &lt;3&gt;</span></span>
-<span id="cb14-502"><a href="#cb14-502" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"Scenario A (correct Q, wrong g):"</span>, <span class="fu">round</span>(fit_a<span class="sc">$</span>estimates<span class="sc">$</span>ATE<span class="sc">$</span>psi, <span class="dv">3</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb14-503"><a href="#cb14-503" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-504"><a href="#cb14-504" aria-hidden="true" tabindex="-1"></a>  <span class="do">## Scenario B: misspecified Q (intercept only), correct g</span></span>
-<span id="cb14-505"><a href="#cb14-505" aria-hidden="true" tabindex="-1"></a>  fit_b <span class="ot">&lt;-</span> <span class="fu">tmle</span>(<span class="at">Y =</span> Y, <span class="at">A =</span> A, <span class="at">W =</span> <span class="fu">data.frame</span>(<span class="at">W =</span> W),</span>
-<span id="cb14-506"><a href="#cb14-506" aria-hidden="true" tabindex="-1"></a>                <span class="at">Q.SL.library =</span> <span class="st">"SL.mean"</span>,                <span class="co"># &lt;4&gt;</span></span>
-<span id="cb14-507"><a href="#cb14-507" aria-hidden="true" tabindex="-1"></a>                <span class="at">g.SL.library  =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.earth"</span>))</span>
-<span id="cb14-508"><a href="#cb14-508" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"Scenario B (wrong Q, correct g):"</span>, <span class="fu">round</span>(fit_b<span class="sc">$</span>estimates<span class="sc">$</span>ATE<span class="sc">$</span>psi, <span class="dv">3</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb14-484"><a href="#cb14-484" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb14-485"><a href="#cb14-485" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-486"><a href="#cb14-486" aria-hidden="true" tabindex="-1"></a><span class="fu">## Software Implementation (R)</span></span>
+<span id="cb14-487"><a href="#cb14-487" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-488"><a href="#cb14-488" aria-hidden="true" tabindex="-1"></a>This example demonstrates the **double robustness** property using the <span class="in">`tmle`</span> package. We deliberately misspecify one nuisance model at a time to show that the TMLE estimate remains consistent as long as at least one model is correct.</span>
+<span id="cb14-489"><a href="#cb14-489" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-490"><a href="#cb14-490" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Simulate data with a nonlinear confounder–outcome relationship</span>
+<span id="cb14-491"><a href="#cb14-491" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Scenario A: correct $Q$, wrong $g$ → TMLE consistent</span>
+<span id="cb14-492"><a href="#cb14-492" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Scenario B: wrong $Q$, correct $g$ → TMLE consistent</span>
+<span id="cb14-493"><a href="#cb14-493" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Scenario C: both correct → TMLE efficient</span>
+<span id="cb14-494"><a href="#cb14-494" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Falls back to a manual demonstration if <span class="in">`tmle`</span> is unavailable</span>
+<span id="cb14-495"><a href="#cb14-495" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-498"><a href="#cb14-498" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb14-499"><a href="#cb14-499" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
+<span id="cb14-500"><a href="#cb14-500" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
+<span id="cb14-501"><a href="#cb14-501" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb14-502"><a href="#cb14-502" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">1000</span></span>
+<span id="cb14-503"><a href="#cb14-503" aria-hidden="true" tabindex="-1"></a>W <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n)</span>
+<span id="cb14-504"><a href="#cb14-504" aria-hidden="true" tabindex="-1"></a>A <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(<span class="fl">0.3</span> <span class="sc">*</span> W <span class="sc">+</span> <span class="fl">0.2</span> <span class="sc">*</span> W<span class="sc">^</span><span class="dv">2</span>))</span>
+<span id="cb14-505"><a href="#cb14-505" aria-hidden="true" tabindex="-1"></a>Y <span class="ot">&lt;-</span> <span class="fl">0.5</span> <span class="sc">*</span> A <span class="sc">+</span> <span class="fu">sin</span>(W) <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="at">sd =</span> <span class="fl">0.3</span>)  <span class="co"># true ATE = 0.5</span></span>
+<span id="cb14-506"><a href="#cb14-506" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-507"><a href="#cb14-507" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="fu">requireNamespace</span>(<span class="st">"tmle"</span>, <span class="at">quietly =</span> <span class="cn">TRUE</span>)) {</span>
+<span id="cb14-508"><a href="#cb14-508" aria-hidden="true" tabindex="-1"></a>  <span class="fu">library</span>(tmle)</span>
 <span id="cb14-509"><a href="#cb14-509" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-510"><a href="#cb14-510" aria-hidden="true" tabindex="-1"></a>  <span class="do">## Scenario C: both reasonably specified</span></span>
-<span id="cb14-511"><a href="#cb14-511" aria-hidden="true" tabindex="-1"></a>  fit_c <span class="ot">&lt;-</span> <span class="fu">tmle</span>(<span class="at">Y =</span> Y, <span class="at">A =</span> A, <span class="at">W =</span> <span class="fu">data.frame</span>(<span class="at">W =</span> W),</span>
-<span id="cb14-512"><a href="#cb14-512" aria-hidden="true" tabindex="-1"></a>                <span class="at">Q.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.earth"</span>),</span>
-<span id="cb14-513"><a href="#cb14-513" aria-hidden="true" tabindex="-1"></a>                <span class="at">g.SL.library  =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.earth"</span>))</span>
-<span id="cb14-514"><a href="#cb14-514" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"Scenario C (both correct):      "</span>, <span class="fu">round</span>(fit_c<span class="sc">$</span>estimates<span class="sc">$</span>ATE<span class="sc">$</span>psi, <span class="dv">3</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb14-515"><a href="#cb14-515" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"95% CI:"</span>, <span class="fu">round</span>(fit_c<span class="sc">$</span>estimates<span class="sc">$</span>ATE<span class="sc">$</span>CI, <span class="dv">3</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb14-516"><a href="#cb14-516" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
-<span id="cb14-517"><a href="#cb14-517" aria-hidden="true" tabindex="-1"></a>  <span class="fu">message</span>(<span class="st">"Install the 'tmle' package:  install.packages('tmle')"</span>)</span>
-<span id="cb14-518"><a href="#cb14-518" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb14-519"><a href="#cb14-519" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb14-520"><a href="#cb14-520" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span><span class="in">`tmle()`</span> from the <span class="in">`tmle`</span> package automates all four TMLE steps; <span class="in">`W`</span> must be a <span class="in">`data.frame`</span> (not a matrix or bare vector)</span>
-<span id="cb14-521"><a href="#cb14-521" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span><span class="in">`Q.SL.library`</span>: the Super Learner library for the outcome model $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$; <span class="in">`SL.earth`</span> adds MARS splines to capture nonlinearity in the outcome</span>
-<span id="cb14-522"><a href="#cb14-522" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span><span class="in">`g.SL.library = "SL.mean"`</span>: deliberately misspecified propensity score using only an intercept-only model (predicts the marginal mean treatment probability for everyone); this tests whether TMLE remains consistent when Q is correct but g is wrong</span>
-<span id="cb14-523"><a href="#cb14-523" aria-hidden="true" tabindex="-1"></a><span class="ss">4. </span><span class="in">`Q.SL.library = "SL.mean"`</span>: deliberately misspecified outcome model; tests whether TMLE remains consistent when g is correct but Q is wrong; both Scenarios A and B should give estimates close to the true ATE = 0.5</span>
+<span id="cb14-510"><a href="#cb14-510" aria-hidden="true" tabindex="-1"></a>  <span class="do">## Scenario A: correct Q model, misspecified g (intercept only)</span></span>
+<span id="cb14-511"><a href="#cb14-511" aria-hidden="true" tabindex="-1"></a>  fit_a <span class="ot">&lt;-</span> <span class="fu">tmle</span>(<span class="at">Y =</span> Y, <span class="at">A =</span> A, <span class="at">W =</span> <span class="fu">data.frame</span>(<span class="at">W =</span> W),  <span class="co"># &lt;1&gt;</span></span>
+<span id="cb14-512"><a href="#cb14-512" aria-hidden="true" tabindex="-1"></a>                <span class="at">Q.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.earth"</span>),  <span class="co"># &lt;2&gt;</span></span>
+<span id="cb14-513"><a href="#cb14-513" aria-hidden="true" tabindex="-1"></a>                <span class="at">g.SL.library  =</span> <span class="st">"SL.mean"</span>)               <span class="co"># &lt;3&gt;</span></span>
+<span id="cb14-514"><a href="#cb14-514" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"Scenario A (correct Q, wrong g):"</span>, <span class="fu">round</span>(fit_a<span class="sc">$</span>estimates<span class="sc">$</span>ATE<span class="sc">$</span>psi, <span class="dv">3</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb14-515"><a href="#cb14-515" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-516"><a href="#cb14-516" aria-hidden="true" tabindex="-1"></a>  <span class="do">## Scenario B: misspecified Q (intercept only), correct g</span></span>
+<span id="cb14-517"><a href="#cb14-517" aria-hidden="true" tabindex="-1"></a>  fit_b <span class="ot">&lt;-</span> <span class="fu">tmle</span>(<span class="at">Y =</span> Y, <span class="at">A =</span> A, <span class="at">W =</span> <span class="fu">data.frame</span>(<span class="at">W =</span> W),</span>
+<span id="cb14-518"><a href="#cb14-518" aria-hidden="true" tabindex="-1"></a>                <span class="at">Q.SL.library =</span> <span class="st">"SL.mean"</span>,                <span class="co"># &lt;4&gt;</span></span>
+<span id="cb14-519"><a href="#cb14-519" aria-hidden="true" tabindex="-1"></a>                <span class="at">g.SL.library  =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.earth"</span>))</span>
+<span id="cb14-520"><a href="#cb14-520" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"Scenario B (wrong Q, correct g):"</span>, <span class="fu">round</span>(fit_b<span class="sc">$</span>estimates<span class="sc">$</span>ATE<span class="sc">$</span>psi, <span class="dv">3</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb14-521"><a href="#cb14-521" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-522"><a href="#cb14-522" aria-hidden="true" tabindex="-1"></a>  <span class="do">## Scenario C: both reasonably specified</span></span>
+<span id="cb14-523"><a href="#cb14-523" aria-hidden="true" tabindex="-1"></a>  fit_c <span class="ot">&lt;-</span> <span class="fu">tmle</span>(<span class="at">Y =</span> Y, <span class="at">A =</span> A, <span class="at">W =</span> <span class="fu">data.frame</span>(<span class="at">W =</span> W),</span>
+<span id="cb14-524"><a href="#cb14-524" aria-hidden="true" tabindex="-1"></a>                <span class="at">Q.SL.library =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.earth"</span>),</span>
+<span id="cb14-525"><a href="#cb14-525" aria-hidden="true" tabindex="-1"></a>                <span class="at">g.SL.library  =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.earth"</span>))</span>
+<span id="cb14-526"><a href="#cb14-526" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"Scenario C (both correct):      "</span>, <span class="fu">round</span>(fit_c<span class="sc">$</span>estimates<span class="sc">$</span>ATE<span class="sc">$</span>psi, <span class="dv">3</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb14-527"><a href="#cb14-527" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"95% CI:"</span>, <span class="fu">round</span>(fit_c<span class="sc">$</span>estimates<span class="sc">$</span>ATE<span class="sc">$</span>CI, <span class="dv">3</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb14-528"><a href="#cb14-528" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb14-529"><a href="#cb14-529" aria-hidden="true" tabindex="-1"></a>  <span class="fu">message</span>(<span class="st">"Install the 'tmle' package:  install.packages('tmle')"</span>)</span>
+<span id="cb14-530"><a href="#cb14-530" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb14-531"><a href="#cb14-531" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb14-532"><a href="#cb14-532" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span><span class="in">`tmle()`</span> from the <span class="in">`tmle`</span> package automates all four TMLE steps; <span class="in">`W`</span> must be a <span class="in">`data.frame`</span> (not a matrix or bare vector)</span>
+<span id="cb14-533"><a href="#cb14-533" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span><span class="in">`Q.SL.library`</span>: the Super Learner library for the outcome model $E<span class="co">[</span><span class="ot">Y \mid A, W</span><span class="co">]</span>$; <span class="in">`SL.earth`</span> adds MARS splines to capture nonlinearity in the outcome</span>
+<span id="cb14-534"><a href="#cb14-534" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span><span class="in">`g.SL.library = "SL.mean"`</span>: deliberately misspecified propensity score using only an intercept-only model (predicts the marginal mean treatment probability for everyone); this tests whether TMLE remains consistent when Q is correct but g is wrong</span>
+<span id="cb14-535"><a href="#cb14-535" aria-hidden="true" tabindex="-1"></a><span class="ss">4. </span><span class="in">`Q.SL.library = "SL.mean"`</span>: deliberately misspecified outcome model; tests whether TMLE remains consistent when g is correct but Q is wrong; both Scenarios A and B should give estimates close to the true ATE = 0.5</span>
 </code><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></pre></div>
 </div></div></div></div></div>
 </div> <!-- /content -->
