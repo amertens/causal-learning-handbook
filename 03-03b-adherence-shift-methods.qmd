@@ -1,5 +1,5 @@
 ---
-subtitle: "Comparing drugs under realistic adherence using LMTP"
+subtitle: "From adherence thresholds to intervention-defined forgiveness curves"
 format: html
 ---
 
@@ -29,6 +29,35 @@ The key concept is **regimen forgiveness**: a drug is forgiving if patients can 
 We use a simulated two-drug HIV cohort designed to capture the essential features of the adherence problem: treatment-confounder feedback between adherence and health, differential forgiveness across drugs, and the positivity challenges that arise when targeting extreme adherence levels. The simulation is calibrated to real pharmacoepidemiologic settings and uses continuous proportion of days covered (PDC) as the adherence measure.
 
 
+The figure below previews the quantity we are after. A **forgiveness curve** plots the counterfactual risk of virologic failure against the adherence level a patient sustains, one curve per drug. The vertical distance between the two curves is the **forgiveness gap**: how much more a missed-dose pattern costs on the less forgiving regimen. The curve is a causal object, the risk we *would* see if adherence were set to each level, and it is not the same as the risk we observe among patients who happen to adhere at that level. Those two can diverge sharply, and most of this chapter is about why, and how to estimate the causal version.
+
+```{r}
+#| label: fig-forgiveness-motivation
+#| fig-cap: "An illustrative forgiveness curve. Counterfactual failure risk rises as sustained adherence falls, and it rises faster for the less forgiving regimen. The vertical distance is the forgiveness gap. This is the causal quantity the chapter estimates; the curve here is a stylized illustration, not yet an estimate from data."
+#| code-fold: true
+library(ggplot2)
+adh <- seq(0.30, 1, length.out = 150)
+data.frame(
+  adherence = rep(adh, 2),
+  risk = c(plogis(-3 + 4.5 * (1 - adh)),
+           plogis(-3 + 4.5 * (1 - adh) - 0.8 * (1 - adh))),
+  Drug = rep(c("Drug B (less forgiving)", "Drug A (more forgiving)"), each = 150)
+) |>
+  ggplot(aes(adherence, risk, color = Drug)) +
+  geom_line(linewidth = 1.2) +
+  annotate("segment", x = 0.5, xend = 0.5, y = 0.16, yend = 0.55,
+           linetype = "dashed", color = "grey40") +
+  annotate("text", x = 0.52, y = 0.36, label = "forgiveness\ngap",
+           hjust = 0, size = 3.4, color = "grey40") +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values = c("Drug B (less forgiving)" = "#EE6677",
+                                "Drug A (more forgiving)" = "#228833")) +
+  labs(x = "Sustained adherence (PDC)", y = "Virologic failure risk", color = NULL) +
+  theme_minimal() + theme(legend.position = "bottom")
+```
+
+
 # The clinical question
 
 Consider two antiretroviral regimens for HIV treatment:
@@ -45,6 +74,28 @@ This question requires separating three components:
 3. **Adherence-mediated effect**: How much of the total drug difference operates through the adherence pathway?
 
 Each component requires longitudinal causal methods because adherence and health co-evolve over time.
+
+
+# Why this needs a causal method
+
+Adherence is measured after treatment starts and changes over time, and it sits in a feedback loop with health. Worse health lowers adherence through side effects and complications; lower adherence worsens virologic control; and worse control feeds back into health, which shapes the next period's adherence. The variable that confounds the adherence-to-failure relationship, current health status $L_t$, is therefore also a *consequence* of past adherence.
+
+```{mermaid}
+%%| label: fig-adherence-dag
+%%| fig-cap: "Two blocks of the adherence process. Health status L at each block confounds the adherence-to-failure relationship and is itself moved by prior adherence (the feedback arrow from PDC1 to L2). A regression that conditions on L removes the confounding but also blocks the pathway through which past adherence acts; a regression that omits L leaves the confounding in place."
+flowchart LR
+  W["W0, A0<br/>baseline, drug"] --> L1["L1<br/>health"]
+  L1 --> P1["PDC1<br/>adherence"]
+  P1 --> Y["Y<br/>failure"]
+  L1 --> Y
+  P1 --> L2["L2<br/>health"]
+  W --> L2
+  L2 --> P2["PDC2<br/>adherence"]
+  P2 --> Y
+  L2 --> Y
+```
+
+This is the dilemma that defeats ordinary regression. Conditioning on observed adherence adjusts for the health-status confounding and, at the same time, blocks the adherence effect we want to measure, because that effect runs through health. Leaving health out of the model leaves the confounding in place. No single regression can do both. This is exactly the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it is why estimating a forgiveness curve needs the g-methods developed there.
 
 
 # The data-generating process
@@ -166,28 +217,81 @@ dat |>
 
 A naive analysis would stratify patients by observed adherence level and compare outcomes within strata. This is systematically biased because of treatment-confounder feedback: patients with low adherence tend to be sicker (higher $L_t$), and sicker patients have higher failure risk regardless of adherence. The naive analysis overestimates the effect of adherence because the low-adherence stratum is enriched for patients who were going to fail anyway.
 
+To see the bias rather than just assert it, compare the crude curve against the truth. Because the data come from a known simulation, we can compute the **oracle forgiveness curve**: the actual counterfactual failure risk if every patient sustained a given adherence level, obtained by re-running the data-generating process with adherence held fixed and health allowed to respond. Overlaying it on the crude adherence-stratified curve shows the gap.
+
 ```{r}
-#| label: fig-naive-forgiveness
-#| fig-cap: "Naive (crude) adherence-outcome relationship. Each point shows the failure rate among patients with PDC in that bin during block 1. The steep relationship is partly causal and partly confounded by the treatment-confounder feedback."
+#| label: fig-oracle-vs-naive
+#| fig-cap: "Causal forgiveness curves (lines) versus crude adherence-stratified failure rates (open points). The crude points tend to sit above the causal curve at low adherence and below it at high adherence, because low-adherence patients are sicker for reasons the crude comparison wrongly attributes to adherence. The crude curve is therefore too steep."
 #| code-fold: true
-dat |>
-  mutate(
-    Drug = ifelse(A0 == 1, "Drug A", "Drug B"),
-    PDC_bin = cut(PDC_1, breaks = seq(0, 1, 0.1), include.lowest = TRUE)
-  ) |>
-  group_by(Drug, PDC_bin) |>
-  summarise(failure_rate = mean(Y_final), n = n(), .groups = "drop") |>
-  filter(n >= 5) |>
-  ggplot(aes(x = PDC_bin, y = failure_rate, color = Drug, group = Drug)) +
-  geom_point(size = 2) +
-  geom_line() +
-  labs(x = "PDC bin (block 1)", y = "Failure rate (crude)") +
+# Oracle: counterfactual 12-month failure risk if PDC is held at `a` every block,
+# for a given drug, with health L allowed to respond to the fixed adherence.
+oracle_forgiveness <- function(a, drug, n = 20000, K = 4, seed = 99) {
+  set.seed(seed)
+  betaW <- 0.30; betaLag <- 0.35; betaP <- 0.80; sigma_L <- 0.50
+  gamma0 <- -3.80; gammaL <- 0.50; gammaW <- 0.30; gammaP <- 2.50; gammaAP <- -1.20
+  W0 <- rnorm(n); A0 <- rep(drug, n)
+  L_prev <- NULL; failed <- rep(FALSE, n)
+  for (t in 1:K) {
+    if (t == 1) L_t <- betaW * W0 + rnorm(n, 0, sigma_L)
+    else        L_t <- betaW * W0 + betaLag * L_prev + betaP * (1 - a) + rnorm(n, 0, sigma_L)
+    lp <- gamma0 + gammaL * L_t + gammaW * W0 + gammaP * (1 - a) + gammaAP * A0 * (1 - a)
+    failed <- failed | (runif(n) < plogis(lp))
+    L_prev <- L_t
+  }
+  mean(failed)
+}
+
+pdc_grid <- seq(0.40, 0.95, by = 0.05)
+oracle_df <- do.call(rbind, lapply(c(0, 1), function(d)
+  data.frame(PDC = pdc_grid, Drug = ifelse(d == 1, "Drug A", "Drug B"),
+             risk = vapply(pdc_grid, oracle_forgiveness, numeric(1), drug = d))))
+
+naive_df <- dat |>
+  mutate(Drug = ifelse(A0 == 1, "Drug A", "Drug B"),
+         mean_PDC = rowMeans(dplyr::across(dplyr::starts_with("PDC_"))),
+         bin = cut(mean_PDC, breaks = seq(0, 1, 0.1))) |>
+  group_by(Drug, bin) |>
+  summarise(PDC = mean(mean_PDC), risk = mean(Y_final), n = n(), .groups = "drop") |>
+  filter(n >= 10)
+
+ggplot(oracle_df, aes(PDC, risk, color = Drug)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(data = naive_df, aes(PDC, risk, color = Drug), shape = 1, size = 2.2) +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
   scale_color_manual(values = c("Drug A" = "#228833", "Drug B" = "#EE6677")) +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  labs(x = "Sustained adherence (PDC)", y = "12-month failure risk", color = NULL,
+       title = "Oracle forgiveness curves (lines) vs crude risk by adherence (points)") +
+  theme_minimal() + theme(legend.position = "bottom")
 ```
 
-The crude curves overestimate the adherence effect because they compare patients who are not exchangeable. The causal adherence-response curve (the forgiveness curve) requires g-methods that account for the feedback between adherence and health. The L-TMLE chapter (@sec-illustrated-ltmle) showed how to estimate static adherence regimes; here we focus on the feasible shift approach using LMTP.
+The solid lines are the causal forgiveness curves; the open points are the crude failure rates among patients whose average adherence fell in each bin. The crude points tend to sit above the causal curve where adherence is low and below it where adherence is high: low-adherence patients are sicker for reasons the crude comparison attributes to adherence, so it overstates the cost of poor adherence and understates the benefit of good adherence, exactly the bias the feedback loop predicts. Recovering the causal curve requires g-methods that account for that feedback. The L-TMLE chapter (@sec-illustrated-ltmle) estimates static adherence regimes that trace this curve at fixed levels; the rest of this chapter develops the feasible-shift approach with LMTP.
+
+
+# Two estimands, and the estimator each one needs
+
+The forgiveness question can be made precise in two ways, and they call for different estimators.
+
+The first is a **static adherence regime**: what would the failure risk be if every patient *sustained* a fixed adherence level, say low, medium, or high, for the whole year? This is the estimand that traces the forgiveness curve at fixed points, and the longitudinal TMLE of @sec-illustrated-ltmle estimates it. Its weakness is positivity: very few patients actually sustain low adherence, or perfect adherence, across all four blocks, so the data thin out at the ends of the curve.
+
+The second is a **feasible shift**: what would happen if every patient's adherence were nudged up by a realistic amount, say 10 percentage points, from wherever it currently sits? This is a modified treatment policy, and LMTP estimates it. Because the shifted adherence stays close to what each patient already does, it respects the support of the data and answers a question an adherence-support program could actually act on.
+
+The two are complementary summaries of the same counterfactual risk surface. The static curve shows the whole shape but needs support at every level; the shift gives a stable, policy-relevant slice near the observed distribution. The positivity problem with static extremes is easy to see directly in the data.
+
+```{r}
+#| label: positivity-sustained
+#| code-fold: show
+# How many patients actually sustain low or high adherence across all four blocks?
+pdc <- as.matrix(dat[, paste0("PDC_", 1:4)])
+data.frame(
+  regime     = c("sustained low (<0.50 every block)", "sustained high (>0.90 every block)"),
+  n_patients = c(sum(rowMeans(pdc < 0.50) == 1), sum(rowMeans(pdc > 0.90) == 1)),
+  pct        = round(100 * c(mean(rowMeans(pdc < 0.50) == 1),
+                             mean(rowMeans(pdc > 0.90) == 1)), 1)
+)
+```
+
+When only a handful of patients sustain an extreme regime, the static forgiveness-curve estimate at that end rests on almost no data, and its confidence interval understates the true fragility. The longitudinal positivity diagnostic in @sec-positivity-overlap is the general version of this check. A feasible shift sidesteps the problem, which is the motivation for the LMTP approach below.
 
 
 # LMTP estimation: feasible adherence shifts
@@ -311,6 +415,8 @@ The curve is well-estimated only where there is adequate positivity. Below appro
 **Causal, not descriptive.** The LMTP framework accounts for the treatment-confounder feedback between adherence and health. When adherence changes, health status changes too, and those changes are propagated through the sequential regression structure.
 
 **Drug-specific effects.** Running the analysis separately by drug reveals whether the marginal return to improved adherence differs by regimen. If Drug A is more forgiving, the benefit of an adherence intervention is smaller for Drug A patients (they are already doing relatively well at moderate adherence) and larger for Drug B patients.
+
+**Read the shift estimate alongside the static curve, not alone.** Under positivity strain the variance of the LMTP shift estimator can be underestimated and its interval can under-cover. The feasible-shift number is most trustworthy when it is reported next to the static-regime estimates and the support diagnostics above, rather than as a single standalone figure.
 
 
 # Connection to mediation
