@@ -82,12 +82,14 @@ Inference for the value of an *optimal* rule is genuinely harder than for an ord
 
 ## 6. Worked example: an individualized HAART-initiation rule
 
-We reuse the baseline HAART cohort. The plan has three steps that mirror the sections above: estimate each patient's benefit, turn it into a rule, and value the rule against the blanket policies. The example uses `grf` for the CATE and base R for the value, and is marked not to run because `grf` is not assumed installed; the structure is what matters.
+We reuse the baseline HAART cohort. The plan has three steps that mirror the sections above: estimate each patient's benefit, turn it into a rule, and value the rule against the blanket policies. The example uses `grf` for the CATE and base R for the value; the structure is what matters.
 
 ```{r}
-#| eval: false
+#| warning: false
+#| message: false
 source("_data/load-haart-cohort.R")
 library(grf)
+set.seed(2026)
 
 W <- haart_baseline[, c("age", "sex", "cd4_sqrt_baseline")]
 A <- haart_baseline$ever_haart
@@ -102,10 +104,22 @@ tau_hat  <- predict(cf)$predictions          # estimated effect of HAART on mort
 rule <- as.integer(tau_hat < 0)
 ```
 
+```{r}
+#| label: fig-otr-cate
+#| fig-cap: "Estimated individual treatment effects (CATEs) of HAART on mortality from the causal forest. Negative values mean HAART is predicted to lower mortality for that patient; the treat-if-benefit rule treats everyone left of the dashed line at zero. Patients piled up near zero are exactly those for whom the rule is least certain."
+#| code-fold: true
+library(ggplot2)
+ggplot(data.frame(tau = tau_hat), aes(tau)) +
+  geom_histogram(bins = 40, fill = "steelblue", alpha = 0.85) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = "Estimated CATE (effect of HAART on mortality risk)", y = "Patients",
+       title = "Who does the rule decide to treat?") +
+  theme_minimal()
+```
+
 Once the rule is defined, value it with the augmented estimator from Section 5, using a propensity model and an outcome model for the nuisance pieces. The helper below values any 0/1 rule and is plain base R.
 
 ```{r}
-#| eval: false
 g_hat <- predict(glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
                      family = binomial, data = haart_baseline), type = "response")
 qfit  <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
@@ -120,9 +134,24 @@ value_of <- function(rule) {
   mean(Qd + (A == d) / gd * (Y - Qd))               # augmented value estimate
 }
 
-c(treat_all = value_of(rep(1, nrow(haart_baseline))),
-  treat_none = value_of(rep(0, nrow(haart_baseline))),
-  learned_rule = value_of(rule))
+policy_values <- c(
+  `Treat all`     = value_of(rep(1, nrow(haart_baseline))),
+  `Treat none`    = value_of(rep(0, nrow(haart_baseline))),
+  `Learned rule`  = value_of(rule))
+policy_values
+```
+
+```{r}
+#| label: fig-otr-value
+#| fig-cap: "Estimated population mortality risk under three policies: treat everyone, treat no one, and the learned treat-if-benefit rule. Lower is better. In this small cohort the differences are modest and imprecise, which is the honest result; a rule that merely matches treat-all offers no practical advantage."
+#| code-fold: true
+ggplot(data.frame(policy = names(policy_values), risk = as.numeric(policy_values)),
+       aes(reorder(policy, risk), risk, fill = policy)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = sprintf("%.3f", risk)), vjust = -0.4) +
+  labs(x = NULL, y = "Estimated mortality risk under policy",
+       title = "Value of the learned rule versus blanket policies") +
+  theme_minimal()
 ```
 
 Read the three numbers as mortality risks under each policy. If the learned rule's value sits below treat-all by, say, two deaths per hundred patients, the rule is worth considering; if it is indistinguishable from treat-all, the blanket policy is simpler and just as good. In this small cohort, with 31 deaths, the differences will be imprecise, which is the honest result rather than a disappointing one.

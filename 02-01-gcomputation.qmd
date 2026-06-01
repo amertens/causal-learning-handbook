@@ -81,7 +81,24 @@ ate  <- risk1 - risk0
 knitr::kable(data.frame(risk1 = risk1, risk0 = risk0, ate = ate))
 ```
 
-**How to interpret these results:** `ate` is the standardized (marginal) risk difference, and it is the causal number, not either regression coefficient. Read it as: if the entire population had initiated HAART rather than not, the estimated mortality risk would change by `ate` (about X percentage points), with the measured confounders' distribution held fixed. `risk1` and `risk0` are the standardized risks under universal treatment and under no treatment; the contrast between them is what a well-randomized trial would have estimated.
+```{r}
+#| label: fig-gcomp-counterfactual
+#| fig-cap: "Predicted mortality risk for every individual under universal HAART initiation ($A=1$) versus no initiation ($A=0$). G-computation averages each distribution down to a single standardized risk (dashed lines); the gap between those averages is the ATE."
+#| code-fold: true
+library(ggplot2)
+tibble::tibble(
+  risk = c(p1, p0),
+  arm  = rep(c("Under HAART (A = 1)", "No HAART (A = 0)"), each = length(p1))
+) |>
+  ggplot(aes(risk, fill = arm)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = c(risk1, risk0), linetype = "dashed") +
+  labs(x = "Predicted mortality risk", y = "Density", fill = NULL,
+       title = "Counterfactual risk distributions g-computation averages over") +
+  theme_minimal()
+```
+
+**How to interpret these results:** `ate` is the standardized (marginal) risk difference, and it is the causal number, not either regression coefficient. Read it as: if the entire population had initiated HAART rather than not, the estimated mortality risk would change by `ate` (about `r round(ate * 100, 1)` percentage points), with the measured confounders' distribution held fixed. `risk1` and `risk0` are the standardized risks under universal treatment and under no treatment; the contrast between them is what a well-randomized trial would have estimated.
 
 ### Beyond the Risk Difference: Relative Risk and Population Attributable Fraction
 
@@ -203,20 +220,26 @@ G-computation handles near-positivity violations differently from IPTW. Where IP
 
 **Practical note.** The biggest limitation of g-computation with logistic regression is that you must get the functional form right. A powerful alternative is to replace the parametric model with a data-adaptive learner (random forests, gradient boosting, GAMs, or a SuperLearner ensemble), reducing reliance on parametric assumptions. In later chapters we systematically integrate SuperLearner with **TMLE**.
 
-```{r, eval=F}
+```{r}
 #| interactive: true
+#| warning: false
+#| message: false
 library(SuperLearner)
+set.seed(2026)
+
+# SuperLearner expects a plain data.frame of predictors
+X_all <- as.data.frame(dat[, c("ever_haart", "age", "sex", "cd4_sqrt_baseline")])
 
 sl_mod <- SuperLearner(
   Y = dat$died,
-  X = dat %>% select(ever_haart, age, sex, cd4_sqrt_baseline),
+  X = X_all,
   family = binomial(),
   SL.library = c("SL.glm", "SL.ranger", "SL.gam")
 )
 
-# predict for counterfactuals
-p1_sl <- predict(sl_mod, newdata = dat1)$pred
-p0_sl <- predict(sl_mod, newdata = dat0)$pred
+# predict for counterfactuals (predictor columns only)
+p1_sl <- predict(sl_mod, newdata = transform(X_all, ever_haart = 1))$pred
+p0_sl <- predict(sl_mod, newdata = transform(X_all, ever_haart = 0))$pred
 
 mean(p1_sl - p0_sl)
 ```
@@ -230,7 +253,7 @@ The simple plug-in g-computation implementation shown here produces a point esti
 
 In practice, the most common approach for inference with plug-in g-computation is the **nonparametric bootstrap**: repeat the entire procedure (fit model, predict counterfactuals, average) on many resampled datasets and take percentiles of the resulting distribution.
 
-```{r, eval=FALSE}
+```{r}
 #| interactive: true
 # Bootstrap confidence interval for g-computation
 set.seed(42)

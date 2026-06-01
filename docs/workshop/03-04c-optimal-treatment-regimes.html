@@ -522,7 +522,7 @@ window.Quarto = {
 
 <header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="./03-04-effect-modification.html">Part VI: Special Topics</a></li><li class="breadcrumb-item"><a href="./03-04c-optimal-treatment-regimes.html"><span class="chapter-number">23</span>&nbsp; <span class="chapter-title">Optimal Treatment Regimes and Policy Learning</span></a></li></ol></nav>
 <div class="quarto-title">
-<div class="quarto-title-block"><div><h1 class="title"><span id="sec-optimal-regimes" class="quarto-section-identifier"><span class="chapter-number">23</span>&nbsp; <span class="chapter-title">Optimal Treatment Regimes and Policy Learning</span></span></h1><button type="button" class="btn code-tools-button" id="quarto-code-tools-source"><i class="bi"></i> Code</button></div></div>
+<div class="quarto-title-block"><div><h1 class="title"><span id="sec-optimal-regimes" class="quarto-section-identifier"><span class="chapter-number">23</span>&nbsp; <span class="chapter-title">Optimal Treatment Regimes and Policy Learning</span></span></h1><button type="button" class="btn code-tools-button dropdown-toggle" id="quarto-code-tools-menu" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi"></i> Code</button><ul class="dropdown-menu dropdown-menu-end" aria-labelelledby="quarto-code-tools-menu"><li><a id="quarto-show-all-code" class="dropdown-item" href="javascript:void(0)" role="button">Show All Code</a></li><li><a id="quarto-hide-all-code" class="dropdown-item" href="javascript:void(0)" role="button">Hide All Code</a></li><li><hr class="dropdown-divider"></li><li><a id="quarto-view-source" class="dropdown-item" href="javascript:void(0)" role="button">View Source</a></li></ul></div></div>
 <p class="subtitle lead">From who benefits to what we should do</p>
 </div>
 
@@ -606,42 +606,97 @@ V(d) = E\big[Y^{d(W)}\big],
 </section>
 <section id="worked-example-an-individualized-haart-initiation-rule" class="level2" data-number="23.6">
 <h2 data-number="23.6" class="anchored" data-anchor-id="worked-example-an-individualized-haart-initiation-rule"><span class="header-section-number">23.6</span> 6. Worked example: an individualized HAART-initiation rule</h2>
-<p>We reuse the baseline HAART cohort. The plan has three steps that mirror the sections above: estimate each patient’s benefit, turn it into a rule, and value the rule against the blanket policies. The example uses <code>grf</code> for the CATE and base R for the value, and is marked not to run because <code>grf</code> is not assumed installed; the structure is what matters.</p>
+<p>We reuse the baseline HAART cohort. The plan has three steps that mirror the sections above: estimate each patient’s benefit, turn it into a rule, and value the rule against the blanket policies. The example uses <code>grf</code> for the CATE and base R for the value; the structure is what matters.</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"_data/load-haart-cohort.R"</span>)</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(grf)</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>W <span class="ot">&lt;-</span> haart_baseline[, <span class="fu">c</span>(<span class="st">"age"</span>, <span class="st">"sex"</span>, <span class="st">"cd4_sqrt_baseline"</span>)]</span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>A <span class="ot">&lt;-</span> haart_baseline<span class="sc">$</span>ever_haart</span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>Y <span class="ot">&lt;-</span> haart_baseline<span class="sc">$</span>died</span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 1: estimate each patient's benefit (CATE) with a causal forest.</span></span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>cf       <span class="ot">&lt;-</span> <span class="fu">causal_forest</span>(<span class="at">X =</span> <span class="fu">as.matrix</span>(W), <span class="at">Y =</span> Y, <span class="at">W =</span> A)</span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>tau_hat  <span class="ot">&lt;-</span> <span class="fu">predict</span>(cf)<span class="sc">$</span>predictions          <span class="co"># estimated effect of HAART on mortality</span></span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 2: the treat-if-benefit rule. Death is harmful, so HAART helps a patient</span></span>
-<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="co"># when it lowers predicted mortality (tau_hat &lt; 0). Treat those patients.</span></span>
-<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>rule <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(tau_hat <span class="sc">&lt;</span> <span class="dv">0</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2026</span>)</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>W <span class="ot">&lt;-</span> haart_baseline[, <span class="fu">c</span>(<span class="st">"age"</span>, <span class="st">"sex"</span>, <span class="st">"cd4_sqrt_baseline"</span>)]</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>A <span class="ot">&lt;-</span> haart_baseline<span class="sc">$</span>ever_haart</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>Y <span class="ot">&lt;-</span> haart_baseline<span class="sc">$</span>died</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 1: estimate each patient's benefit (CATE) with a causal forest.</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>cf       <span class="ot">&lt;-</span> <span class="fu">causal_forest</span>(<span class="at">X =</span> <span class="fu">as.matrix</span>(W), <span class="at">Y =</span> Y, <span class="at">W =</span> A)</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>tau_hat  <span class="ot">&lt;-</span> <span class="fu">predict</span>(cf)<span class="sc">$</span>predictions          <span class="co"># estimated effect of HAART on mortality</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 2: the treat-if-benefit rule. Death is harmful, so HAART helps a patient</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="co"># when it lowers predicted mortality (tau_hat &lt; 0). Treat those patients.</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>rule <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(tau_hat <span class="sc">&lt;</span> <span class="dv">0</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="cell">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(<span class="at">tau =</span> tau_hat), <span class="fu">aes</span>(tau)) <span class="sc">+</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_histogram</span>(<span class="at">bins =</span> <span class="dv">40</span>, <span class="at">fill =</span> <span class="st">"steelblue"</span>, <span class="at">alpha =</span> <span class="fl">0.85</span>) <span class="sc">+</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_vline</span>(<span class="at">xintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>) <span class="sc">+</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"Estimated CATE (effect of HAART on mortality risk)"</span>, <span class="at">y =</span> <span class="st">"Patients"</span>,</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>       <span class="at">title =</span> <span class="st">"Who does the rule decide to treat?"</span>) <span class="sc">+</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output-display">
+<div id="fig-otr-cate" class="quarto-float quarto-figure quarto-figure-center anchored">
+<figure class="quarto-float quarto-float-fig figure">
+<div aria-describedby="fig-otr-cate-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<img src="03-04c-optimal-treatment-regimes_files/figure-html/fig-otr-cate-1.png" class="img-fluid figure-img" width="672">
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-otr-cate-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;23.1: Estimated individual treatment effects (CATEs) of HAART on mortality from the causal forest. Negative values mean HAART is predicted to lower mortality for that patient; the treat-if-benefit rule treats everyone left of the dashed line at zero. Patients piled up near zero are exactly those for whom the rule is least certain.
+</figcaption>
+</figure>
+</div>
+</div>
 </div>
 <p>Once the rule is defined, value it with the augmented estimator from Section 5, using a propensity model and an outcome model for the nuisance pieces. The helper below values any 0/1 rule and is plain base R.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>g_hat <span class="ot">&lt;-</span> <span class="fu">predict</span>(<span class="fu">glm</span>(ever_haart <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>                     <span class="at">family =</span> binomial, <span class="at">data =</span> haart_baseline), <span class="at">type =</span> <span class="st">"response"</span>)</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>qfit  <span class="ot">&lt;-</span> <span class="fu">glm</span>(died <span class="sc">~</span> ever_haart <span class="sc">+</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
-<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>             <span class="at">family =</span> binomial, <span class="at">data =</span> haart_baseline)</span>
-<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>value_of <span class="ot">&lt;-</span> <span class="cf">function</span>(rule) {</span>
-<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>  d  <span class="ot">&lt;-</span> rule</span>
-<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>  <span class="co"># predicted mortality if each patient received the treatment the rule assigns</span></span>
-<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>  nd <span class="ot">&lt;-</span> haart_baseline; nd<span class="sc">$</span>ever_haart <span class="ot">&lt;-</span> d</span>
-<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>  Qd <span class="ot">&lt;-</span> <span class="fu">predict</span>(qfit, <span class="at">newdata =</span> nd, <span class="at">type =</span> <span class="st">"response"</span>)</span>
-<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>  gd <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(d <span class="sc">==</span> <span class="dv">1</span>, g_hat, <span class="dv">1</span> <span class="sc">-</span> g_hat)            <span class="co"># prob of the assigned treatment</span></span>
-<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mean</span>(Qd <span class="sc">+</span> (A <span class="sc">==</span> d) <span class="sc">/</span> gd <span class="sc">*</span> (Y <span class="sc">-</span> Qd))               <span class="co"># augmented value estimate</span></span>
-<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a><span class="fu">c</span>(<span class="at">treat_all =</span> <span class="fu">value_of</span>(<span class="fu">rep</span>(<span class="dv">1</span>, <span class="fu">nrow</span>(haart_baseline))),</span>
-<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>  <span class="at">treat_none =</span> <span class="fu">value_of</span>(<span class="fu">rep</span>(<span class="dv">0</span>, <span class="fu">nrow</span>(haart_baseline))),</span>
-<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">learned_rule =</span> <span class="fu">value_of</span>(rule))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>g_hat <span class="ot">&lt;-</span> <span class="fu">predict</span>(<span class="fu">glm</span>(ever_haart <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>                     <span class="at">family =</span> binomial, <span class="at">data =</span> haart_baseline), <span class="at">type =</span> <span class="st">"response"</span>)</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>qfit  <span class="ot">&lt;-</span> <span class="fu">glm</span>(died <span class="sc">~</span> ever_haart <span class="sc">+</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>             <span class="at">family =</span> binomial, <span class="at">data =</span> haart_baseline)</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>value_of <span class="ot">&lt;-</span> <span class="cf">function</span>(rule) {</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>  d  <span class="ot">&lt;-</span> rule</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>  <span class="co"># predicted mortality if each patient received the treatment the rule assigns</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>  nd <span class="ot">&lt;-</span> haart_baseline; nd<span class="sc">$</span>ever_haart <span class="ot">&lt;-</span> d</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>  Qd <span class="ot">&lt;-</span> <span class="fu">predict</span>(qfit, <span class="at">newdata =</span> nd, <span class="at">type =</span> <span class="st">"response"</span>)</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>  gd <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(d <span class="sc">==</span> <span class="dv">1</span>, g_hat, <span class="dv">1</span> <span class="sc">-</span> g_hat)            <span class="co"># prob of the assigned treatment</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mean</span>(Qd <span class="sc">+</span> (A <span class="sc">==</span> d) <span class="sc">/</span> gd <span class="sc">*</span> (Y <span class="sc">-</span> Qd))               <span class="co"># augmented value estimate</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>policy_values <span class="ot">&lt;-</span> <span class="fu">c</span>(</span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>  <span class="st">`</span><span class="at">Treat all</span><span class="st">`</span>     <span class="ot">=</span> <span class="fu">value_of</span>(<span class="fu">rep</span>(<span class="dv">1</span>, <span class="fu">nrow</span>(haart_baseline))),</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>  <span class="st">`</span><span class="at">Treat none</span><span class="st">`</span>    <span class="ot">=</span> <span class="fu">value_of</span>(<span class="fu">rep</span>(<span class="dv">0</span>, <span class="fu">nrow</span>(haart_baseline))),</span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>  <span class="st">`</span><span class="at">Learned rule</span><span class="st">`</span>  <span class="ot">=</span> <span class="fu">value_of</span>(rule))</span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>policy_values</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>   Treat all   Treat none Learned rule 
+  0.01693363   0.03113330   0.01600199 </code></pre>
+</div>
+</div>
+<div class="cell">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(<span class="at">policy =</span> <span class="fu">names</span>(policy_values), <span class="at">risk =</span> <span class="fu">as.numeric</span>(policy_values)),</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>       <span class="fu">aes</span>(<span class="fu">reorder</span>(policy, risk), risk, <span class="at">fill =</span> policy)) <span class="sc">+</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_col</span>(<span class="at">width =</span> <span class="fl">0.6</span>, <span class="at">show.legend =</span> <span class="cn">FALSE</span>) <span class="sc">+</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> <span class="fu">sprintf</span>(<span class="st">"%.3f"</span>, risk)), <span class="at">vjust =</span> <span class="sc">-</span><span class="fl">0.4</span>) <span class="sc">+</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="cn">NULL</span>, <span class="at">y =</span> <span class="st">"Estimated mortality risk under policy"</span>,</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>       <span class="at">title =</span> <span class="st">"Value of the learned rule versus blanket policies"</span>) <span class="sc">+</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output-display">
+<div id="fig-otr-value" class="quarto-float quarto-figure quarto-figure-center anchored">
+<figure class="quarto-float quarto-float-fig figure">
+<div aria-describedby="fig-otr-value-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<img src="03-04c-optimal-treatment-regimes_files/figure-html/fig-otr-value-1.png" class="img-fluid figure-img" width="672">
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-otr-value-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;23.2: Estimated population mortality risk under three policies: treat everyone, treat no one, and the learned treat-if-benefit rule. Lower is better. In this small cohort the differences are modest and imprecise, which is the honest result; a rule that merely matches treat-all offers no practical advantage.
+</figcaption>
+</figure>
+</div>
+</div>
 </div>
 <p>Read the three numbers as mortality risks under each policy. If the learned rule’s value sits below treat-all by, say, two deaths per hundred patients, the rule is worth considering; if it is indistinguishable from treat-all, the blanket policy is simpler and just as good. In this small cohort, with 31 deaths, the differences will be imprecise, which is the honest result rather than a disappointing one.</p>
 <p>The positivity warning from Section 3 is concrete here. The treat-if-benefit rule will tend to assign HAART to the sickest, lowest-CD4 patients, which is fine because almost all of them were in fact treated. The trouble is the other direction: if the rule ever assigns <em>no treatment</em> to a low-CD4 group in which essentially everyone was treated, the value estimate for that group rests on almost no untreated patients and is extrapolation, not evidence. Run the per-stratum positivity check from <a href="03-04-effect-modification.html" class="quarto-xref"><span>Chapter 21</span></a> on the groups the rule actually creates, not only on the cohort as a whole, and treat a rule that depends on a near-empty treatment arm as a hypothesis rather than a recommendation.</p>
@@ -1193,189 +1248,218 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
       </a>
   </div>
 </nav><div class="modal fade" id="quarto-embedded-source-code-modal" tabindex="-1" aria-labelledby="quarto-embedded-source-code-modal-label" aria-hidden="true"><div class="modal-dialog modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="quarto-embedded-source-code-modal-label">Source Code</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="">
-<div class="sourceCode" id="cb3" data-shortcodes="false"><pre class="sourceCode markdown code-with-copy"><code class="sourceCode markdown"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="an">subtitle:</span><span class="co"> "From who benefits to what we should do"</span></span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="an">format:</span><span class="co"> html</span></span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="fu"># Optimal Treatment Regimes and Policy Learning {#sec-optimal-regimes}</span></span>
-<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>*Turning estimated benefit into a decision rule, and learning how much that rule is worth*</span>
-<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>*Estimated reading time: 35 minutes*</span>
-<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>Guidelines for when to start antiretroviral therapy moved over two decades from "treat once CD4 falls below 200" to "below 350," then "below 500," and finally "treat everyone at diagnosis." Each change was a single threshold applied to every patient. A natural next question is whether one threshold is really best for everyone, or whether a younger patient with a slowly declining CD4 count and an older patient with a rapid decline should be treated under different rules. The effect-modification chapter (@sec-effect-modification) asked *who benefits more*. This chapter asks the decision that follows from that answer: *given what we can measure about a patient, what should we do, and how much better off would the population be if everyone followed that rule?*</span>
-<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>::: {.callout-note}</span>
-<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a><span class="fu">## Learning objectives</span></span>
-<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>State the optimal-rule estimand and the value of a treatment rule in plain language</span>
-<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>See why an optimal rule is built directly from the conditional treatment effect (the CATE)</span>
-<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Estimate a treat-if-benefit rule and its value, and compare it to treat-all and treat-none</span>
-<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Recognize the two failure modes that matter most here: positivity in the subgroups a rule targets, and the instability of decisions for patients whose benefit is near zero</span>
-<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a>*Causal conclusions require the identification assumptions of @sec-roadmap. When flexible machine learning estimates the rule or its value, valid inference requires cross-fitting or a cross-validated TMLE variant (@sec-advanced-tmle).*</span>
-<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a><span class="fu">## 1. From an average effect to a decision</span></span>
-<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a>An average treatment effect answers whether a drug helps on average. A conditional average treatment effect (CATE) answers whether it helps more in some patients than others. Neither one tells a clinician what to do with the patient in front of them. A **treatment rule** does: it is a function $d(W)$ that takes the baseline information $W$ we have on a patient and returns a treatment decision, for example "start HAART now" or "monitor and defer."</span>
-<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a>The reason this is worth a separate chapter is that a good rule is not obvious even when the CATE is known. A rule has to respect what the data can support, it has to be simple enough to use in a clinic, and its benefit has to be estimated honestly rather than read off the same data that produced it. Those three concerns drive everything below.</span>
-<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb3-32"><a href="#cb3-32" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-33"><a href="#cb3-33" aria-hidden="true" tabindex="-1"></a><span class="fu">## 2. The estimand: the value of a rule, and the optimal rule</span></span>
-<span id="cb3-34"><a href="#cb3-34" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-35"><a href="#cb3-35" aria-hidden="true" tabindex="-1"></a>Fix a candidate rule $d$. If every patient in the target population were treated according to $d$, the average outcome we would see is the **value** of the rule,</span>
-<span id="cb3-36"><a href="#cb3-36" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-37"><a href="#cb3-37" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb3-38"><a href="#cb3-38" aria-hidden="true" tabindex="-1"></a>V(d) = E\big<span class="co">[</span><span class="ot">Y^{d(W)}\big</span><span class="co">]</span>,</span>
-<span id="cb3-39"><a href="#cb3-39" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb3-40"><a href="#cb3-40" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-41"><a href="#cb3-41" aria-hidden="true" tabindex="-1"></a>the expected counterfactual outcome when each person receives the treatment $d$ assigns to someone with their covariates. For a beneficial outcome we want the rule with the largest value; for a harmful outcome such as death we want the smallest. The **optimal rule** $d^{*}$ is simply the rule with the best value among the rules we are willing to consider.</span>
-<span id="cb3-42"><a href="#cb3-42" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-43"><a href="#cb3-43" aria-hidden="true" tabindex="-1"></a>The connection to the CATE is direct and is the single most useful idea in this chapter. Write the CATE on the additive scale as $\tau(W) = E<span class="co">[</span><span class="ot">Y^1 - Y^0 \mid W</span><span class="co">]</span>$. If treatment is beneficial exactly when $\tau(W)$ points in the helpful direction, then the rule that maximizes value is the **treat-if-benefit** rule: assign treatment to the patients whose estimated benefit is favorable, and withhold it from the rest. In the HIV example, if starting HAART lowers a patient's predicted mortality, the optimal rule starts it; if for some profile the predicted effect is essentially nil or unfavorable once side effects and competing risks are accounted for, the rule does not. So an optimal-rule analysis reuses the CATE estimates from @sec-effect-modification and adds a decision and a value on top of them.</span>
-<span id="cb3-44"><a href="#cb3-44" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-45"><a href="#cb3-45" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb3-46"><a href="#cb3-46" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-47"><a href="#cb3-47" aria-hidden="true" tabindex="-1"></a><span class="fu">## 3. Identification assumptions</span></span>
-<span id="cb3-48"><a href="#cb3-48" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-49"><a href="#cb3-49" aria-hidden="true" tabindex="-1"></a>A rule analysis needs the same three assumptions as any causal effect (@sec-roadmap): consistency, no unmeasured confounding given $W$, and positivity. Two points specific to rules deserve emphasis.</span>
-<span id="cb3-50"><a href="#cb3-50" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-51"><a href="#cb3-51" aria-hidden="true" tabindex="-1"></a>First, the rule may only use information that is actually available at the moment the decision is made. A rule that conditions on a post-treatment variable, or on a biomarker that is not measured in practice, is not a rule a clinician could follow and can introduce bias.</span>
-<span id="cb3-52"><a href="#cb3-52" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-53"><a href="#cb3-53" aria-hidden="true" tabindex="-1"></a>Second, positivity has to hold for the treatment the rule assigns, within the covariate groups the rule sends to that treatment. This is a stronger demand than positivity for the average effect, and it is the most common way a rule analysis fails. Section 6 returns to it with the HAART data.</span>
-<span id="cb3-54"><a href="#cb3-54" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-55"><a href="#cb3-55" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb3-56"><a href="#cb3-56" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-57"><a href="#cb3-57" aria-hidden="true" tabindex="-1"></a><span class="fu">## 4. Two ways to estimate a rule</span></span>
-<span id="cb3-58"><a href="#cb3-58" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-59"><a href="#cb3-59" aria-hidden="true" tabindex="-1"></a>There are two routes, and they trade transparency against directness.</span>
-<span id="cb3-60"><a href="#cb3-60" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-61"><a href="#cb3-61" aria-hidden="true" tabindex="-1"></a>The first route estimates the CATE and then thresholds it. Fit the conditional treatment effect with Super Learner or a causal forest as in @sec-effect-modification, then set the rule to treat wherever the estimated benefit is favorable. This is intuitive and reuses tools already covered. Its weakness is that the decision depends on the *sign* of an estimated quantity, so wherever the true benefit is close to zero, small estimation errors flip the decision back and forth. Those near-zero patients contribute most of the difficulty in the next section.</span>
-<span id="cb3-62"><a href="#cb3-62" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-63"><a href="#cb3-63" aria-hidden="true" tabindex="-1"></a>The second route, **policy learning**, skips the intermediate CATE and searches directly over a restricted class of simple rules for the one with the best estimated value. A common choice is a shallow decision tree: "treat if CD4 is below this cutpoint and age is above that one," a rule a clinician can read and apply. Restricting to shallow, interpretable rules also guards against overfitting, because there are far fewer candidate rules to choose among. The <span class="in">`policytree`</span> companion to causal forests implements this idea.</span>
-<span id="cb3-64"><a href="#cb3-64" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-65"><a href="#cb3-65" aria-hidden="true" tabindex="-1"></a>In practice the two routes are complementary. The CATE route shows where benefit concentrates; the policy-learning route turns that into a deployable rule and protects against reading too much into a noisy individual prediction.</span>
-<span id="cb3-66"><a href="#cb3-66" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-67"><a href="#cb3-67" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb3-68"><a href="#cb3-68" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-69"><a href="#cb3-69" aria-hidden="true" tabindex="-1"></a><span class="fu">## 5. How much is the rule worth, and how sure are we?</span></span>
-<span id="cb3-70"><a href="#cb3-70" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-71"><a href="#cb3-71" aria-hidden="true" tabindex="-1"></a>Reporting a rule without its value is like reporting a treatment without an effect size. The value $V(d)$ is itself a causal estimand, and it is estimated with the same doubly robust machinery used for the average treatment effect. For a binary treatment and a rule $d$ that assigns $d(W) \in <span class="sc">\{</span>0,1<span class="sc">\}</span>$, the augmented estimator averages, over patients, the predicted outcome under the rule's assigned treatment plus a correction for patients whose observed treatment happened to match the rule:</span>
-<span id="cb3-72"><a href="#cb3-72" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-73"><a href="#cb3-73" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb3-74"><a href="#cb3-74" aria-hidden="true" tabindex="-1"></a>\hat V(d) = \frac{1}{n}\sum_{i=1}^{n}\left<span class="co">[</span><span class="ot">\hat Q\big(d(W_i),W_i\big) + \frac{\mathbb{1}\{A_i = d(W_i)\}}{\hat g\big(d(W_i)\mid W_i\big)}\Big(Y_i - \hat Q\big(d(W_i),W_i\big)\Big)\right</span><span class="co">]</span>.</span>
-<span id="cb3-75"><a href="#cb3-75" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb3-76"><a href="#cb3-76" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-77"><a href="#cb3-77" aria-hidden="true" tabindex="-1"></a>The practical reporting move is to estimate the value of three rules on the same scale and compare them: treat everyone, treat no one, and the learned rule. The difference in value between the learned rule and treat-all answers the question a guideline committee actually has, namely whether individualizing the decision buys anything beyond a blanket policy.</span>
-<span id="cb3-78"><a href="#cb3-78" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-79"><a href="#cb3-79" aria-hidden="true" tabindex="-1"></a>Inference for the value of an *optimal* rule is genuinely harder than for an ordinary average effect, and it is worth being honest about why. Where the true benefit is exactly zero, the optimal decision is undefined: treating and not treating give the same outcome, so noise alone decides which way the rule points. This makes the value of the optimal rule a non-smooth target, and naive confidence intervals can be too narrow. The estimators developed by @luedtke2016inference and @vanderlaan2015optimal address this with cross-fitting and a careful treatment of the near-zero region; the applied takeaway is to use those methods rather than a plug-in interval, and to flag patients near the decision boundary as the ones for whom the rule is least certain.</span>
-<span id="cb3-80"><a href="#cb3-80" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-81"><a href="#cb3-81" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb3-82"><a href="#cb3-82" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-83"><a href="#cb3-83" aria-hidden="true" tabindex="-1"></a><span class="fu">## 6. Worked example: an individualized HAART-initiation rule</span></span>
-<span id="cb3-84"><a href="#cb3-84" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-85"><a href="#cb3-85" aria-hidden="true" tabindex="-1"></a>We reuse the baseline HAART cohort. The plan has three steps that mirror the sections above: estimate each patient's benefit, turn it into a rule, and value the rule against the blanket policies. The example uses <span class="in">`grf`</span> for the CATE and base R for the value, and is marked not to run because <span class="in">`grf`</span> is not assumed installed; the structure is what matters.</span>
-<span id="cb3-86"><a href="#cb3-86" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-89"><a href="#cb3-89" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb3-90"><a href="#cb3-90" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
-<span id="cb3-91"><a href="#cb3-91" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"_data/load-haart-cohort.R"</span>)</span>
-<span id="cb3-92"><a href="#cb3-92" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(grf)</span>
-<span id="cb3-93"><a href="#cb3-93" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-94"><a href="#cb3-94" aria-hidden="true" tabindex="-1"></a>W <span class="ot">&lt;-</span> haart_baseline[, <span class="fu">c</span>(<span class="st">"age"</span>, <span class="st">"sex"</span>, <span class="st">"cd4_sqrt_baseline"</span>)]</span>
-<span id="cb3-95"><a href="#cb3-95" aria-hidden="true" tabindex="-1"></a>A <span class="ot">&lt;-</span> haart_baseline<span class="sc">$</span>ever_haart</span>
-<span id="cb3-96"><a href="#cb3-96" aria-hidden="true" tabindex="-1"></a>Y <span class="ot">&lt;-</span> haart_baseline<span class="sc">$</span>died</span>
-<span id="cb3-97"><a href="#cb3-97" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-98"><a href="#cb3-98" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 1: estimate each patient's benefit (CATE) with a causal forest.</span></span>
-<span id="cb3-99"><a href="#cb3-99" aria-hidden="true" tabindex="-1"></a>cf       <span class="ot">&lt;-</span> <span class="fu">causal_forest</span>(<span class="at">X =</span> <span class="fu">as.matrix</span>(W), <span class="at">Y =</span> Y, <span class="at">W =</span> A)</span>
-<span id="cb3-100"><a href="#cb3-100" aria-hidden="true" tabindex="-1"></a>tau_hat  <span class="ot">&lt;-</span> <span class="fu">predict</span>(cf)<span class="sc">$</span>predictions          <span class="co"># estimated effect of HAART on mortality</span></span>
-<span id="cb3-101"><a href="#cb3-101" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-102"><a href="#cb3-102" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 2: the treat-if-benefit rule. Death is harmful, so HAART helps a patient</span></span>
-<span id="cb3-103"><a href="#cb3-103" aria-hidden="true" tabindex="-1"></a><span class="co"># when it lowers predicted mortality (tau_hat &lt; 0). Treat those patients.</span></span>
-<span id="cb3-104"><a href="#cb3-104" aria-hidden="true" tabindex="-1"></a>rule <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(tau_hat <span class="sc">&lt;</span> <span class="dv">0</span>)</span>
-<span id="cb3-105"><a href="#cb3-105" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb3-106"><a href="#cb3-106" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-107"><a href="#cb3-107" aria-hidden="true" tabindex="-1"></a>Once the rule is defined, value it with the augmented estimator from Section 5, using a propensity model and an outcome model for the nuisance pieces. The helper below values any 0/1 rule and is plain base R.</span>
-<span id="cb3-108"><a href="#cb3-108" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-111"><a href="#cb3-111" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb3-112"><a href="#cb3-112" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
-<span id="cb3-113"><a href="#cb3-113" aria-hidden="true" tabindex="-1"></a>g_hat <span class="ot">&lt;-</span> <span class="fu">predict</span>(<span class="fu">glm</span>(ever_haart <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
-<span id="cb3-114"><a href="#cb3-114" aria-hidden="true" tabindex="-1"></a>                     <span class="at">family =</span> binomial, <span class="at">data =</span> haart_baseline), <span class="at">type =</span> <span class="st">"response"</span>)</span>
-<span id="cb3-115"><a href="#cb3-115" aria-hidden="true" tabindex="-1"></a>qfit  <span class="ot">&lt;-</span> <span class="fu">glm</span>(died <span class="sc">~</span> ever_haart <span class="sc">+</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
-<span id="cb3-116"><a href="#cb3-116" aria-hidden="true" tabindex="-1"></a>             <span class="at">family =</span> binomial, <span class="at">data =</span> haart_baseline)</span>
-<span id="cb3-117"><a href="#cb3-117" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-118"><a href="#cb3-118" aria-hidden="true" tabindex="-1"></a>value_of <span class="ot">&lt;-</span> <span class="cf">function</span>(rule) {</span>
-<span id="cb3-119"><a href="#cb3-119" aria-hidden="true" tabindex="-1"></a>  d  <span class="ot">&lt;-</span> rule</span>
-<span id="cb3-120"><a href="#cb3-120" aria-hidden="true" tabindex="-1"></a>  <span class="co"># predicted mortality if each patient received the treatment the rule assigns</span></span>
-<span id="cb3-121"><a href="#cb3-121" aria-hidden="true" tabindex="-1"></a>  nd <span class="ot">&lt;-</span> haart_baseline; nd<span class="sc">$</span>ever_haart <span class="ot">&lt;-</span> d</span>
-<span id="cb3-122"><a href="#cb3-122" aria-hidden="true" tabindex="-1"></a>  Qd <span class="ot">&lt;-</span> <span class="fu">predict</span>(qfit, <span class="at">newdata =</span> nd, <span class="at">type =</span> <span class="st">"response"</span>)</span>
-<span id="cb3-123"><a href="#cb3-123" aria-hidden="true" tabindex="-1"></a>  gd <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(d <span class="sc">==</span> <span class="dv">1</span>, g_hat, <span class="dv">1</span> <span class="sc">-</span> g_hat)            <span class="co"># prob of the assigned treatment</span></span>
-<span id="cb3-124"><a href="#cb3-124" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mean</span>(Qd <span class="sc">+</span> (A <span class="sc">==</span> d) <span class="sc">/</span> gd <span class="sc">*</span> (Y <span class="sc">-</span> Qd))               <span class="co"># augmented value estimate</span></span>
-<span id="cb3-125"><a href="#cb3-125" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb3-126"><a href="#cb3-126" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-127"><a href="#cb3-127" aria-hidden="true" tabindex="-1"></a><span class="fu">c</span>(<span class="at">treat_all =</span> <span class="fu">value_of</span>(<span class="fu">rep</span>(<span class="dv">1</span>, <span class="fu">nrow</span>(haart_baseline))),</span>
-<span id="cb3-128"><a href="#cb3-128" aria-hidden="true" tabindex="-1"></a>  <span class="at">treat_none =</span> <span class="fu">value_of</span>(<span class="fu">rep</span>(<span class="dv">0</span>, <span class="fu">nrow</span>(haart_baseline))),</span>
-<span id="cb3-129"><a href="#cb3-129" aria-hidden="true" tabindex="-1"></a>  <span class="at">learned_rule =</span> <span class="fu">value_of</span>(rule))</span>
-<span id="cb3-130"><a href="#cb3-130" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb3-131"><a href="#cb3-131" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-132"><a href="#cb3-132" aria-hidden="true" tabindex="-1"></a>Read the three numbers as mortality risks under each policy. If the learned rule's value sits below treat-all by, say, two deaths per hundred patients, the rule is worth considering; if it is indistinguishable from treat-all, the blanket policy is simpler and just as good. In this small cohort, with 31 deaths, the differences will be imprecise, which is the honest result rather than a disappointing one.</span>
-<span id="cb3-133"><a href="#cb3-133" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-134"><a href="#cb3-134" aria-hidden="true" tabindex="-1"></a>The positivity warning from Section 3 is concrete here. The treat-if-benefit rule will tend to assign HAART to the sickest, lowest-CD4 patients, which is fine because almost all of them were in fact treated. The trouble is the other direction: if the rule ever assigns *no treatment* to a low-CD4 group in which essentially everyone was treated, the value estimate for that group rests on almost no untreated patients and is extrapolation, not evidence. Run the per-stratum positivity check from @sec-effect-modification on the groups the rule actually creates, not only on the cohort as a whole, and treat a rule that depends on a near-empty treatment arm as a hypothesis rather than a recommendation.</span>
-<span id="cb3-135"><a href="#cb3-135" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-136"><a href="#cb3-136" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb3-137"><a href="#cb3-137" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-138"><a href="#cb3-138" aria-hidden="true" tabindex="-1"></a><span class="fu">## 7. Where these analyses fail</span></span>
-<span id="cb3-139"><a href="#cb3-139" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-140"><a href="#cb3-140" aria-hidden="true" tabindex="-1"></a>Three failure modes recur, and naming them is the best defense.</span>
-<span id="cb3-141"><a href="#cb3-141" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-142"><a href="#cb3-142" aria-hidden="true" tabindex="-1"></a>The first is positivity within the rule's own subgroups, described just above. A rule manufactures the very subpopulations whose counterfactual outcomes it then needs, so it is unusually easy to ask the data for a comparison it cannot support.</span>
-<span id="cb3-143"><a href="#cb3-143" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-144"><a href="#cb3-144" aria-hidden="true" tabindex="-1"></a>The second is instability at the decision boundary. For patients whose true benefit is near zero, the rule's decision is driven by noise, the value of the optimal rule is a non-smooth target, and ordinary confidence intervals understate the uncertainty. Use the cross-fit estimators built for this problem and report which patients sit near the boundary.</span>
-<span id="cb3-145"><a href="#cb3-145" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-146"><a href="#cb3-146" aria-hidden="true" tabindex="-1"></a>The third is optimism from reusing data. A rule chosen to look good on a dataset will look better on that dataset than it will in practice. Estimate the value of the learned rule with cross-fitting or on held-out data, never with the same fit that selected the rule, and prefer a simple, prespecified rule class when the goal is a deployable recommendation.</span>
-<span id="cb3-147"><a href="#cb3-147" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-148"><a href="#cb3-148" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb3-149"><a href="#cb3-149" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-150"><a href="#cb3-150" aria-hidden="true" tabindex="-1"></a><span class="fu">## 8. Software</span></span>
-<span id="cb3-151"><a href="#cb3-151" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-152"><a href="#cb3-152" aria-hidden="true" tabindex="-1"></a>The <span class="in">`policytree`</span> package, a companion to <span class="in">`grf`</span>, learns shallow, interpretable decision trees that maximize estimated value and pairs naturally with the causal-forest CATE used above. <span class="in">`DynTxRegime`</span> implements value-search and regression-based estimators for single- and multi-stage rules. Super Learner or the highly adaptive lasso (@sec-hal) are good choices for the outcome and propensity nuisance models that the value estimator needs. Targeted-learning implementations of optimal-rule estimation also exist in the broader software ecosystem; this handbook's running examples stay with <span class="in">`grf`</span> and base R so the moving parts remain visible.</span>
-<span id="cb3-153"><a href="#cb3-153" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-154"><a href="#cb3-154" aria-hidden="true" tabindex="-1"></a>---</span>
-<span id="cb3-155"><a href="#cb3-155" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-156"><a href="#cb3-156" aria-hidden="true" tabindex="-1"></a><span class="fu">## Connections to other chapters</span></span>
-<span id="cb3-157"><a href="#cb3-157" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-158"><a href="#cb3-158" aria-hidden="true" tabindex="-1"></a>This chapter is the decision-making sequel to effect modification (@sec-effect-modification): the CATE is the input, and a rule plus its value is the output. The value estimator is the augmented, doubly robust estimator of @sec-doubly-robust-tmle applied to a rule-assigned treatment, and the inference cautions are the cross-fitting ideas of @sec-advanced-tmle. When the decision is not a one-time choice but a sustained, time-updated policy, the longitudinal modified-treatment-policy framework of @sec-applied-lmtp is the natural extension.</span>
-<span id="cb3-159"><a href="#cb3-159" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-160"><a href="#cb3-160" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and further reading</span></span>
-<span id="cb3-161"><a href="#cb3-161" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-162"><a href="#cb3-162" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>@vanderlaan2015optimal develops targeted learning of the optimal rule and its value.</span>
-<span id="cb3-163"><a href="#cb3-163" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>@luedtke2016inference gives valid inference for the value of the optimal rule, including the non-regular near-zero-benefit case.</span>
-<span id="cb3-164"><a href="#cb3-164" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>@wager2018estimation and @athey2016recursive are the causal-forest foundations reused here for the CATE step.</span>
-<span id="cb3-165"><a href="#cb3-165" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-166"><a href="#cb3-166" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
-<span id="cb3-167"><a href="#cb3-167" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-168"><a href="#cb3-168" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb3-169"><a href="#cb3-169" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. Why can a treat-if-benefit rule create a positivity problem that the average treatment effect analysis did not have?&lt;/strong&gt;&lt;/summary&gt;</span>
-<span id="cb3-170"><a href="#cb3-170" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-171"><a href="#cb3-171" aria-hidden="true" tabindex="-1"></a>The rule defines new subpopulations by the treatment it assigns, and it then needs each subpopulation's outcome under that assigned treatment. If the rule assigns a treatment that some covariate group almost never received in the data, there are too few comparable patients to estimate the outcome under that assignment, so the value rests on extrapolation. The average treatment effect pools across the whole cohort and is less exposed to these rule-induced sparse cells.</span>
-<span id="cb3-172"><a href="#cb3-172" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-173"><a href="#cb3-173" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
-<span id="cb3-174"><a href="#cb3-174" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-175"><a href="#cb3-175" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb3-176"><a href="#cb3-176" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q2. A colleague reports a confidence interval for the value of the optimal rule using the same forest that selected the rule, on the same data. Name the two problems.&lt;/strong&gt;&lt;/summary&gt;</span>
-<span id="cb3-177"><a href="#cb3-177" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-178"><a href="#cb3-178" aria-hidden="true" tabindex="-1"></a>First, optimism: a rule chosen to look good on a dataset will overstate its value on that dataset, so the point estimate is biased upward and needs cross-fitting or held-out evaluation. Second, non-regularity: the value of the optimal rule is non-smooth wherever the true benefit is near zero, so a plug-in interval is too narrow even setting optimism aside. Both push the reported interval toward false confidence.</span>
-<span id="cb3-179"><a href="#cb3-179" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-180"><a href="#cb3-180" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
-<span id="cb3-181"><a href="#cb3-181" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-182"><a href="#cb3-182" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb3-183"><a href="#cb3-183" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q3. When is a shallow decision-tree rule (policy learning) preferable to thresholding an estimated CATE?&lt;/strong&gt;&lt;/summary&gt;</span>
-<span id="cb3-184"><a href="#cb3-184" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-185"><a href="#cb3-185" aria-hidden="true" tabindex="-1"></a>When the rule has to be implemented and defended in practice. A shallow tree is readable, applies a small number of cutpoints a clinician can follow, and overfits less because the rule class is small. Thresholding a flexible CATE can yield a rule that is accurate in expectation but opaque and unstable for individual patients near the boundary. The tree trades a little estimated value for interpretability and robustness.</span>
-<span id="cb3-186"><a href="#cb3-186" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-187"><a href="#cb3-187" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
+<div class="sourceCode" id="cb6" data-shortcodes="false"><pre class="sourceCode markdown code-with-copy"><code class="sourceCode markdown"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="an">subtitle:</span><span class="co"> "From who benefits to what we should do"</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="an">format:</span><span class="co"> html</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="fu"># Optimal Treatment Regimes and Policy Learning {#sec-optimal-regimes}</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>*Turning estimated benefit into a decision rule, and learning how much that rule is worth*</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>*Estimated reading time: 35 minutes*</span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>Guidelines for when to start antiretroviral therapy moved over two decades from "treat once CD4 falls below 200" to "below 350," then "below 500," and finally "treat everyone at diagnosis." Each change was a single threshold applied to every patient. A natural next question is whether one threshold is really best for everyone, or whether a younger patient with a slowly declining CD4 count and an older patient with a rapid decline should be treated under different rules. The effect-modification chapter (@sec-effect-modification) asked *who benefits more*. This chapter asks the decision that follows from that answer: *given what we can measure about a patient, what should we do, and how much better off would the population be if everyone followed that rule?*</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>::: {.callout-note}</span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a><span class="fu">## Learning objectives</span></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>State the optimal-rule estimand and the value of a treatment rule in plain language</span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>See why an optimal rule is built directly from the conditional treatment effect (the CATE)</span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Estimate a treat-if-benefit rule and its value, and compare it to treat-all and treat-none</span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Recognize the two failure modes that matter most here: positivity in the subgroups a rule targets, and the instability of decisions for patients whose benefit is near zero</span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>*Causal conclusions require the identification assumptions of @sec-roadmap. When flexible machine learning estimates the rule or its value, valid inference requires cross-fitting or a cross-validated TMLE variant (@sec-advanced-tmle).*</span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a><span class="fu">## 1. From an average effect to a decision</span></span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a>An average treatment effect answers whether a drug helps on average. A conditional average treatment effect (CATE) answers whether it helps more in some patients than others. Neither one tells a clinician what to do with the patient in front of them. A **treatment rule** does: it is a function $d(W)$ that takes the baseline information $W$ we have on a patient and returns a treatment decision, for example "start HAART now" or "monitor and defer."</span>
+<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a>The reason this is worth a separate chapter is that a good rule is not obvious even when the CATE is known. A rule has to respect what the data can support, it has to be simple enough to use in a clinic, and its benefit has to be estimated honestly rather than read off the same data that produced it. Those three concerns drive everything below.</span>
+<span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-31"><a href="#cb6-31" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-32"><a href="#cb6-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-33"><a href="#cb6-33" aria-hidden="true" tabindex="-1"></a><span class="fu">## 2. The estimand: the value of a rule, and the optimal rule</span></span>
+<span id="cb6-34"><a href="#cb6-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-35"><a href="#cb6-35" aria-hidden="true" tabindex="-1"></a>Fix a candidate rule $d$. If every patient in the target population were treated according to $d$, the average outcome we would see is the **value** of the rule,</span>
+<span id="cb6-36"><a href="#cb6-36" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-37"><a href="#cb6-37" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb6-38"><a href="#cb6-38" aria-hidden="true" tabindex="-1"></a>V(d) = E\big<span class="co">[</span><span class="ot">Y^{d(W)}\big</span><span class="co">]</span>,</span>
+<span id="cb6-39"><a href="#cb6-39" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb6-40"><a href="#cb6-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-41"><a href="#cb6-41" aria-hidden="true" tabindex="-1"></a>the expected counterfactual outcome when each person receives the treatment $d$ assigns to someone with their covariates. For a beneficial outcome we want the rule with the largest value; for a harmful outcome such as death we want the smallest. The **optimal rule** $d^{*}$ is simply the rule with the best value among the rules we are willing to consider.</span>
+<span id="cb6-42"><a href="#cb6-42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-43"><a href="#cb6-43" aria-hidden="true" tabindex="-1"></a>The connection to the CATE is direct and is the single most useful idea in this chapter. Write the CATE on the additive scale as $\tau(W) = E<span class="co">[</span><span class="ot">Y^1 - Y^0 \mid W</span><span class="co">]</span>$. If treatment is beneficial exactly when $\tau(W)$ points in the helpful direction, then the rule that maximizes value is the **treat-if-benefit** rule: assign treatment to the patients whose estimated benefit is favorable, and withhold it from the rest. In the HIV example, if starting HAART lowers a patient's predicted mortality, the optimal rule starts it; if for some profile the predicted effect is essentially nil or unfavorable once side effects and competing risks are accounted for, the rule does not. So an optimal-rule analysis reuses the CATE estimates from @sec-effect-modification and adds a decision and a value on top of them.</span>
+<span id="cb6-44"><a href="#cb6-44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-45"><a href="#cb6-45" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-46"><a href="#cb6-46" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-47"><a href="#cb6-47" aria-hidden="true" tabindex="-1"></a><span class="fu">## 3. Identification assumptions</span></span>
+<span id="cb6-48"><a href="#cb6-48" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-49"><a href="#cb6-49" aria-hidden="true" tabindex="-1"></a>A rule analysis needs the same three assumptions as any causal effect (@sec-roadmap): consistency, no unmeasured confounding given $W$, and positivity. Two points specific to rules deserve emphasis.</span>
+<span id="cb6-50"><a href="#cb6-50" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-51"><a href="#cb6-51" aria-hidden="true" tabindex="-1"></a>First, the rule may only use information that is actually available at the moment the decision is made. A rule that conditions on a post-treatment variable, or on a biomarker that is not measured in practice, is not a rule a clinician could follow and can introduce bias.</span>
+<span id="cb6-52"><a href="#cb6-52" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-53"><a href="#cb6-53" aria-hidden="true" tabindex="-1"></a>Second, positivity has to hold for the treatment the rule assigns, within the covariate groups the rule sends to that treatment. This is a stronger demand than positivity for the average effect, and it is the most common way a rule analysis fails. Section 6 returns to it with the HAART data.</span>
+<span id="cb6-54"><a href="#cb6-54" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-55"><a href="#cb6-55" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-56"><a href="#cb6-56" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-57"><a href="#cb6-57" aria-hidden="true" tabindex="-1"></a><span class="fu">## 4. Two ways to estimate a rule</span></span>
+<span id="cb6-58"><a href="#cb6-58" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-59"><a href="#cb6-59" aria-hidden="true" tabindex="-1"></a>There are two routes, and they trade transparency against directness.</span>
+<span id="cb6-60"><a href="#cb6-60" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-61"><a href="#cb6-61" aria-hidden="true" tabindex="-1"></a>The first route estimates the CATE and then thresholds it. Fit the conditional treatment effect with Super Learner or a causal forest as in @sec-effect-modification, then set the rule to treat wherever the estimated benefit is favorable. This is intuitive and reuses tools already covered. Its weakness is that the decision depends on the *sign* of an estimated quantity, so wherever the true benefit is close to zero, small estimation errors flip the decision back and forth. Those near-zero patients contribute most of the difficulty in the next section.</span>
+<span id="cb6-62"><a href="#cb6-62" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-63"><a href="#cb6-63" aria-hidden="true" tabindex="-1"></a>The second route, **policy learning**, skips the intermediate CATE and searches directly over a restricted class of simple rules for the one with the best estimated value. A common choice is a shallow decision tree: "treat if CD4 is below this cutpoint and age is above that one," a rule a clinician can read and apply. Restricting to shallow, interpretable rules also guards against overfitting, because there are far fewer candidate rules to choose among. The <span class="in">`policytree`</span> companion to causal forests implements this idea.</span>
+<span id="cb6-64"><a href="#cb6-64" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-65"><a href="#cb6-65" aria-hidden="true" tabindex="-1"></a>In practice the two routes are complementary. The CATE route shows where benefit concentrates; the policy-learning route turns that into a deployable rule and protects against reading too much into a noisy individual prediction.</span>
+<span id="cb6-66"><a href="#cb6-66" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-67"><a href="#cb6-67" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-68"><a href="#cb6-68" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-69"><a href="#cb6-69" aria-hidden="true" tabindex="-1"></a><span class="fu">## 5. How much is the rule worth, and how sure are we?</span></span>
+<span id="cb6-70"><a href="#cb6-70" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-71"><a href="#cb6-71" aria-hidden="true" tabindex="-1"></a>Reporting a rule without its value is like reporting a treatment without an effect size. The value $V(d)$ is itself a causal estimand, and it is estimated with the same doubly robust machinery used for the average treatment effect. For a binary treatment and a rule $d$ that assigns $d(W) \in <span class="sc">\{</span>0,1<span class="sc">\}</span>$, the augmented estimator averages, over patients, the predicted outcome under the rule's assigned treatment plus a correction for patients whose observed treatment happened to match the rule:</span>
+<span id="cb6-72"><a href="#cb6-72" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-73"><a href="#cb6-73" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb6-74"><a href="#cb6-74" aria-hidden="true" tabindex="-1"></a>\hat V(d) = \frac{1}{n}\sum_{i=1}^{n}\left<span class="co">[</span><span class="ot">\hat Q\big(d(W_i),W_i\big) + \frac{\mathbb{1}\{A_i = d(W_i)\}}{\hat g\big(d(W_i)\mid W_i\big)}\Big(Y_i - \hat Q\big(d(W_i),W_i\big)\Big)\right</span><span class="co">]</span>.</span>
+<span id="cb6-75"><a href="#cb6-75" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb6-76"><a href="#cb6-76" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-77"><a href="#cb6-77" aria-hidden="true" tabindex="-1"></a>The practical reporting move is to estimate the value of three rules on the same scale and compare them: treat everyone, treat no one, and the learned rule. The difference in value between the learned rule and treat-all answers the question a guideline committee actually has, namely whether individualizing the decision buys anything beyond a blanket policy.</span>
+<span id="cb6-78"><a href="#cb6-78" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-79"><a href="#cb6-79" aria-hidden="true" tabindex="-1"></a>Inference for the value of an *optimal* rule is genuinely harder than for an ordinary average effect, and it is worth being honest about why. Where the true benefit is exactly zero, the optimal decision is undefined: treating and not treating give the same outcome, so noise alone decides which way the rule points. This makes the value of the optimal rule a non-smooth target, and naive confidence intervals can be too narrow. The estimators developed by @luedtke2016inference and @vanderlaan2015optimal address this with cross-fitting and a careful treatment of the near-zero region; the applied takeaway is to use those methods rather than a plug-in interval, and to flag patients near the decision boundary as the ones for whom the rule is least certain.</span>
+<span id="cb6-80"><a href="#cb6-80" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-81"><a href="#cb6-81" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-82"><a href="#cb6-82" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-83"><a href="#cb6-83" aria-hidden="true" tabindex="-1"></a><span class="fu">## 6. Worked example: an individualized HAART-initiation rule</span></span>
+<span id="cb6-84"><a href="#cb6-84" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-85"><a href="#cb6-85" aria-hidden="true" tabindex="-1"></a>We reuse the baseline HAART cohort. The plan has three steps that mirror the sections above: estimate each patient's benefit, turn it into a rule, and value the rule against the blanket policies. The example uses <span class="in">`grf`</span> for the CATE and base R for the value; the structure is what matters.</span>
+<span id="cb6-86"><a href="#cb6-86" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-89"><a href="#cb6-89" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb6-90"><a href="#cb6-90" aria-hidden="true" tabindex="-1"></a><span class="co">#| warning: false</span></span>
+<span id="cb6-91"><a href="#cb6-91" aria-hidden="true" tabindex="-1"></a><span class="co">#| message: false</span></span>
+<span id="cb6-92"><a href="#cb6-92" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"_data/load-haart-cohort.R"</span>)</span>
+<span id="cb6-93"><a href="#cb6-93" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(grf)</span>
+<span id="cb6-94"><a href="#cb6-94" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2026</span>)</span>
+<span id="cb6-95"><a href="#cb6-95" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-96"><a href="#cb6-96" aria-hidden="true" tabindex="-1"></a>W <span class="ot">&lt;-</span> haart_baseline[, <span class="fu">c</span>(<span class="st">"age"</span>, <span class="st">"sex"</span>, <span class="st">"cd4_sqrt_baseline"</span>)]</span>
+<span id="cb6-97"><a href="#cb6-97" aria-hidden="true" tabindex="-1"></a>A <span class="ot">&lt;-</span> haart_baseline<span class="sc">$</span>ever_haart</span>
+<span id="cb6-98"><a href="#cb6-98" aria-hidden="true" tabindex="-1"></a>Y <span class="ot">&lt;-</span> haart_baseline<span class="sc">$</span>died</span>
+<span id="cb6-99"><a href="#cb6-99" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-100"><a href="#cb6-100" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 1: estimate each patient's benefit (CATE) with a causal forest.</span></span>
+<span id="cb6-101"><a href="#cb6-101" aria-hidden="true" tabindex="-1"></a>cf       <span class="ot">&lt;-</span> <span class="fu">causal_forest</span>(<span class="at">X =</span> <span class="fu">as.matrix</span>(W), <span class="at">Y =</span> Y, <span class="at">W =</span> A)</span>
+<span id="cb6-102"><a href="#cb6-102" aria-hidden="true" tabindex="-1"></a>tau_hat  <span class="ot">&lt;-</span> <span class="fu">predict</span>(cf)<span class="sc">$</span>predictions          <span class="co"># estimated effect of HAART on mortality</span></span>
+<span id="cb6-103"><a href="#cb6-103" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-104"><a href="#cb6-104" aria-hidden="true" tabindex="-1"></a><span class="co"># Step 2: the treat-if-benefit rule. Death is harmful, so HAART helps a patient</span></span>
+<span id="cb6-105"><a href="#cb6-105" aria-hidden="true" tabindex="-1"></a><span class="co"># when it lowers predicted mortality (tau_hat &lt; 0). Treat those patients.</span></span>
+<span id="cb6-106"><a href="#cb6-106" aria-hidden="true" tabindex="-1"></a>rule <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(tau_hat <span class="sc">&lt;</span> <span class="dv">0</span>)</span>
+<span id="cb6-107"><a href="#cb6-107" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb6-108"><a href="#cb6-108" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-111"><a href="#cb6-111" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb6-112"><a href="#cb6-112" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-otr-cate</span></span>
+<span id="cb6-113"><a href="#cb6-113" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Estimated individual treatment effects (CATEs) of HAART on mortality from the causal forest. Negative values mean HAART is predicted to lower mortality for that patient; the treat-if-benefit rule treats everyone left of the dashed line at zero. Patients piled up near zero are exactly those for whom the rule is least certain."</span></span>
+<span id="cb6-114"><a href="#cb6-114" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
+<span id="cb6-115"><a href="#cb6-115" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb6-116"><a href="#cb6-116" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(<span class="at">tau =</span> tau_hat), <span class="fu">aes</span>(tau)) <span class="sc">+</span></span>
+<span id="cb6-117"><a href="#cb6-117" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_histogram</span>(<span class="at">bins =</span> <span class="dv">40</span>, <span class="at">fill =</span> <span class="st">"steelblue"</span>, <span class="at">alpha =</span> <span class="fl">0.85</span>) <span class="sc">+</span></span>
+<span id="cb6-118"><a href="#cb6-118" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_vline</span>(<span class="at">xintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>) <span class="sc">+</span></span>
+<span id="cb6-119"><a href="#cb6-119" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"Estimated CATE (effect of HAART on mortality risk)"</span>, <span class="at">y =</span> <span class="st">"Patients"</span>,</span>
+<span id="cb6-120"><a href="#cb6-120" aria-hidden="true" tabindex="-1"></a>       <span class="at">title =</span> <span class="st">"Who does the rule decide to treat?"</span>) <span class="sc">+</span></span>
+<span id="cb6-121"><a href="#cb6-121" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>()</span>
+<span id="cb6-122"><a href="#cb6-122" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb6-123"><a href="#cb6-123" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-124"><a href="#cb6-124" aria-hidden="true" tabindex="-1"></a>Once the rule is defined, value it with the augmented estimator from Section 5, using a propensity model and an outcome model for the nuisance pieces. The helper below values any 0/1 rule and is plain base R.</span>
+<span id="cb6-125"><a href="#cb6-125" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-128"><a href="#cb6-128" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb6-129"><a href="#cb6-129" aria-hidden="true" tabindex="-1"></a>g_hat <span class="ot">&lt;-</span> <span class="fu">predict</span>(<span class="fu">glm</span>(ever_haart <span class="sc">~</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
+<span id="cb6-130"><a href="#cb6-130" aria-hidden="true" tabindex="-1"></a>                     <span class="at">family =</span> binomial, <span class="at">data =</span> haart_baseline), <span class="at">type =</span> <span class="st">"response"</span>)</span>
+<span id="cb6-131"><a href="#cb6-131" aria-hidden="true" tabindex="-1"></a>qfit  <span class="ot">&lt;-</span> <span class="fu">glm</span>(died <span class="sc">~</span> ever_haart <span class="sc">+</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
+<span id="cb6-132"><a href="#cb6-132" aria-hidden="true" tabindex="-1"></a>             <span class="at">family =</span> binomial, <span class="at">data =</span> haart_baseline)</span>
+<span id="cb6-133"><a href="#cb6-133" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-134"><a href="#cb6-134" aria-hidden="true" tabindex="-1"></a>value_of <span class="ot">&lt;-</span> <span class="cf">function</span>(rule) {</span>
+<span id="cb6-135"><a href="#cb6-135" aria-hidden="true" tabindex="-1"></a>  d  <span class="ot">&lt;-</span> rule</span>
+<span id="cb6-136"><a href="#cb6-136" aria-hidden="true" tabindex="-1"></a>  <span class="co"># predicted mortality if each patient received the treatment the rule assigns</span></span>
+<span id="cb6-137"><a href="#cb6-137" aria-hidden="true" tabindex="-1"></a>  nd <span class="ot">&lt;-</span> haart_baseline; nd<span class="sc">$</span>ever_haart <span class="ot">&lt;-</span> d</span>
+<span id="cb6-138"><a href="#cb6-138" aria-hidden="true" tabindex="-1"></a>  Qd <span class="ot">&lt;-</span> <span class="fu">predict</span>(qfit, <span class="at">newdata =</span> nd, <span class="at">type =</span> <span class="st">"response"</span>)</span>
+<span id="cb6-139"><a href="#cb6-139" aria-hidden="true" tabindex="-1"></a>  gd <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(d <span class="sc">==</span> <span class="dv">1</span>, g_hat, <span class="dv">1</span> <span class="sc">-</span> g_hat)            <span class="co"># prob of the assigned treatment</span></span>
+<span id="cb6-140"><a href="#cb6-140" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mean</span>(Qd <span class="sc">+</span> (A <span class="sc">==</span> d) <span class="sc">/</span> gd <span class="sc">*</span> (Y <span class="sc">-</span> Qd))               <span class="co"># augmented value estimate</span></span>
+<span id="cb6-141"><a href="#cb6-141" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb6-142"><a href="#cb6-142" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-143"><a href="#cb6-143" aria-hidden="true" tabindex="-1"></a>policy_values <span class="ot">&lt;-</span> <span class="fu">c</span>(</span>
+<span id="cb6-144"><a href="#cb6-144" aria-hidden="true" tabindex="-1"></a>  <span class="st">`</span><span class="at">Treat all</span><span class="st">`</span>     <span class="ot">=</span> <span class="fu">value_of</span>(<span class="fu">rep</span>(<span class="dv">1</span>, <span class="fu">nrow</span>(haart_baseline))),</span>
+<span id="cb6-145"><a href="#cb6-145" aria-hidden="true" tabindex="-1"></a>  <span class="st">`</span><span class="at">Treat none</span><span class="st">`</span>    <span class="ot">=</span> <span class="fu">value_of</span>(<span class="fu">rep</span>(<span class="dv">0</span>, <span class="fu">nrow</span>(haart_baseline))),</span>
+<span id="cb6-146"><a href="#cb6-146" aria-hidden="true" tabindex="-1"></a>  <span class="st">`</span><span class="at">Learned rule</span><span class="st">`</span>  <span class="ot">=</span> <span class="fu">value_of</span>(rule))</span>
+<span id="cb6-147"><a href="#cb6-147" aria-hidden="true" tabindex="-1"></a>policy_values</span>
+<span id="cb6-148"><a href="#cb6-148" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb6-149"><a href="#cb6-149" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-152"><a href="#cb6-152" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb6-153"><a href="#cb6-153" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-otr-value</span></span>
+<span id="cb6-154"><a href="#cb6-154" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Estimated population mortality risk under three policies: treat everyone, treat no one, and the learned treat-if-benefit rule. Lower is better. In this small cohort the differences are modest and imprecise, which is the honest result; a rule that merely matches treat-all offers no practical advantage."</span></span>
+<span id="cb6-155"><a href="#cb6-155" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
+<span id="cb6-156"><a href="#cb6-156" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(<span class="at">policy =</span> <span class="fu">names</span>(policy_values), <span class="at">risk =</span> <span class="fu">as.numeric</span>(policy_values)),</span>
+<span id="cb6-157"><a href="#cb6-157" aria-hidden="true" tabindex="-1"></a>       <span class="fu">aes</span>(<span class="fu">reorder</span>(policy, risk), risk, <span class="at">fill =</span> policy)) <span class="sc">+</span></span>
+<span id="cb6-158"><a href="#cb6-158" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_col</span>(<span class="at">width =</span> <span class="fl">0.6</span>, <span class="at">show.legend =</span> <span class="cn">FALSE</span>) <span class="sc">+</span></span>
+<span id="cb6-159"><a href="#cb6-159" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> <span class="fu">sprintf</span>(<span class="st">"%.3f"</span>, risk)), <span class="at">vjust =</span> <span class="sc">-</span><span class="fl">0.4</span>) <span class="sc">+</span></span>
+<span id="cb6-160"><a href="#cb6-160" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="cn">NULL</span>, <span class="at">y =</span> <span class="st">"Estimated mortality risk under policy"</span>,</span>
+<span id="cb6-161"><a href="#cb6-161" aria-hidden="true" tabindex="-1"></a>       <span class="at">title =</span> <span class="st">"Value of the learned rule versus blanket policies"</span>) <span class="sc">+</span></span>
+<span id="cb6-162"><a href="#cb6-162" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>()</span>
+<span id="cb6-163"><a href="#cb6-163" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb6-164"><a href="#cb6-164" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-165"><a href="#cb6-165" aria-hidden="true" tabindex="-1"></a>Read the three numbers as mortality risks under each policy. If the learned rule's value sits below treat-all by, say, two deaths per hundred patients, the rule is worth considering; if it is indistinguishable from treat-all, the blanket policy is simpler and just as good. In this small cohort, with 31 deaths, the differences will be imprecise, which is the honest result rather than a disappointing one.</span>
+<span id="cb6-166"><a href="#cb6-166" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-167"><a href="#cb6-167" aria-hidden="true" tabindex="-1"></a>The positivity warning from Section 3 is concrete here. The treat-if-benefit rule will tend to assign HAART to the sickest, lowest-CD4 patients, which is fine because almost all of them were in fact treated. The trouble is the other direction: if the rule ever assigns *no treatment* to a low-CD4 group in which essentially everyone was treated, the value estimate for that group rests on almost no untreated patients and is extrapolation, not evidence. Run the per-stratum positivity check from @sec-effect-modification on the groups the rule actually creates, not only on the cohort as a whole, and treat a rule that depends on a near-empty treatment arm as a hypothesis rather than a recommendation.</span>
+<span id="cb6-168"><a href="#cb6-168" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-169"><a href="#cb6-169" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-170"><a href="#cb6-170" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-171"><a href="#cb6-171" aria-hidden="true" tabindex="-1"></a><span class="fu">## 7. Where these analyses fail</span></span>
+<span id="cb6-172"><a href="#cb6-172" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-173"><a href="#cb6-173" aria-hidden="true" tabindex="-1"></a>Three failure modes recur, and naming them is the best defense.</span>
+<span id="cb6-174"><a href="#cb6-174" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-175"><a href="#cb6-175" aria-hidden="true" tabindex="-1"></a>The first is positivity within the rule's own subgroups, described just above. A rule manufactures the very subpopulations whose counterfactual outcomes it then needs, so it is unusually easy to ask the data for a comparison it cannot support.</span>
+<span id="cb6-176"><a href="#cb6-176" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-177"><a href="#cb6-177" aria-hidden="true" tabindex="-1"></a>The second is instability at the decision boundary. For patients whose true benefit is near zero, the rule's decision is driven by noise, the value of the optimal rule is a non-smooth target, and ordinary confidence intervals understate the uncertainty. Use the cross-fit estimators built for this problem and report which patients sit near the boundary.</span>
+<span id="cb6-178"><a href="#cb6-178" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-179"><a href="#cb6-179" aria-hidden="true" tabindex="-1"></a>The third is optimism from reusing data. A rule chosen to look good on a dataset will look better on that dataset than it will in practice. Estimate the value of the learned rule with cross-fitting or on held-out data, never with the same fit that selected the rule, and prefer a simple, prespecified rule class when the goal is a deployable recommendation.</span>
+<span id="cb6-180"><a href="#cb6-180" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-181"><a href="#cb6-181" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-182"><a href="#cb6-182" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-183"><a href="#cb6-183" aria-hidden="true" tabindex="-1"></a><span class="fu">## 8. Software</span></span>
+<span id="cb6-184"><a href="#cb6-184" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-185"><a href="#cb6-185" aria-hidden="true" tabindex="-1"></a>The <span class="in">`policytree`</span> package, a companion to <span class="in">`grf`</span>, learns shallow, interpretable decision trees that maximize estimated value and pairs naturally with the causal-forest CATE used above. <span class="in">`DynTxRegime`</span> implements value-search and regression-based estimators for single- and multi-stage rules. Super Learner or the highly adaptive lasso (@sec-hal) are good choices for the outcome and propensity nuisance models that the value estimator needs. Targeted-learning implementations of optimal-rule estimation also exist in the broader software ecosystem; this handbook's running examples stay with <span class="in">`grf`</span> and base R so the moving parts remain visible.</span>
+<span id="cb6-186"><a href="#cb6-186" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-187"><a href="#cb6-187" aria-hidden="true" tabindex="-1"></a>---</span>
+<span id="cb6-188"><a href="#cb6-188" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-189"><a href="#cb6-189" aria-hidden="true" tabindex="-1"></a><span class="fu">## Connections to other chapters</span></span>
+<span id="cb6-190"><a href="#cb6-190" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-191"><a href="#cb6-191" aria-hidden="true" tabindex="-1"></a>This chapter is the decision-making sequel to effect modification (@sec-effect-modification): the CATE is the input, and a rule plus its value is the output. The value estimator is the augmented, doubly robust estimator of @sec-doubly-robust-tmle applied to a rule-assigned treatment, and the inference cautions are the cross-fitting ideas of @sec-advanced-tmle. When the decision is not a one-time choice but a sustained, time-updated policy, the longitudinal modified-treatment-policy framework of @sec-applied-lmtp is the natural extension.</span>
+<span id="cb6-192"><a href="#cb6-192" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-193"><a href="#cb6-193" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and further reading</span></span>
+<span id="cb6-194"><a href="#cb6-194" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-195"><a href="#cb6-195" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>@vanderlaan2015optimal develops targeted learning of the optimal rule and its value.</span>
+<span id="cb6-196"><a href="#cb6-196" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>@luedtke2016inference gives valid inference for the value of the optimal rule, including the non-regular near-zero-benefit case.</span>
+<span id="cb6-197"><a href="#cb6-197" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>@wager2018estimation and @athey2016recursive are the causal-forest foundations reused here for the CATE step.</span>
+<span id="cb6-198"><a href="#cb6-198" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-199"><a href="#cb6-199" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
+<span id="cb6-200"><a href="#cb6-200" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-201"><a href="#cb6-201" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb6-202"><a href="#cb6-202" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. Why can a treat-if-benefit rule create a positivity problem that the average treatment effect analysis did not have?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb6-203"><a href="#cb6-203" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-204"><a href="#cb6-204" aria-hidden="true" tabindex="-1"></a>The rule defines new subpopulations by the treatment it assigns, and it then needs each subpopulation's outcome under that assigned treatment. If the rule assigns a treatment that some covariate group almost never received in the data, there are too few comparable patients to estimate the outcome under that assignment, so the value rests on extrapolation. The average treatment effect pools across the whole cohort and is less exposed to these rule-induced sparse cells.</span>
+<span id="cb6-205"><a href="#cb6-205" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-206"><a href="#cb6-206" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
+<span id="cb6-207"><a href="#cb6-207" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-208"><a href="#cb6-208" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb6-209"><a href="#cb6-209" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q2. A colleague reports a confidence interval for the value of the optimal rule using the same forest that selected the rule, on the same data. Name the two problems.&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb6-210"><a href="#cb6-210" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-211"><a href="#cb6-211" aria-hidden="true" tabindex="-1"></a>First, optimism: a rule chosen to look good on a dataset will overstate its value on that dataset, so the point estimate is biased upward and needs cross-fitting or held-out evaluation. Second, non-regularity: the value of the optimal rule is non-smooth wherever the true benefit is near zero, so a plug-in interval is too narrow even setting optimism aside. Both push the reported interval toward false confidence.</span>
+<span id="cb6-212"><a href="#cb6-212" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-213"><a href="#cb6-213" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
+<span id="cb6-214"><a href="#cb6-214" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-215"><a href="#cb6-215" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb6-216"><a href="#cb6-216" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q3. When is a shallow decision-tree rule (policy learning) preferable to thresholding an estimated CATE?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb6-217"><a href="#cb6-217" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-218"><a href="#cb6-218" aria-hidden="true" tabindex="-1"></a>When the rule has to be implemented and defended in practice. A shallow tree is readable, applies a small number of cutpoints a clinician can follow, and overfits less because the rule class is small. Thresholding a flexible CATE can yield a rule that is accurate in expectation but opaque and unstable for individual patients near the boundary. The tree trades a little estimated value for interpretability and robustness.</span>
+<span id="cb6-219"><a href="#cb6-219" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-220"><a href="#cb6-220" aria-hidden="true" tabindex="-1"></a>&lt;/details&gt;</span>
 </code><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></pre></div>
 </div></div></div></div></div>
 </div> <!-- /content -->

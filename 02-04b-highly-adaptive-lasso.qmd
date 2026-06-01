@@ -53,7 +53,8 @@ There are two natural ways to use HAL, and the first is the safer default. Add i
 The `hal9001` package implements both. The two knobs worth knowing are the maximum interaction order, which sets whether HAL considers single covariates only, pairs, or higher combinations, and the smoothness setting, which controls whether the building blocks are sharp steps or smoother pieces. The main practical cost is computation: the basis grows quickly with the number of covariates and the sample size, so analysts often cap the interaction order at two and screen covariates before fitting in high-dimensional problems.
 
 ```{r}
-#| eval: false
+#| warning: false
+#| message: false
 source("_data/load-haart-cohort.R")
 library(hal9001)
 
@@ -64,18 +65,34 @@ Y <- haart_baseline$died
 hal_fit <- fit_hal(X = X, Y = Y, family = "binomial", max_degree = 2)
 
 # Compare HAL's fitted mortality risks with a main-terms logistic regression.
-p_hal <- predict(hal_fit, new_data = X)
+p_hal <- as.numeric(predict(hal_fit, new_data = X))
 p_glm <- predict(glm(died ~ age + sex + cd4_sqrt_baseline,
                      family = binomial, data = haart_baseline), type = "response")
 
 summary(p_hal); summary(p_glm)
 ```
 
+```{r}
+#| label: fig-hal-vs-glm
+#| fig-cap: "Fitted mortality risks from HAL versus a main-terms logistic regression, one point per patient. Where points leave the dashed 45-degree line, HAL has captured structure (CD4 thresholds and age interactions) that the additive logistic model cannot represent; those better nuisance fits are what give TMLE its rate guarantee."
+#| code-fold: true
+library(ggplot2)
+data.frame(p_glm = p_glm, p_hal = p_hal) |>
+  ggplot(aes(p_glm, p_hal)) +
+  geom_point(alpha = 0.3, size = 0.6) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(x = "Main-terms logistic regression risk", y = "HAL fitted risk",
+       title = "HAL separates patients the additive model lumps together") +
+  theme_minimal()
+```
+
 To use HAL inside an ensemble instead, list it as a learner and let Super Learner weight it against the others.
 
 ```{r}
-#| eval: false
+#| warning: false
+#| message: false
 library(SuperLearner)
+set.seed(2026)
 sl_fit <- SuperLearner(
   Y = Y, X = as.data.frame(X), family = binomial(),
   SL.library = c("SL.glm", "SL.mean", "SL.hal9001")

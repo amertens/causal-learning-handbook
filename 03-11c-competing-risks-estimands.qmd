@@ -702,12 +702,28 @@ comp_risk <- tibble(
   se   = comp_24$std.err
 )
 
-bind_rows(
+estimand_tbl <- bind_rows(
   km_risk   %>% mutate(estimand = "(a) KM, death censored"),
   aj_risk   %>% mutate(estimand = "(b) AJ, death as competing event"),
   comp_risk %>% mutate(estimand = "(c) Composite (hosp or death)")
 ) %>%
   arrange(estimand, A)
+estimand_tbl
+```
+
+```{r}
+#| label: fig-three-estimands
+#| fig-cap: "24-month risk of HF hospitalization estimated three ways, by treatment arm (95% CIs). Censoring death (a) inflates the risk relative to the competing-risks Aalen-Johansen estimate (b); the composite endpoint (c) is larger still because it counts a different outcome. The three answers disagree by construction, which is why the estimand must be fixed before the estimator."
+#| code-fold: true
+ggplot(estimand_tbl, aes(factor(A, labels = c("Drug B (control)", "Drug A")),
+                         risk, fill = estimand)) +
+  geom_col(position = position_dodge(0.8), width = 0.7) +
+  geom_errorbar(aes(ymin = pmax(risk - 1.96 * se, 0), ymax = risk + 1.96 * se),
+                position = position_dodge(0.8), width = 0.2) +
+  labs(x = NULL, y = "24-month risk of HF hospitalization", fill = NULL,
+       title = "Three estimands, three different numbers") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
 ```
 
 The three numbers will not agree, and that disagreement is the whole point. Censoring death (estimand a) inflates the apparent risk of HF hospitalization, especially under Drug A, because frail patients who would have died early are kept "at risk" in the KM denominator as if they could still hospitalize. The AJ number (estimand b) is the patient-facing observed-world risk. The composite (estimand c) is bigger than both because it counts a different outcome.
@@ -755,24 +771,26 @@ In words: cumulative incidence accumulates the chance of having the event of int
 #| warning: false
 
 manual_cif <- function(time, event, horizon) {
+  n_total <- length(time)                       # everyone is at risk at time zero
   tibble(time = time, event = event) %>%
-    filter(time <= horizon) %>%
     arrange(time) %>%
     group_by(time) %>%
     summarise(
-      d_hosp  = sum(event == 1),
-      d_death = sum(event == 2),
-      n_event = sum(event %in% c(1, 2, 3) | event == 0 & time == time),
+      d_hosp  = sum(event == 1),                # hospitalizations at this time
+      d_death = sum(event == 2),                # competing deaths at this time
+      n_exit  = dplyr::n(),                     # subjects leaving the risk set (event or censor)
       .groups = "drop"
     ) %>%
     mutate(
-      n_at_risk = length(time) - cumsum(lag(d_hosp + d_death, default = 0)),
+      # at-risk just before each distinct time = total minus those who exited earlier
+      n_at_risk = n_total - cumsum(lag(n_exit, default = 0)),
       h_hosp    = d_hosp  / pmax(n_at_risk, 1),
       h_death   = d_death / pmax(n_at_risk, 1),
       S_prev    = cumprod(lag(1 - h_hosp - h_death, default = 1)),
       cif_hosp  = cumsum(S_prev * h_hosp)
     ) %>%
-    select(time, h_hosp, h_death, S_prev, cif_hosp)
+    filter(time <= horizon) %>%
+    select(time, n_at_risk, h_hosp, h_death, S_prev, cif_hosp)
 }
 
 dat %>%
