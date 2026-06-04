@@ -134,12 +134,14 @@ The double-robustness and Super Learner machinery covered in @sec-doubly-robust-
 
 Worked example: the ATE among patients younger than 75.
 
-```{r, eval=FALSE}
+```{r}
+#| warning: false
+#| message: false
 library(tmle)
 library(SuperLearner)
 library(tidyverse)
 
-# Assume dat has columns: Y (outcome), A (treatment), age, cvd, eGFR, etc.
+# Illustrative data: Y is independent of A here, so the true subgroup effect is ~0.
 set.seed(123)
 
 dat <- tibble(
@@ -158,9 +160,9 @@ sl_lib <- c("SL.glm", "SL.ranger", "SL.mean")
 tmle_sub <- tmle(
   Y = dat$Y[dat$age_under75 == 1],             # <1>
   A = dat$A[dat$age_under75 == 1],             # <1>
-  W = dat %>%
+  W = as.data.frame(dat %>%
     filter(age_under75 == 1) %>%
-    select(cvd, eGFR),                         # <2>
+    select(cvd, eGFR)),                        # <2>
   family = "binomial",
   Q.SL.library = sl_lib,                       # <3>
   g.SL.library = sl_lib                        # <3>
@@ -172,9 +174,7 @@ tmle_sub$estimates$ATE
 2. W contains the **confounders** for the subgroup analysis. Notably, the subgrouping variable `age_under75` itself is **excluded** from W; including it would condition the propensity score model on the stratification variable, collapsing variation and potentially destabilizing the estimate
 3. The same SL library is used for both the outcome model (Q) and propensity score (g); in small subgroups you may need to simplify the library or reduce cross-validation folds to prevent empty folds
 
-Interpretation:
-
-> Among patients younger than 75, the TMLE-estimated risk difference for treatment is approximately X percentage points (95% CI …).
+Interpretation: read `tmle_sub$estimates$ATE` (printed above) as the subgroup-specific risk difference $E[Y(1) - Y(0) \mid \text{age} < 75]$ with an influence-curve-based 95% CI. Because the demonstration data are random noise (Y was generated independently of A), the estimate here is close to zero; on real data you would report the subgroup point estimate and CI in its place.
 
 The strengths of this approach are that it gives valid subgroup-specific estimates and uses Super Learner for the nuisance models. The limitations are that it does not produce a continuous CATE curve and requires the analyst to prespecify subgroups with adequate sample size in each.
 

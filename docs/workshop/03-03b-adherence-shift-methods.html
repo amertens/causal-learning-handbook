@@ -896,6 +896,9 @@ Figure&nbsp;21.1: Causal forgiveness curves (lines) versus crude adherence-strat
 <span id="cb7-37"><a href="#cb7-37" aria-hidden="true" tabindex="-1"></a><span class="co"># Contrast: effect of shifting adherence up by 10pp</span></span>
 <span id="cb7-38"><a href="#cb7-38" aria-hidden="true" tabindex="-1"></a>contrast <span class="ot">&lt;-</span> <span class="fu">lmtp_contrast</span>(fit_shifted, <span class="at">ref =</span> fit_natural, <span class="at">type =</span> <span class="st">"additive"</span>)</span>
 <span id="cb7-39"><a href="#cb7-39" aria-hidden="true" tabindex="-1"></a>contrast</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<pre><code>#&gt; 
+#&gt;   shift   ref estimate std.error conf.low conf.high p.value
+#&gt; 1 0.866 0.814   0.0521    0.0137   0.0252     0.079  &lt;0.001</code></pre>
 </div>
 <p>The contrast estimates how much the failure rate would change if every patient’s adherence increased by 10 percentage points at each visit. Because <code>lmtp</code> uses <code>outcome_type = "survival"</code>, it returns <span class="math inline">\(P(\text{survive})\)</span>, so the risk is <span class="math inline">\(1 - \theta\)</span>. A negative risk difference means the shift reduces failure.</p>
 </section>
@@ -906,30 +909,30 @@ Figure&nbsp;21.1: Causal forgiveness curves (lines) versus crude adherence-strat
 <h2 data-number="24.1" class="anchored" data-anchor-id="quantile-matching-what-if-drug-b-adhered-like-drug-a"><span class="header-section-number">24.1</span> Quantile matching: what if Drug B adhered like Drug A?</h2>
 <p>This maps each Drug B patient’s adherence to the corresponding quantile of Drug A’s distribution. A patient at the 30th percentile of Drug B adherence gets mapped to the 30th percentile of Drug A adherence. This answers: what would happen to Drug B’s outcomes if its patients had Drug A’s adherence profile?</p>
 <div class="cell" data-layout-align="center">
-<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Build quantile-matching shift function</span></span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>ecdf_B <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>sorted_A <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
-<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (t <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>K) {</span>
-<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>  col <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"PDC_"</span>, t)</span>
-<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>  ecdf_B[[t]] <span class="ot">&lt;-</span> <span class="fu">ecdf</span>(dat[[col]][dat<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">0</span>])</span>
-<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>  sorted_A[[t]] <span class="ot">&lt;-</span> <span class="fu">sort</span>(dat[[col]][dat<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">1</span>])</span>
-<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>shift_match_A <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) {</span>
-<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>  t_idx <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(<span class="fu">gsub</span>(<span class="st">"PDC_"</span>, <span class="st">""</span>, trt))</span>
-<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>  a_obs <span class="ot">&lt;-</span> data[[trt]]</span>
-<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>  a_shifted <span class="ot">&lt;-</span> a_obs</span>
-<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>  is_b <span class="ot">&lt;-</span> data<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">0</span></span>
-<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">any</span>(is_b)) {</span>
-<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>    p_rank <span class="ot">&lt;-</span> ecdf_B[[t_idx]](a_obs[is_b])</span>
-<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a>    p_rank <span class="ot">&lt;-</span> <span class="fu">pmax</span>(<span class="fl">0.01</span>, <span class="fu">pmin</span>(<span class="fl">0.99</span>, p_rank))</span>
-<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>    a_shifted[is_b] <span class="ot">&lt;-</span> sorted_A[[t_idx]][</span>
-<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>      <span class="fu">pmin</span>(<span class="fu">length</span>(sorted_A[[t_idx]]),</span>
-<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a>           <span class="fu">ceiling</span>(p_rank <span class="sc">*</span> <span class="fu">length</span>(sorted_A[[t_idx]])))</span>
-<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a>    ]</span>
-<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a>  a_shifted</span>
-<span id="cb8-24"><a href="#cb8-24" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Build quantile-matching shift function</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>ecdf_B <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>sorted_A <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (t <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>K) {</span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>  col <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"PDC_"</span>, t)</span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>  ecdf_B[[t]] <span class="ot">&lt;-</span> <span class="fu">ecdf</span>(dat[[col]][dat<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">0</span>])</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>  sorted_A[[t]] <span class="ot">&lt;-</span> <span class="fu">sort</span>(dat[[col]][dat<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">1</span>])</span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>shift_match_A <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) {</span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>  t_idx <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(<span class="fu">gsub</span>(<span class="st">"PDC_"</span>, <span class="st">""</span>, trt))</span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>  a_obs <span class="ot">&lt;-</span> data[[trt]]</span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>  a_shifted <span class="ot">&lt;-</span> a_obs</span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>  is_b <span class="ot">&lt;-</span> data<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">0</span></span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">any</span>(is_b)) {</span>
+<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>    p_rank <span class="ot">&lt;-</span> ecdf_B[[t_idx]](a_obs[is_b])</span>
+<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>    p_rank <span class="ot">&lt;-</span> <span class="fu">pmax</span>(<span class="fl">0.01</span>, <span class="fu">pmin</span>(<span class="fl">0.99</span>, p_rank))</span>
+<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>    a_shifted[is_b] <span class="ot">&lt;-</span> sorted_A[[t_idx]][</span>
+<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a>      <span class="fu">pmin</span>(<span class="fu">length</span>(sorted_A[[t_idx]]),</span>
+<span id="cb9-20"><a href="#cb9-20" aria-hidden="true" tabindex="-1"></a>           <span class="fu">ceiling</span>(p_rank <span class="sc">*</span> <span class="fu">length</span>(sorted_A[[t_idx]])))</span>
+<span id="cb9-21"><a href="#cb9-21" aria-hidden="true" tabindex="-1"></a>    ]</span>
+<span id="cb9-22"><a href="#cb9-22" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb9-23"><a href="#cb9-23" aria-hidden="true" tabindex="-1"></a>  a_shifted</span>
+<span id="cb9-24"><a href="#cb9-24" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </section>
 <section id="mean-calibrated-additive-shift" class="level2" data-number="24.2">
@@ -1462,438 +1465,440 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
       </a>
   </div>
 </nav><div class="modal fade" id="quarto-embedded-source-code-modal" tabindex="-1" aria-labelledby="quarto-embedded-source-code-modal-label" aria-hidden="true"><div class="modal-dialog modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="quarto-embedded-source-code-modal-label">Source Code</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="">
-<div class="sourceCode" id="cb9" data-shortcodes="false"><pre class="sourceCode markdown code-with-copy"><code class="sourceCode markdown"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
-<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="an">subtitle:</span><span class="co"> "From adherence thresholds to intervention-defined forgiveness curves"</span></span>
-<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="an">format:</span><span class="co"> html</span></span>
-<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
-<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="fu"># Adherence, Forgiveness, and Distribution-Shift Interventions {#sec-adherence-shift}</span></span>
-<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>*Estimated reading time: 55 minutes*</span>
-<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a><span class="co">#| include: false</span></span>
-<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span>opts_chunk<span class="sc">$</span><span class="fu">set</span>(</span>
-<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">collapse =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>  <span class="at">comment =</span> <span class="st">"#&gt;"</span>,</span>
-<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.width =</span> <span class="dv">7</span>,</span>
-<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.height =</span> <span class="dv">4</span>,</span>
-<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.align =</span> <span class="st">"center"</span></span>
-<span id="cb9-20"><a href="#cb9-20" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb9-21"><a href="#cb9-21" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
-<span id="cb9-22"><a href="#cb9-22" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb9-23"><a href="#cb9-23" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-24"><a href="#cb9-24" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-25"><a href="#cb9-25" aria-hidden="true" tabindex="-1"></a><span class="fu"># What this chapter is about</span></span>
-<span id="cb9-26"><a href="#cb9-26" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-27"><a href="#cb9-27" aria-hidden="true" tabindex="-1"></a>The previous chapters introduced longitudinal TMLE for static interventions ("always maintain high adherence") and LMTP for modified treatment policies. This chapter brings those tools to bear on a clinically important question: how do two antiretroviral drugs compare when we account for realistic adherence patterns? It focuses on the adherence- and forgiveness-specific shift methods; for the full end-to-end LMTP workflow on a dynamic treatment rule, from question to estimate, see @sec-applied-lmtp.</span>
-<span id="cb9-28"><a href="#cb9-28" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-29"><a href="#cb9-29" aria-hidden="true" tabindex="-1"></a>The key concept is **regimen forgiveness**: a drug is forgiving if patients can miss some doses without a large increase in treatment failure. A drug with a flat adherence-response curve is forgiving; one with a steep curve is not. Forgiveness is a causal quantity, not an observable property of the data, because the adherence-response relationship is confounded by time-varying health status.</span>
-<span id="cb9-30"><a href="#cb9-30" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-31"><a href="#cb9-31" aria-hidden="true" tabindex="-1"></a>We use a simulated two-drug HIV cohort designed to capture the essential features of the adherence problem: treatment-confounder feedback between adherence and health, differential forgiveness across drugs, and the positivity challenges that arise when targeting extreme adherence levels. The simulation is calibrated to real pharmacoepidemiologic settings and uses continuous proportion of days covered (PDC) as the adherence measure.</span>
-<span id="cb9-32"><a href="#cb9-32" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-33"><a href="#cb9-33" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-34"><a href="#cb9-34" aria-hidden="true" tabindex="-1"></a>The figure below previews the quantity we are after. A **forgiveness curve** plots the counterfactual risk of virologic failure against the adherence level a patient sustains, one curve per drug. The vertical distance between the two curves is the **forgiveness gap**: how much more a missed-dose pattern costs on the less forgiving regimen. The curve is a causal object, the risk we *would* see if adherence were set to each level, and it is not the same as the risk we observe among patients who happen to adhere at that level. Those two can diverge sharply, and most of this chapter is about why, and how to estimate the causal version.</span>
-<span id="cb9-35"><a href="#cb9-35" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-38"><a href="#cb9-38" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb9-39"><a href="#cb9-39" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-forgiveness-motivation</span></span>
-<span id="cb9-40"><a href="#cb9-40" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "An illustrative forgiveness curve. Counterfactual failure risk rises as sustained adherence falls, and it rises faster for the less forgiving regimen. The vertical distance is the forgiveness gap. This is the causal quantity the chapter estimates; the curve here is a stylized illustration, not yet an estimate from data."</span></span>
-<span id="cb9-41"><a href="#cb9-41" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
-<span id="cb9-42"><a href="#cb9-42" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
-<span id="cb9-43"><a href="#cb9-43" aria-hidden="true" tabindex="-1"></a>adh <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="fl">0.30</span>, <span class="dv">1</span>, <span class="at">length.out =</span> <span class="dv">150</span>)</span>
-<span id="cb9-44"><a href="#cb9-44" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
-<span id="cb9-45"><a href="#cb9-45" aria-hidden="true" tabindex="-1"></a>  <span class="at">adherence =</span> <span class="fu">rep</span>(adh, <span class="dv">2</span>),</span>
-<span id="cb9-46"><a href="#cb9-46" aria-hidden="true" tabindex="-1"></a>  <span class="at">risk =</span> <span class="fu">c</span>(<span class="fu">plogis</span>(<span class="sc">-</span><span class="dv">3</span> <span class="sc">+</span> <span class="fl">4.5</span> <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> adh)),</span>
-<span id="cb9-47"><a href="#cb9-47" aria-hidden="true" tabindex="-1"></a>           <span class="fu">plogis</span>(<span class="sc">-</span><span class="dv">3</span> <span class="sc">+</span> <span class="fl">4.5</span> <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> adh) <span class="sc">-</span> <span class="fl">0.8</span> <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> adh))),</span>
-<span id="cb9-48"><a href="#cb9-48" aria-hidden="true" tabindex="-1"></a>  <span class="at">Drug =</span> <span class="fu">rep</span>(<span class="fu">c</span>(<span class="st">"Drug B (less forgiving)"</span>, <span class="st">"Drug A (more forgiving)"</span>), <span class="at">each =</span> <span class="dv">150</span>)</span>
-<span id="cb9-49"><a href="#cb9-49" aria-hidden="true" tabindex="-1"></a>) <span class="sc">|&gt;</span></span>
-<span id="cb9-50"><a href="#cb9-50" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(adherence, risk, <span class="at">color =</span> Drug)) <span class="sc">+</span></span>
-<span id="cb9-51"><a href="#cb9-51" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
-<span id="cb9-52"><a href="#cb9-52" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"segment"</span>, <span class="at">x =</span> <span class="fl">0.5</span>, <span class="at">xend =</span> <span class="fl">0.5</span>, <span class="at">y =</span> <span class="fl">0.16</span>, <span class="at">yend =</span> <span class="fl">0.55</span>,</span>
-<span id="cb9-53"><a href="#cb9-53" aria-hidden="true" tabindex="-1"></a>           <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">color =</span> <span class="st">"grey40"</span>) <span class="sc">+</span></span>
-<span id="cb9-54"><a href="#cb9-54" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"text"</span>, <span class="at">x =</span> <span class="fl">0.52</span>, <span class="at">y =</span> <span class="fl">0.36</span>, <span class="at">label =</span> <span class="st">"forgiveness</span><span class="sc">\n</span><span class="st">gap"</span>,</span>
-<span id="cb9-55"><a href="#cb9-55" aria-hidden="true" tabindex="-1"></a>           <span class="at">hjust =</span> <span class="dv">0</span>, <span class="at">size =</span> <span class="fl">3.4</span>, <span class="at">color =</span> <span class="st">"grey40"</span>) <span class="sc">+</span></span>
-<span id="cb9-56"><a href="#cb9-56" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_x_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span>percent) <span class="sc">+</span></span>
-<span id="cb9-57"><a href="#cb9-57" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span>percent) <span class="sc">+</span></span>
-<span id="cb9-58"><a href="#cb9-58" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"Drug B (less forgiving)"</span> <span class="ot">=</span> <span class="st">"#EE6677"</span>,</span>
-<span id="cb9-59"><a href="#cb9-59" aria-hidden="true" tabindex="-1"></a>                                <span class="st">"Drug A (more forgiving)"</span> <span class="ot">=</span> <span class="st">"#228833"</span>)) <span class="sc">+</span></span>
-<span id="cb9-60"><a href="#cb9-60" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"Sustained adherence (PDC)"</span>, <span class="at">y =</span> <span class="st">"Virologic failure risk"</span>, <span class="at">color =</span> <span class="cn">NULL</span>) <span class="sc">+</span></span>
-<span id="cb9-61"><a href="#cb9-61" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>() <span class="sc">+</span> <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
-<span id="cb9-62"><a href="#cb9-62" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb9-63"><a href="#cb9-63" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-64"><a href="#cb9-64" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-65"><a href="#cb9-65" aria-hidden="true" tabindex="-1"></a><span class="fu"># The clinical question</span></span>
-<span id="cb9-66"><a href="#cb9-66" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-67"><a href="#cb9-67" aria-hidden="true" tabindex="-1"></a>Consider two antiretroviral regimens for HIV treatment:</span>
-<span id="cb9-68"><a href="#cb9-68" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-69"><a href="#cb9-69" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Drug A** (e.g., a long-acting formulation): pharmacologically forgiving, meaning that occasional missed doses have a smaller impact on viral suppression.</span>
-<span id="cb9-70"><a href="#cb9-70" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Drug B** (e.g., a short half-life oral regimen): less forgiving, where missed doses lead to faster viral rebound.</span>
-<span id="cb9-71"><a href="#cb9-71" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-72"><a href="#cb9-72" aria-hidden="true" tabindex="-1"></a>In practice, both drugs are prescribed and adherence varies. The adherence distributions may differ across drugs (one may be easier to take consistently), and the clinical consequences of low adherence differ (one may be more forgiving). The causal question is: **how much of the observed outcome difference between drugs is due to adherence patterns versus pharmacological forgiveness?**</span>
-<span id="cb9-73"><a href="#cb9-73" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-74"><a href="#cb9-74" aria-hidden="true" tabindex="-1"></a>This question requires separating three components:</span>
-<span id="cb9-75"><a href="#cb9-75" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-76"><a href="#cb9-76" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**Adherence distribution**: Do Drug A and Drug B patients adhere at different rates?</span>
-<span id="cb9-77"><a href="#cb9-77" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**Forgiveness**: At any given adherence level, does one drug produce better outcomes than the other?</span>
-<span id="cb9-78"><a href="#cb9-78" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Adherence-mediated effect**: How much of the total drug difference operates through the adherence pathway?</span>
-<span id="cb9-79"><a href="#cb9-79" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-80"><a href="#cb9-80" aria-hidden="true" tabindex="-1"></a>Each component requires longitudinal causal methods because adherence and health co-evolve over time.</span>
-<span id="cb9-81"><a href="#cb9-81" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-82"><a href="#cb9-82" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-83"><a href="#cb9-83" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why this needs a causal method</span></span>
-<span id="cb9-84"><a href="#cb9-84" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-85"><a href="#cb9-85" aria-hidden="true" tabindex="-1"></a>Adherence is measured after treatment starts and changes over time, and it sits in a feedback loop with health. Worse health lowers adherence through side effects and complications; lower adherence worsens virologic control; and worse control feeds back into health, which shapes the next period's adherence. The variable that confounds the adherence-to-failure relationship, current health status $L_t$, is therefore also a *consequence* of past adherence.</span>
-<span id="cb9-86"><a href="#cb9-86" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-89"><a href="#cb9-89" aria-hidden="true" tabindex="-1"></a><span class="in">```{mermaid}</span></span>
-<span id="cb9-90"><a href="#cb9-90" aria-hidden="true" tabindex="-1"></a><span class="in">%%| label: fig-adherence-dag</span></span>
-<span id="cb9-91"><a href="#cb9-91" aria-hidden="true" tabindex="-1"></a><span class="in">%%| fig-cap: "Two blocks of the adherence process. Health status L at each block confounds the adherence-to-failure relationship and is itself moved by prior adherence (the feedback arrow from PDC1 to L2). A regression that conditions on L removes the confounding but also blocks the pathway through which past adherence acts; a regression that omits L leaves the confounding in place."</span></span>
-<span id="cb9-92"><a href="#cb9-92" aria-hidden="true" tabindex="-1"></a><span class="in">flowchart LR</span></span>
-<span id="cb9-93"><a href="#cb9-93" aria-hidden="true" tabindex="-1"></a><span class="in">  W["W0, A0&lt;br/&gt;baseline, drug"] --&gt; L1["L1&lt;br/&gt;health"]</span></span>
-<span id="cb9-94"><a href="#cb9-94" aria-hidden="true" tabindex="-1"></a><span class="in">  L1 --&gt; P1["PDC1&lt;br/&gt;adherence"]</span></span>
-<span id="cb9-95"><a href="#cb9-95" aria-hidden="true" tabindex="-1"></a><span class="in">  P1 --&gt; Y["Y&lt;br/&gt;failure"]</span></span>
-<span id="cb9-96"><a href="#cb9-96" aria-hidden="true" tabindex="-1"></a><span class="in">  L1 --&gt; Y</span></span>
-<span id="cb9-97"><a href="#cb9-97" aria-hidden="true" tabindex="-1"></a><span class="in">  P1 --&gt; L2["L2&lt;br/&gt;health"]</span></span>
-<span id="cb9-98"><a href="#cb9-98" aria-hidden="true" tabindex="-1"></a><span class="in">  W --&gt; L2</span></span>
-<span id="cb9-99"><a href="#cb9-99" aria-hidden="true" tabindex="-1"></a><span class="in">  L2 --&gt; P2["PDC2&lt;br/&gt;adherence"]</span></span>
-<span id="cb9-100"><a href="#cb9-100" aria-hidden="true" tabindex="-1"></a><span class="in">  P2 --&gt; Y</span></span>
-<span id="cb9-101"><a href="#cb9-101" aria-hidden="true" tabindex="-1"></a><span class="in">  L2 --&gt; Y</span></span>
-<span id="cb9-102"><a href="#cb9-102" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb9-103"><a href="#cb9-103" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-104"><a href="#cb9-104" aria-hidden="true" tabindex="-1"></a>This is the dilemma that defeats ordinary regression. Conditioning on observed adherence adjusts for the health-status confounding and, at the same time, blocks the adherence effect we want to measure, because that effect runs through health. Leaving health out of the model leaves the confounding in place. No single regression can do both. This is exactly the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it is why estimating a forgiveness curve needs the g-methods developed there.</span>
-<span id="cb9-105"><a href="#cb9-105" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-106"><a href="#cb9-106" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-107"><a href="#cb9-107" aria-hidden="true" tabindex="-1"></a><span class="fu"># The data-generating process</span></span>
-<span id="cb9-108"><a href="#cb9-108" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-109"><a href="#cb9-109" aria-hidden="true" tabindex="-1"></a>We use a simulation that generates longitudinal data with 90-day blocks over one year (K = 4 blocks). The DGP produces treatment-confounder feedback: poor adherence worsens health (higher L), and worse health reduces future adherence. Drug A is more forgiving at low adherence levels, encoded through a drug-by-adherence interaction in the failure hazard.</span>
-<span id="cb9-110"><a href="#cb9-110" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-113"><a href="#cb9-113" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb9-114"><a href="#cb9-114" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: sim-dgp</span></span>
-<span id="cb9-115"><a href="#cb9-115" aria-hidden="true" tabindex="-1"></a><span class="co"># Simplified DGP for the adherence forgiveness simulation</span></span>
-<span id="cb9-116"><a href="#cb9-116" aria-hidden="true" tabindex="-1"></a><span class="co"># Based on sim_v4_dgp.R from the adherence simulation project</span></span>
-<span id="cb9-117"><a href="#cb9-117" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-118"><a href="#cb9-118" aria-hidden="true" tabindex="-1"></a>simulate_adherence_data <span class="ot">&lt;-</span> <span class="cf">function</span>(<span class="at">n =</span> <span class="dv">500</span>, <span class="at">K =</span> <span class="dv">4</span>, <span class="at">seed =</span> <span class="dv">2026</span>) {</span>
-<span id="cb9-119"><a href="#cb9-119" aria-hidden="true" tabindex="-1"></a>  <span class="fu">set.seed</span>(seed)</span>
-<span id="cb9-120"><a href="#cb9-120" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-121"><a href="#cb9-121" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Parameters</span></span>
-<span id="cb9-122"><a href="#cb9-122" aria-hidden="true" tabindex="-1"></a>  alpha0 <span class="ot">&lt;-</span> <span class="fl">1.30</span>; alphaA <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">0.35</span>; alphaW <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">0.20</span>; alphaL <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">0.30</span></span>
-<span id="cb9-123"><a href="#cb9-123" aria-hidden="true" tabindex="-1"></a>  rho <span class="ot">&lt;-</span> <span class="fl">0.45</span>; sigma_u <span class="ot">&lt;-</span> <span class="fl">0.50</span>; sigma_e <span class="ot">&lt;-</span> <span class="fl">0.65</span></span>
-<span id="cb9-124"><a href="#cb9-124" aria-hidden="true" tabindex="-1"></a>  beta0 <span class="ot">&lt;-</span> <span class="fl">0.0</span>; betaW <span class="ot">&lt;-</span> <span class="fl">0.30</span>; betaA <span class="ot">&lt;-</span> <span class="fl">0.0</span>; betaLag <span class="ot">&lt;-</span> <span class="fl">0.35</span>; betaP <span class="ot">&lt;-</span> <span class="fl">0.80</span></span>
-<span id="cb9-125"><a href="#cb9-125" aria-hidden="true" tabindex="-1"></a>  sigma_L <span class="ot">&lt;-</span> <span class="fl">0.50</span></span>
-<span id="cb9-126"><a href="#cb9-126" aria-hidden="true" tabindex="-1"></a>  gamma0 <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">3.80</span>; gammaL <span class="ot">&lt;-</span> <span class="fl">0.50</span>; gammaW <span class="ot">&lt;-</span> <span class="fl">0.30</span></span>
-<span id="cb9-127"><a href="#cb9-127" aria-hidden="true" tabindex="-1"></a>  gammaP <span class="ot">&lt;-</span> <span class="fl">2.50</span>; gammaA <span class="ot">&lt;-</span> <span class="fl">0.0</span>; gammaAP <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">1.20</span></span>
-<span id="cb9-128"><a href="#cb9-128" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-129"><a href="#cb9-129" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Baseline</span></span>
-<span id="cb9-130"><a href="#cb9-130" aria-hidden="true" tabindex="-1"></a>  W0 <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n)</span>
-<span id="cb9-131"><a href="#cb9-131" aria-hidden="true" tabindex="-1"></a>  A0 <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fl">0.5</span>)  <span class="co"># 1 = Drug A, 0 = Drug B</span></span>
-<span id="cb9-132"><a href="#cb9-132" aria-hidden="true" tabindex="-1"></a>  u_i <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, sigma_u)</span>
-<span id="cb9-133"><a href="#cb9-133" aria-hidden="true" tabindex="-1"></a>  mu_i <span class="ot">&lt;-</span> alpha0 <span class="sc">+</span> alphaA <span class="sc">*</span> A0 <span class="sc">+</span> alphaW <span class="sc">*</span> W0 <span class="sc">+</span> u_i</span>
-<span id="cb9-134"><a href="#cb9-134" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-135"><a href="#cb9-135" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Storage</span></span>
-<span id="cb9-136"><a href="#cb9-136" aria-hidden="true" tabindex="-1"></a>  L_mat <span class="ot">&lt;-</span> PDC_mat <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="cn">NA_real_</span>, n, K)</span>
-<span id="cb9-137"><a href="#cb9-137" aria-hidden="true" tabindex="-1"></a>  Y_mat <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="dv">0</span>L, n, K)</span>
-<span id="cb9-138"><a href="#cb9-138" aria-hidden="true" tabindex="-1"></a>  eta_prev <span class="ot">&lt;-</span> <span class="fu">rep</span>(<span class="cn">NA_real_</span>, n)</span>
-<span id="cb9-139"><a href="#cb9-139" aria-hidden="true" tabindex="-1"></a>  failed <span class="ot">&lt;-</span> <span class="fu">rep</span>(<span class="cn">FALSE</span>, n)</span>
-<span id="cb9-140"><a href="#cb9-140" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-141"><a href="#cb9-141" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (t <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>K) {</span>
-<span id="cb9-142"><a href="#cb9-142" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Time-varying health confounder L_t</span></span>
-<span id="cb9-143"><a href="#cb9-143" aria-hidden="true" tabindex="-1"></a>    noise_L <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, sigma_L)</span>
-<span id="cb9-144"><a href="#cb9-144" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (t <span class="sc">==</span> <span class="dv">1</span>) {</span>
-<span id="cb9-145"><a href="#cb9-145" aria-hidden="true" tabindex="-1"></a>      L_mat[, t] <span class="ot">&lt;-</span> beta0 <span class="sc">+</span> betaW <span class="sc">*</span> W0 <span class="sc">+</span> betaA <span class="sc">*</span> A0 <span class="sc">+</span> noise_L</span>
-<span id="cb9-146"><a href="#cb9-146" aria-hidden="true" tabindex="-1"></a>    } <span class="cf">else</span> {</span>
-<span id="cb9-147"><a href="#cb9-147" aria-hidden="true" tabindex="-1"></a>      L_mat[, t] <span class="ot">&lt;-</span> beta0 <span class="sc">+</span> betaW <span class="sc">*</span> W0 <span class="sc">+</span> betaA <span class="sc">*</span> A0 <span class="sc">+</span></span>
-<span id="cb9-148"><a href="#cb9-148" aria-hidden="true" tabindex="-1"></a>        betaLag <span class="sc">*</span> L_mat[, t<span class="dv">-1</span>] <span class="sc">+</span> betaP <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> PDC_mat[, t<span class="dv">-1</span>]) <span class="sc">+</span> noise_L</span>
-<span id="cb9-149"><a href="#cb9-149" aria-hidden="true" tabindex="-1"></a>    }</span>
-<span id="cb9-150"><a href="#cb9-150" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-151"><a href="#cb9-151" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Adherence (PDC) on logit scale with AR(1) persistence</span></span>
-<span id="cb9-152"><a href="#cb9-152" aria-hidden="true" tabindex="-1"></a>    noise_e <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, sigma_e)</span>
-<span id="cb9-153"><a href="#cb9-153" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (t <span class="sc">==</span> <span class="dv">1</span>) {</span>
-<span id="cb9-154"><a href="#cb9-154" aria-hidden="true" tabindex="-1"></a>      eta_t <span class="ot">&lt;-</span> mu_i <span class="sc">+</span> noise_e</span>
-<span id="cb9-155"><a href="#cb9-155" aria-hidden="true" tabindex="-1"></a>    } <span class="cf">else</span> {</span>
-<span id="cb9-156"><a href="#cb9-156" aria-hidden="true" tabindex="-1"></a>      eta_t <span class="ot">&lt;-</span> (<span class="dv">1</span> <span class="sc">-</span> rho) <span class="sc">*</span> mu_i <span class="sc">+</span> rho <span class="sc">*</span> eta_prev <span class="sc">+</span> alphaL <span class="sc">*</span> L_mat[, t<span class="dv">-1</span>] <span class="sc">+</span> noise_e</span>
-<span id="cb9-157"><a href="#cb9-157" aria-hidden="true" tabindex="-1"></a>    }</span>
-<span id="cb9-158"><a href="#cb9-158" aria-hidden="true" tabindex="-1"></a>    PDC_mat[, t] <span class="ot">&lt;-</span> <span class="fu">plogis</span>(eta_t)</span>
-<span id="cb9-159"><a href="#cb9-159" aria-hidden="true" tabindex="-1"></a>    eta_prev <span class="ot">&lt;-</span> eta_t</span>
-<span id="cb9-160"><a href="#cb9-160" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-161"><a href="#cb9-161" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Virologic failure (absorbing)</span></span>
-<span id="cb9-162"><a href="#cb9-162" aria-hidden="true" tabindex="-1"></a>    at_risk <span class="ot">&lt;-</span> <span class="sc">!</span>failed</span>
-<span id="cb9-163"><a href="#cb9-163" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (<span class="fu">any</span>(at_risk)) {</span>
-<span id="cb9-164"><a href="#cb9-164" aria-hidden="true" tabindex="-1"></a>      lp <span class="ot">&lt;-</span> gamma0 <span class="sc">+</span> gammaL <span class="sc">*</span> L_mat[at_risk, t] <span class="sc">+</span> gammaW <span class="sc">*</span> W0[at_risk] <span class="sc">+</span></span>
-<span id="cb9-165"><a href="#cb9-165" aria-hidden="true" tabindex="-1"></a>        gammaP <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> PDC_mat[at_risk, t]) <span class="sc">+</span> gammaA <span class="sc">*</span> A0[at_risk] <span class="sc">+</span></span>
-<span id="cb9-166"><a href="#cb9-166" aria-hidden="true" tabindex="-1"></a>        gammaAP <span class="sc">*</span> A0[at_risk] <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> PDC_mat[at_risk, t])</span>
-<span id="cb9-167"><a href="#cb9-167" aria-hidden="true" tabindex="-1"></a>      new_fail <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(<span class="fu">sum</span>(at_risk), <span class="dv">1</span>, <span class="fu">plogis</span>(lp)) <span class="sc">==</span> <span class="dv">1</span>L</span>
-<span id="cb9-168"><a href="#cb9-168" aria-hidden="true" tabindex="-1"></a>      idx <span class="ot">&lt;-</span> <span class="fu">which</span>(at_risk)</span>
-<span id="cb9-169"><a href="#cb9-169" aria-hidden="true" tabindex="-1"></a>      Y_mat[idx[new_fail], t] <span class="ot">&lt;-</span> <span class="dv">1</span>L</span>
-<span id="cb9-170"><a href="#cb9-170" aria-hidden="true" tabindex="-1"></a>      failed[idx[new_fail]] <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
-<span id="cb9-171"><a href="#cb9-171" aria-hidden="true" tabindex="-1"></a>    }</span>
-<span id="cb9-172"><a href="#cb9-172" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (t <span class="sc">&gt;</span> <span class="dv">1</span>) Y_mat[Y_mat[, t<span class="dv">-1</span>] <span class="sc">==</span> <span class="dv">1</span>L, t] <span class="ot">&lt;-</span> <span class="dv">1</span>L</span>
-<span id="cb9-173"><a href="#cb9-173" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb9-174"><a href="#cb9-174" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-175"><a href="#cb9-175" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Assemble wide data</span></span>
-<span id="cb9-176"><a href="#cb9-176" aria-hidden="true" tabindex="-1"></a>  df <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">id =</span> <span class="dv">1</span><span class="sc">:</span>n, <span class="at">W0 =</span> W0, <span class="at">A0 =</span> A0)</span>
-<span id="cb9-177"><a href="#cb9-177" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (t <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>K) {</span>
-<span id="cb9-178"><a href="#cb9-178" aria-hidden="true" tabindex="-1"></a>    df[[<span class="fu">paste0</span>(<span class="st">"L_"</span>, t)]]   <span class="ot">&lt;-</span> L_mat[, t]</span>
-<span id="cb9-179"><a href="#cb9-179" aria-hidden="true" tabindex="-1"></a>    df[[<span class="fu">paste0</span>(<span class="st">"PDC_"</span>, t)]] <span class="ot">&lt;-</span> PDC_mat[, t]</span>
-<span id="cb9-180"><a href="#cb9-180" aria-hidden="true" tabindex="-1"></a>    df[[<span class="fu">paste0</span>(<span class="st">"Y_"</span>, t)]]   <span class="ot">&lt;-</span> Y_mat[, t]</span>
-<span id="cb9-181"><a href="#cb9-181" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb9-182"><a href="#cb9-182" aria-hidden="true" tabindex="-1"></a>  df<span class="sc">$</span>Y_final <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(<span class="fu">rowSums</span>(Y_mat) <span class="sc">&gt;</span> <span class="dv">0</span>)</span>
-<span id="cb9-183"><a href="#cb9-183" aria-hidden="true" tabindex="-1"></a>  <span class="fu">attr</span>(df, <span class="st">"K"</span>) <span class="ot">&lt;-</span> K</span>
-<span id="cb9-184"><a href="#cb9-184" aria-hidden="true" tabindex="-1"></a>  df</span>
-<span id="cb9-185"><a href="#cb9-185" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb9-186"><a href="#cb9-186" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-187"><a href="#cb9-187" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> <span class="fu">simulate_adherence_data</span>(<span class="at">n =</span> <span class="dv">500</span>, <span class="at">K =</span> <span class="dv">4</span>, <span class="at">seed =</span> <span class="dv">2026</span>)</span>
-<span id="cb9-188"><a href="#cb9-188" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb9-189"><a href="#cb9-189" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-190"><a href="#cb9-190" aria-hidden="true" tabindex="-1"></a>The key structural features of this DGP:</span>
-<span id="cb9-191"><a href="#cb9-191" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-192"><a href="#cb9-192" aria-hidden="true" tabindex="-1"></a>**Treatment-confounder feedback.** Poor adherence (low PDC) at block $t-1$ worsens health ($L_t$), which then reduces adherence at block $t$ (through <span class="in">`alphaL`</span>) and independently increases failure risk (through <span class="in">`gammaL`</span>). This is the same feedback structure discussed in @sec-longitudinal-confounding.</span>
-<span id="cb9-193"><a href="#cb9-193" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-194"><a href="#cb9-194" aria-hidden="true" tabindex="-1"></a>**Drug-by-adherence interaction (the forgiveness mechanism).** The parameter <span class="in">`gammaAP = -1.20`</span> means that Drug A's penalty for poor adherence is smaller than Drug B's. At high adherence, the two drugs perform similarly. At low adherence, Drug A is more forgiving. This interaction is what makes the forgiveness curve differ between drugs.</span>
-<span id="cb9-195"><a href="#cb9-195" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-198"><a href="#cb9-198" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb9-199"><a href="#cb9-199" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-adherence-dist</span></span>
-<span id="cb9-200"><a href="#cb9-200" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "PDC distributions at block 1 by drug. Drug A patients have slightly lower mean adherence (the drug assignment shifts the adherence intercept), but Drug A is more forgiving of that lower adherence."</span></span>
-<span id="cb9-201"><a href="#cb9-201" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
-<span id="cb9-202"><a href="#cb9-202" aria-hidden="true" tabindex="-1"></a>dat <span class="sc">|&gt;</span></span>
-<span id="cb9-203"><a href="#cb9-203" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">Drug =</span> <span class="fu">ifelse</span>(A0 <span class="sc">==</span> <span class="dv">1</span>, <span class="st">"Drug A"</span>, <span class="st">"Drug B"</span>)) <span class="sc">|&gt;</span></span>
-<span id="cb9-204"><a href="#cb9-204" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> PDC_1, <span class="at">fill =</span> Drug)) <span class="sc">+</span></span>
-<span id="cb9-205"><a href="#cb9-205" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_density</span>(<span class="at">alpha =</span> <span class="fl">0.4</span>) <span class="sc">+</span></span>
-<span id="cb9-206"><a href="#cb9-206" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"PDC (block 1)"</span>, <span class="at">y =</span> <span class="st">"Density"</span>) <span class="sc">+</span></span>
-<span id="cb9-207"><a href="#cb9-207" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_fill_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"Drug A"</span> <span class="ot">=</span> <span class="st">"#228833"</span>, <span class="st">"Drug B"</span> <span class="ot">=</span> <span class="st">"#EE6677"</span>)) <span class="sc">+</span></span>
-<span id="cb9-208"><a href="#cb9-208" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>()</span>
-<span id="cb9-209"><a href="#cb9-209" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb9-210"><a href="#cb9-210" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-213"><a href="#cb9-213" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb9-214"><a href="#cb9-214" aria-hidden="true" tabindex="-1"></a><span class="co"># Cohort summary</span></span>
-<span id="cb9-215"><a href="#cb9-215" aria-hidden="true" tabindex="-1"></a>dat <span class="sc">|&gt;</span></span>
-<span id="cb9-216"><a href="#cb9-216" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">Drug =</span> <span class="fu">ifelse</span>(A0 <span class="sc">==</span> <span class="dv">1</span>, <span class="st">"Drug A"</span>, <span class="st">"Drug B"</span>)) <span class="sc">|&gt;</span></span>
-<span id="cb9-217"><a href="#cb9-217" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(Drug) <span class="sc">|&gt;</span></span>
-<span id="cb9-218"><a href="#cb9-218" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(</span>
-<span id="cb9-219"><a href="#cb9-219" aria-hidden="true" tabindex="-1"></a>    <span class="at">n =</span> <span class="fu">n</span>(),</span>
-<span id="cb9-220"><a href="#cb9-220" aria-hidden="true" tabindex="-1"></a>    <span class="at">mean_PDC_1 =</span> <span class="fu">round</span>(<span class="fu">mean</span>(PDC_1), <span class="dv">3</span>),</span>
-<span id="cb9-221"><a href="#cb9-221" aria-hidden="true" tabindex="-1"></a>    <span class="at">failure_pct =</span> <span class="fu">round</span>(<span class="dv">100</span> <span class="sc">*</span> <span class="fu">mean</span>(Y_final), <span class="dv">1</span>),</span>
-<span id="cb9-222"><a href="#cb9-222" aria-hidden="true" tabindex="-1"></a>    <span class="at">.groups =</span> <span class="st">"drop"</span></span>
-<span id="cb9-223"><a href="#cb9-223" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
-<span id="cb9-224"><a href="#cb9-224" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as.data.frame</span>()</span>
-<span id="cb9-225"><a href="#cb9-225" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb9-226"><a href="#cb9-226" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-227"><a href="#cb9-227" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-228"><a href="#cb9-228" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why naive adherence analysis is biased</span></span>
-<span id="cb9-229"><a href="#cb9-229" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-230"><a href="#cb9-230" aria-hidden="true" tabindex="-1"></a>A naive analysis would stratify patients by observed adherence level and compare outcomes within strata. This is systematically biased because of treatment-confounder feedback: patients with low adherence tend to be sicker (higher $L_t$), and sicker patients have higher failure risk regardless of adherence. The naive analysis overestimates the effect of adherence because the low-adherence stratum is enriched for patients who were going to fail anyway.</span>
-<span id="cb9-231"><a href="#cb9-231" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-232"><a href="#cb9-232" aria-hidden="true" tabindex="-1"></a>To see the bias rather than just assert it, compare the crude curve against the truth. Because the data come from a known simulation, we can compute the **oracle forgiveness curve**: the actual counterfactual failure risk if every patient sustained a given adherence level, obtained by re-running the data-generating process with adherence held fixed and health allowed to respond. Overlaying it on the crude adherence-stratified curve shows the gap.</span>
-<span id="cb9-233"><a href="#cb9-233" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-236"><a href="#cb9-236" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb9-237"><a href="#cb9-237" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-oracle-vs-naive</span></span>
-<span id="cb9-238"><a href="#cb9-238" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Causal forgiveness curves (lines) versus crude adherence-stratified failure rates (open points). The crude points tend to sit above the causal curve at low adherence and below it at high adherence, because low-adherence patients are sicker for reasons the crude comparison wrongly attributes to adherence. The crude curve is therefore too steep."</span></span>
-<span id="cb9-239"><a href="#cb9-239" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
-<span id="cb9-240"><a href="#cb9-240" aria-hidden="true" tabindex="-1"></a><span class="co"># Oracle: counterfactual 12-month failure risk if PDC is held at `a` every block,</span></span>
-<span id="cb9-241"><a href="#cb9-241" aria-hidden="true" tabindex="-1"></a><span class="co"># for a given drug, with health L allowed to respond to the fixed adherence.</span></span>
-<span id="cb9-242"><a href="#cb9-242" aria-hidden="true" tabindex="-1"></a>oracle_forgiveness <span class="ot">&lt;-</span> <span class="cf">function</span>(a, drug, <span class="at">n =</span> <span class="dv">20000</span>, <span class="at">K =</span> <span class="dv">4</span>, <span class="at">seed =</span> <span class="dv">99</span>) {</span>
-<span id="cb9-243"><a href="#cb9-243" aria-hidden="true" tabindex="-1"></a>  <span class="fu">set.seed</span>(seed)</span>
-<span id="cb9-244"><a href="#cb9-244" aria-hidden="true" tabindex="-1"></a>  betaW <span class="ot">&lt;-</span> <span class="fl">0.30</span>; betaLag <span class="ot">&lt;-</span> <span class="fl">0.35</span>; betaP <span class="ot">&lt;-</span> <span class="fl">0.80</span>; sigma_L <span class="ot">&lt;-</span> <span class="fl">0.50</span></span>
-<span id="cb9-245"><a href="#cb9-245" aria-hidden="true" tabindex="-1"></a>  gamma0 <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">3.80</span>; gammaL <span class="ot">&lt;-</span> <span class="fl">0.50</span>; gammaW <span class="ot">&lt;-</span> <span class="fl">0.30</span>; gammaP <span class="ot">&lt;-</span> <span class="fl">2.50</span>; gammaAP <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">1.20</span></span>
-<span id="cb9-246"><a href="#cb9-246" aria-hidden="true" tabindex="-1"></a>  W0 <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n); A0 <span class="ot">&lt;-</span> <span class="fu">rep</span>(drug, n)</span>
-<span id="cb9-247"><a href="#cb9-247" aria-hidden="true" tabindex="-1"></a>  L_prev <span class="ot">&lt;-</span> <span class="cn">NULL</span>; failed <span class="ot">&lt;-</span> <span class="fu">rep</span>(<span class="cn">FALSE</span>, n)</span>
-<span id="cb9-248"><a href="#cb9-248" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (t <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>K) {</span>
-<span id="cb9-249"><a href="#cb9-249" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (t <span class="sc">==</span> <span class="dv">1</span>) L_t <span class="ot">&lt;-</span> betaW <span class="sc">*</span> W0 <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, sigma_L)</span>
-<span id="cb9-250"><a href="#cb9-250" aria-hidden="true" tabindex="-1"></a>    <span class="cf">else</span>        L_t <span class="ot">&lt;-</span> betaW <span class="sc">*</span> W0 <span class="sc">+</span> betaLag <span class="sc">*</span> L_prev <span class="sc">+</span> betaP <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> a) <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, sigma_L)</span>
-<span id="cb9-251"><a href="#cb9-251" aria-hidden="true" tabindex="-1"></a>    lp <span class="ot">&lt;-</span> gamma0 <span class="sc">+</span> gammaL <span class="sc">*</span> L_t <span class="sc">+</span> gammaW <span class="sc">*</span> W0 <span class="sc">+</span> gammaP <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> a) <span class="sc">+</span> gammaAP <span class="sc">*</span> A0 <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> a)</span>
-<span id="cb9-252"><a href="#cb9-252" aria-hidden="true" tabindex="-1"></a>    failed <span class="ot">&lt;-</span> failed <span class="sc">|</span> (<span class="fu">runif</span>(n) <span class="sc">&lt;</span> <span class="fu">plogis</span>(lp))</span>
-<span id="cb9-253"><a href="#cb9-253" aria-hidden="true" tabindex="-1"></a>    L_prev <span class="ot">&lt;-</span> L_t</span>
-<span id="cb9-254"><a href="#cb9-254" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb9-255"><a href="#cb9-255" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mean</span>(failed)</span>
-<span id="cb9-256"><a href="#cb9-256" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb9-257"><a href="#cb9-257" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-258"><a href="#cb9-258" aria-hidden="true" tabindex="-1"></a>pdc_grid <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="fl">0.40</span>, <span class="fl">0.95</span>, <span class="at">by =</span> <span class="fl">0.05</span>)</span>
-<span id="cb9-259"><a href="#cb9-259" aria-hidden="true" tabindex="-1"></a>oracle_df <span class="ot">&lt;-</span> <span class="fu">do.call</span>(rbind, <span class="fu">lapply</span>(<span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">1</span>), <span class="cf">function</span>(d)</span>
-<span id="cb9-260"><a href="#cb9-260" aria-hidden="true" tabindex="-1"></a>  <span class="fu">data.frame</span>(<span class="at">PDC =</span> pdc_grid, <span class="at">Drug =</span> <span class="fu">ifelse</span>(d <span class="sc">==</span> <span class="dv">1</span>, <span class="st">"Drug A"</span>, <span class="st">"Drug B"</span>),</span>
-<span id="cb9-261"><a href="#cb9-261" aria-hidden="true" tabindex="-1"></a>             <span class="at">risk =</span> <span class="fu">vapply</span>(pdc_grid, oracle_forgiveness, <span class="fu">numeric</span>(<span class="dv">1</span>), <span class="at">drug =</span> d))))</span>
-<span id="cb9-262"><a href="#cb9-262" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-263"><a href="#cb9-263" aria-hidden="true" tabindex="-1"></a>naive_df <span class="ot">&lt;-</span> dat <span class="sc">|&gt;</span></span>
-<span id="cb9-264"><a href="#cb9-264" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">Drug =</span> <span class="fu">ifelse</span>(A0 <span class="sc">==</span> <span class="dv">1</span>, <span class="st">"Drug A"</span>, <span class="st">"Drug B"</span>),</span>
-<span id="cb9-265"><a href="#cb9-265" aria-hidden="true" tabindex="-1"></a>         <span class="at">mean_PDC =</span> <span class="fu">rowMeans</span>(dplyr<span class="sc">::</span><span class="fu">across</span>(dplyr<span class="sc">::</span><span class="fu">starts_with</span>(<span class="st">"PDC_"</span>))),</span>
-<span id="cb9-266"><a href="#cb9-266" aria-hidden="true" tabindex="-1"></a>         <span class="at">bin =</span> <span class="fu">cut</span>(mean_PDC, <span class="at">breaks =</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">1</span>, <span class="fl">0.1</span>))) <span class="sc">|&gt;</span></span>
-<span id="cb9-267"><a href="#cb9-267" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(Drug, bin) <span class="sc">|&gt;</span></span>
-<span id="cb9-268"><a href="#cb9-268" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(<span class="at">PDC =</span> <span class="fu">mean</span>(mean_PDC), <span class="at">risk =</span> <span class="fu">mean</span>(Y_final), <span class="at">n =</span> <span class="fu">n</span>(), <span class="at">.groups =</span> <span class="st">"drop"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb9-269"><a href="#cb9-269" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(n <span class="sc">&gt;=</span> <span class="dv">10</span>)</span>
-<span id="cb9-270"><a href="#cb9-270" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-271"><a href="#cb9-271" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(oracle_df, <span class="fu">aes</span>(PDC, risk, <span class="at">color =</span> Drug)) <span class="sc">+</span></span>
-<span id="cb9-272"><a href="#cb9-272" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
-<span id="cb9-273"><a href="#cb9-273" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">data =</span> naive_df, <span class="fu">aes</span>(PDC, risk, <span class="at">color =</span> Drug), <span class="at">shape =</span> <span class="dv">1</span>, <span class="at">size =</span> <span class="fl">2.2</span>) <span class="sc">+</span></span>
-<span id="cb9-274"><a href="#cb9-274" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_x_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span>percent) <span class="sc">+</span></span>
-<span id="cb9-275"><a href="#cb9-275" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span>percent) <span class="sc">+</span></span>
-<span id="cb9-276"><a href="#cb9-276" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"Drug A"</span> <span class="ot">=</span> <span class="st">"#228833"</span>, <span class="st">"Drug B"</span> <span class="ot">=</span> <span class="st">"#EE6677"</span>)) <span class="sc">+</span></span>
-<span id="cb9-277"><a href="#cb9-277" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"Sustained adherence (PDC)"</span>, <span class="at">y =</span> <span class="st">"12-month failure risk"</span>, <span class="at">color =</span> <span class="cn">NULL</span>,</span>
-<span id="cb9-278"><a href="#cb9-278" aria-hidden="true" tabindex="-1"></a>       <span class="at">title =</span> <span class="st">"Oracle forgiveness curves (lines) vs crude risk by adherence (points)"</span>) <span class="sc">+</span></span>
-<span id="cb9-279"><a href="#cb9-279" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>() <span class="sc">+</span> <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
-<span id="cb9-280"><a href="#cb9-280" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb9-281"><a href="#cb9-281" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-282"><a href="#cb9-282" aria-hidden="true" tabindex="-1"></a>The solid lines are the causal forgiveness curves; the open points are the crude failure rates among patients whose average adherence fell in each bin. The crude points tend to sit above the causal curve where adherence is low and below it where adherence is high: low-adherence patients are sicker for reasons the crude comparison attributes to adherence, so it overstates the cost of poor adherence and understates the benefit of good adherence, exactly the bias the feedback loop predicts. Recovering the causal curve requires g-methods that account for that feedback. The L-TMLE chapter (@sec-illustrated-ltmle) estimates static adherence regimes that trace this curve at fixed levels; the rest of this chapter develops the feasible-shift approach with LMTP.</span>
-<span id="cb9-283"><a href="#cb9-283" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-284"><a href="#cb9-284" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-285"><a href="#cb9-285" aria-hidden="true" tabindex="-1"></a><span class="fu"># Two estimands, and the estimator each one needs</span></span>
-<span id="cb9-286"><a href="#cb9-286" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-287"><a href="#cb9-287" aria-hidden="true" tabindex="-1"></a>The forgiveness question can be made precise in two ways, and they call for different estimators.</span>
-<span id="cb9-288"><a href="#cb9-288" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-289"><a href="#cb9-289" aria-hidden="true" tabindex="-1"></a>The first is a **static adherence regime**: what would the failure risk be if every patient *sustained* a fixed adherence level, say low, medium, or high, for the whole year? This is the estimand that traces the forgiveness curve at fixed points, and the longitudinal TMLE of @sec-illustrated-ltmle estimates it. Its weakness is positivity: very few patients actually sustain low adherence, or perfect adherence, across all four blocks, so the data thin out at the ends of the curve.</span>
-<span id="cb9-290"><a href="#cb9-290" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-291"><a href="#cb9-291" aria-hidden="true" tabindex="-1"></a>The second is a **feasible shift**: what would happen if every patient's adherence were nudged up by a realistic amount, say 10 percentage points, from wherever it currently sits? This is a modified treatment policy, and LMTP estimates it. Because the shifted adherence stays close to what each patient already does, it respects the support of the data and answers a question an adherence-support program could actually act on.</span>
-<span id="cb9-292"><a href="#cb9-292" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-293"><a href="#cb9-293" aria-hidden="true" tabindex="-1"></a>The two are complementary summaries of the same counterfactual risk surface. The static curve shows the whole shape but needs support at every level; the shift gives a stable, policy-relevant slice near the observed distribution. The positivity problem with static extremes is easy to see directly in the data.</span>
-<span id="cb9-294"><a href="#cb9-294" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-297"><a href="#cb9-297" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb9-298"><a href="#cb9-298" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: positivity-sustained</span></span>
-<span id="cb9-299"><a href="#cb9-299" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
-<span id="cb9-300"><a href="#cb9-300" aria-hidden="true" tabindex="-1"></a><span class="co"># How many patients actually sustain low or high adherence across all four blocks?</span></span>
-<span id="cb9-301"><a href="#cb9-301" aria-hidden="true" tabindex="-1"></a>pdc <span class="ot">&lt;-</span> <span class="fu">as.matrix</span>(dat[, <span class="fu">paste0</span>(<span class="st">"PDC_"</span>, <span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>)])</span>
-<span id="cb9-302"><a href="#cb9-302" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
-<span id="cb9-303"><a href="#cb9-303" aria-hidden="true" tabindex="-1"></a>  <span class="at">regime     =</span> <span class="fu">c</span>(<span class="st">"sustained low (&lt;0.50 every block)"</span>, <span class="st">"sustained high (&gt;0.90 every block)"</span>),</span>
-<span id="cb9-304"><a href="#cb9-304" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_patients =</span> <span class="fu">c</span>(<span class="fu">sum</span>(<span class="fu">rowMeans</span>(pdc <span class="sc">&lt;</span> <span class="fl">0.50</span>) <span class="sc">==</span> <span class="dv">1</span>), <span class="fu">sum</span>(<span class="fu">rowMeans</span>(pdc <span class="sc">&gt;</span> <span class="fl">0.90</span>) <span class="sc">==</span> <span class="dv">1</span>)),</span>
-<span id="cb9-305"><a href="#cb9-305" aria-hidden="true" tabindex="-1"></a>  <span class="at">pct        =</span> <span class="fu">round</span>(<span class="dv">100</span> <span class="sc">*</span> <span class="fu">c</span>(<span class="fu">mean</span>(<span class="fu">rowMeans</span>(pdc <span class="sc">&lt;</span> <span class="fl">0.50</span>) <span class="sc">==</span> <span class="dv">1</span>),</span>
-<span id="cb9-306"><a href="#cb9-306" aria-hidden="true" tabindex="-1"></a>                             <span class="fu">mean</span>(<span class="fu">rowMeans</span>(pdc <span class="sc">&gt;</span> <span class="fl">0.90</span>) <span class="sc">==</span> <span class="dv">1</span>)), <span class="dv">1</span>)</span>
-<span id="cb9-307"><a href="#cb9-307" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb9-308"><a href="#cb9-308" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb9-309"><a href="#cb9-309" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-310"><a href="#cb9-310" aria-hidden="true" tabindex="-1"></a>When only a handful of patients sustain an extreme regime, the static forgiveness-curve estimate at that end rests on almost no data, and its confidence interval understates the true fragility. The longitudinal positivity diagnostic in @sec-positivity-overlap is the general version of this check. A feasible shift sidesteps the problem, which is the motivation for the LMTP approach below.</span>
-<span id="cb9-311"><a href="#cb9-311" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-312"><a href="#cb9-312" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-313"><a href="#cb9-313" aria-hidden="true" tabindex="-1"></a><span class="fu"># LMTP estimation: feasible adherence shifts</span></span>
-<span id="cb9-314"><a href="#cb9-314" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-315"><a href="#cb9-315" aria-hidden="true" tabindex="-1"></a>Rather than targeting extreme static interventions ("force everyone to perfect adherence"), which violate positivity for patients who cannot realistically achieve high adherence, we use LMTP to define feasible adherence shifts <span class="co">[</span><span class="ot">@diaz2021lmtp</span><span class="co">]</span>.</span>
-<span id="cb9-316"><a href="#cb9-316" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-317"><a href="#cb9-317" aria-hidden="true" tabindex="-1"></a>The shift function increases each patient's PDC by a fixed amount (e.g., 10 percentage points), capped at 1.0. This stays within the support of the observed data because no patient is assigned an adherence level that is impossible given their covariate history.</span>
-<span id="cb9-318"><a href="#cb9-318" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-321"><a href="#cb9-321" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb9-322"><a href="#cb9-322" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-estimation</span></span>
-<span id="cb9-323"><a href="#cb9-323" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
-<span id="cb9-324"><a href="#cb9-324" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(lmtp)</span>
-<span id="cb9-325"><a href="#cb9-325" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-326"><a href="#cb9-326" aria-hidden="true" tabindex="-1"></a><span class="co"># Prepare variable names</span></span>
-<span id="cb9-327"><a href="#cb9-327" aria-hidden="true" tabindex="-1"></a>K <span class="ot">&lt;-</span> <span class="dv">4</span></span>
-<span id="cb9-328"><a href="#cb9-328" aria-hidden="true" tabindex="-1"></a>trt_vars     <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"PDC_"</span>, <span class="dv">1</span><span class="sc">:</span>K)</span>
-<span id="cb9-329"><a href="#cb9-329" aria-hidden="true" tabindex="-1"></a>outcome_vars <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"Y_"</span>, <span class="dv">1</span><span class="sc">:</span>K)</span>
-<span id="cb9-330"><a href="#cb9-330" aria-hidden="true" tabindex="-1"></a>baseline     <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"W0"</span>, <span class="st">"A0"</span>)</span>
-<span id="cb9-331"><a href="#cb9-331" aria-hidden="true" tabindex="-1"></a>time_vary    <span class="ot">&lt;-</span> <span class="fu">lapply</span>(<span class="dv">1</span><span class="sc">:</span>K, <span class="cf">function</span>(t) <span class="fu">paste0</span>(<span class="st">"L_"</span>, t))</span>
-<span id="cb9-332"><a href="#cb9-332" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-333"><a href="#cb9-333" aria-hidden="true" tabindex="-1"></a><span class="co"># Additive shift: increase PDC by 10 percentage points</span></span>
-<span id="cb9-334"><a href="#cb9-334" aria-hidden="true" tabindex="-1"></a>shift_up <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) {</span>
-<span id="cb9-335"><a href="#cb9-335" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pmin</span>(data[[trt]] <span class="sc">+</span> <span class="fl">0.10</span>, <span class="fl">1.0</span>)</span>
-<span id="cb9-336"><a href="#cb9-336" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb9-337"><a href="#cb9-337" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-338"><a href="#cb9-338" aria-hidden="true" tabindex="-1"></a><span class="co"># Natural course (no intervention)</span></span>
-<span id="cb9-339"><a href="#cb9-339" aria-hidden="true" tabindex="-1"></a>shift_natural <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) data[[trt]]</span>
-<span id="cb9-340"><a href="#cb9-340" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-341"><a href="#cb9-341" aria-hidden="true" tabindex="-1"></a><span class="co"># Estimate outcomes under each regime</span></span>
-<span id="cb9-342"><a href="#cb9-342" aria-hidden="true" tabindex="-1"></a>fit_shifted <span class="ot">&lt;-</span> <span class="fu">lmtp_tmle</span>(</span>
-<span id="cb9-343"><a href="#cb9-343" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat, <span class="at">trt =</span> trt_vars, <span class="at">outcome =</span> outcome_vars,</span>
-<span id="cb9-344"><a href="#cb9-344" aria-hidden="true" tabindex="-1"></a>  <span class="at">baseline =</span> baseline, <span class="at">time_vary =</span> time_vary,</span>
-<span id="cb9-345"><a href="#cb9-345" aria-hidden="true" tabindex="-1"></a>  <span class="at">shift =</span> shift_up, <span class="at">mtp =</span> <span class="cn">TRUE</span>, <span class="at">outcome_type =</span> <span class="st">"survival"</span>,</span>
-<span id="cb9-346"><a href="#cb9-346" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_outcome =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
-<span id="cb9-347"><a href="#cb9-347" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_trt =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
-<span id="cb9-348"><a href="#cb9-348" aria-hidden="true" tabindex="-1"></a>  <span class="at">folds =</span> <span class="dv">2</span></span>
-<span id="cb9-349"><a href="#cb9-349" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb9-350"><a href="#cb9-350" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-351"><a href="#cb9-351" aria-hidden="true" tabindex="-1"></a>fit_natural <span class="ot">&lt;-</span> <span class="fu">lmtp_tmle</span>(</span>
-<span id="cb9-352"><a href="#cb9-352" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat, <span class="at">trt =</span> trt_vars, <span class="at">outcome =</span> outcome_vars,</span>
-<span id="cb9-353"><a href="#cb9-353" aria-hidden="true" tabindex="-1"></a>  <span class="at">baseline =</span> baseline, <span class="at">time_vary =</span> time_vary,</span>
-<span id="cb9-354"><a href="#cb9-354" aria-hidden="true" tabindex="-1"></a>  <span class="at">shift =</span> shift_natural, <span class="at">mtp =</span> <span class="cn">TRUE</span>, <span class="at">outcome_type =</span> <span class="st">"survival"</span>,</span>
-<span id="cb9-355"><a href="#cb9-355" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_outcome =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
-<span id="cb9-356"><a href="#cb9-356" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_trt =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
-<span id="cb9-357"><a href="#cb9-357" aria-hidden="true" tabindex="-1"></a>  <span class="at">folds =</span> <span class="dv">2</span></span>
-<span id="cb9-358"><a href="#cb9-358" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb9-359"><a href="#cb9-359" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-360"><a href="#cb9-360" aria-hidden="true" tabindex="-1"></a><span class="co"># Contrast: effect of shifting adherence up by 10pp</span></span>
-<span id="cb9-361"><a href="#cb9-361" aria-hidden="true" tabindex="-1"></a>contrast <span class="ot">&lt;-</span> <span class="fu">lmtp_contrast</span>(fit_shifted, <span class="at">ref =</span> fit_natural, <span class="at">type =</span> <span class="st">"additive"</span>)</span>
-<span id="cb9-362"><a href="#cb9-362" aria-hidden="true" tabindex="-1"></a>contrast</span>
-<span id="cb9-363"><a href="#cb9-363" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb9-364"><a href="#cb9-364" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-365"><a href="#cb9-365" aria-hidden="true" tabindex="-1"></a>The contrast estimates how much the failure rate would change if every patient's adherence increased by 10 percentage points at each visit. Because <span class="in">`lmtp`</span> uses <span class="in">`outcome_type = "survival"`</span>, it returns $P(\text{survive})$, so the risk is $1 - \theta$. A negative risk difference means the shift reduces failure.</span>
-<span id="cb9-366"><a href="#cb9-366" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-367"><a href="#cb9-367" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-368"><a href="#cb9-368" aria-hidden="true" tabindex="-1"></a><span class="fu"># Alternative shift approaches</span></span>
-<span id="cb9-369"><a href="#cb9-369" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-370"><a href="#cb9-370" aria-hidden="true" tabindex="-1"></a>The additive shift is one way to operationalize "what if adherence were better?" Other approaches answer subtly different questions.</span>
-<span id="cb9-371"><a href="#cb9-371" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-372"><a href="#cb9-372" aria-hidden="true" tabindex="-1"></a><span class="fu">## Quantile matching: what if Drug B adhered like Drug A?</span></span>
-<span id="cb9-373"><a href="#cb9-373" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-374"><a href="#cb9-374" aria-hidden="true" tabindex="-1"></a>This maps each Drug B patient's adherence to the corresponding quantile of Drug A's distribution. A patient at the 30th percentile of Drug B adherence gets mapped to the 30th percentile of Drug A adherence. This answers: what would happen to Drug B's outcomes if its patients had Drug A's adherence profile?</span>
-<span id="cb9-375"><a href="#cb9-375" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-378"><a href="#cb9-378" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb9-379"><a href="#cb9-379" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: quantile-shift</span></span>
-<span id="cb9-380"><a href="#cb9-380" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
-<span id="cb9-381"><a href="#cb9-381" aria-hidden="true" tabindex="-1"></a><span class="co"># Build quantile-matching shift function</span></span>
-<span id="cb9-382"><a href="#cb9-382" aria-hidden="true" tabindex="-1"></a>ecdf_B <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
-<span id="cb9-383"><a href="#cb9-383" aria-hidden="true" tabindex="-1"></a>sorted_A <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
-<span id="cb9-384"><a href="#cb9-384" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (t <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>K) {</span>
-<span id="cb9-385"><a href="#cb9-385" aria-hidden="true" tabindex="-1"></a>  col <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"PDC_"</span>, t)</span>
-<span id="cb9-386"><a href="#cb9-386" aria-hidden="true" tabindex="-1"></a>  ecdf_B[[t]] <span class="ot">&lt;-</span> <span class="fu">ecdf</span>(dat[[col]][dat<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">0</span>])</span>
-<span id="cb9-387"><a href="#cb9-387" aria-hidden="true" tabindex="-1"></a>  sorted_A[[t]] <span class="ot">&lt;-</span> <span class="fu">sort</span>(dat[[col]][dat<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">1</span>])</span>
-<span id="cb9-388"><a href="#cb9-388" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb9-389"><a href="#cb9-389" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-390"><a href="#cb9-390" aria-hidden="true" tabindex="-1"></a>shift_match_A <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) {</span>
-<span id="cb9-391"><a href="#cb9-391" aria-hidden="true" tabindex="-1"></a>  t_idx <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(<span class="fu">gsub</span>(<span class="st">"PDC_"</span>, <span class="st">""</span>, trt))</span>
-<span id="cb9-392"><a href="#cb9-392" aria-hidden="true" tabindex="-1"></a>  a_obs <span class="ot">&lt;-</span> data[[trt]]</span>
-<span id="cb9-393"><a href="#cb9-393" aria-hidden="true" tabindex="-1"></a>  a_shifted <span class="ot">&lt;-</span> a_obs</span>
-<span id="cb9-394"><a href="#cb9-394" aria-hidden="true" tabindex="-1"></a>  is_b <span class="ot">&lt;-</span> data<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">0</span></span>
-<span id="cb9-395"><a href="#cb9-395" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">any</span>(is_b)) {</span>
-<span id="cb9-396"><a href="#cb9-396" aria-hidden="true" tabindex="-1"></a>    p_rank <span class="ot">&lt;-</span> ecdf_B[[t_idx]](a_obs[is_b])</span>
-<span id="cb9-397"><a href="#cb9-397" aria-hidden="true" tabindex="-1"></a>    p_rank <span class="ot">&lt;-</span> <span class="fu">pmax</span>(<span class="fl">0.01</span>, <span class="fu">pmin</span>(<span class="fl">0.99</span>, p_rank))</span>
-<span id="cb9-398"><a href="#cb9-398" aria-hidden="true" tabindex="-1"></a>    a_shifted[is_b] <span class="ot">&lt;-</span> sorted_A[[t_idx]][</span>
-<span id="cb9-399"><a href="#cb9-399" aria-hidden="true" tabindex="-1"></a>      <span class="fu">pmin</span>(<span class="fu">length</span>(sorted_A[[t_idx]]),</span>
-<span id="cb9-400"><a href="#cb9-400" aria-hidden="true" tabindex="-1"></a>           <span class="fu">ceiling</span>(p_rank <span class="sc">*</span> <span class="fu">length</span>(sorted_A[[t_idx]])))</span>
-<span id="cb9-401"><a href="#cb9-401" aria-hidden="true" tabindex="-1"></a>    ]</span>
-<span id="cb9-402"><a href="#cb9-402" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb9-403"><a href="#cb9-403" aria-hidden="true" tabindex="-1"></a>  a_shifted</span>
-<span id="cb9-404"><a href="#cb9-404" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb9-405"><a href="#cb9-405" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb9-406"><a href="#cb9-406" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-407"><a href="#cb9-407" aria-hidden="true" tabindex="-1"></a><span class="fu">## Mean-calibrated additive shift</span></span>
-<span id="cb9-408"><a href="#cb9-408" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-409"><a href="#cb9-409" aria-hidden="true" tabindex="-1"></a>Add a constant to every Drug B patient's adherence so that Drug B's mean matches Drug A's mean. This is the simplest cross-drug comparison: it shifts the location of the distribution but preserves the shape.</span>
-<span id="cb9-410"><a href="#cb9-410" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-411"><a href="#cb9-411" aria-hidden="true" tabindex="-1"></a><span class="fu">## Fixed additive shift (policy evaluation)</span></span>
-<span id="cb9-412"><a href="#cb9-412" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-413"><a href="#cb9-413" aria-hidden="true" tabindex="-1"></a>The +10pp shift applied to everyone, regardless of drug. This answers a purely policy question: what would a universal adherence support program achieve? It does not reference the other drug at all and has the strongest positivity properties because the shift is small and uniform.</span>
-<span id="cb9-414"><a href="#cb9-414" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-415"><a href="#cb9-415" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-416"><a href="#cb9-416" aria-hidden="true" tabindex="-1"></a><span class="fu"># The forgiveness curve</span></span>
-<span id="cb9-417"><a href="#cb9-417" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-418"><a href="#cb9-418" aria-hidden="true" tabindex="-1"></a>The forgiveness curve maps sustained adherence level to counterfactual failure risk for each drug:</span>
-<span id="cb9-419"><a href="#cb9-419" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-420"><a href="#cb9-420" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb9-421"><a href="#cb9-421" aria-hidden="true" tabindex="-1"></a>r_d(a) = P\big(Y = 1 \mid \text{do}(\bar{A} = a), D = d\big)</span>
-<span id="cb9-422"><a href="#cb9-422" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb9-423"><a href="#cb9-423" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-424"><a href="#cb9-424" aria-hidden="true" tabindex="-1"></a>A flat curve means the drug is forgiving (patients can miss doses without large increases in failure risk). A steep curve means small adherence drops produce large outcome differences.</span>
-<span id="cb9-425"><a href="#cb9-425" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-426"><a href="#cb9-426" aria-hidden="true" tabindex="-1"></a>Static-regime L-TMLE traces this curve by estimating the failure risk at a grid of fixed PDC thresholds. The LMTP shift approach provides a complementary view: it estimates the marginal benefit of a small adherence improvement, integrated over the observed adherence distribution. The two approaches are different summaries of the same counterfactual risk surface.</span>
-<span id="cb9-427"><a href="#cb9-427" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-428"><a href="#cb9-428" aria-hidden="true" tabindex="-1"></a>The curve is well-estimated only where there is adequate positivity. Below approximately PDC 0.70, few patients sustain such low adherence for four consecutive blocks, so the estimates become unstable. LMTP shift interventions avoid this problem because they stay close to the observed distribution.</span>
-<span id="cb9-429"><a href="#cb9-429" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-430"><a href="#cb9-430" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-431"><a href="#cb9-431" aria-hidden="true" tabindex="-1"></a><span class="fu"># Interpretation</span></span>
-<span id="cb9-432"><a href="#cb9-432" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-433"><a href="#cb9-433" aria-hidden="true" tabindex="-1"></a>**Feasible, not hypothetical.** The +10pp shift corresponds to something a real adherence support program might achieve. The estimate answers a concrete policy question.</span>
-<span id="cb9-434"><a href="#cb9-434" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-435"><a href="#cb9-435" aria-hidden="true" tabindex="-1"></a>**Causal, not descriptive.** The LMTP framework accounts for the treatment-confounder feedback between adherence and health. When adherence changes, health status changes too, and those changes are propagated through the sequential regression structure.</span>
-<span id="cb9-436"><a href="#cb9-436" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-437"><a href="#cb9-437" aria-hidden="true" tabindex="-1"></a>**Drug-specific effects.** Running the analysis separately by drug reveals whether the marginal return to improved adherence differs by regimen. If Drug A is more forgiving, the benefit of an adherence intervention is smaller for Drug A patients (they are already doing relatively well at moderate adherence) and larger for Drug B patients.</span>
-<span id="cb9-438"><a href="#cb9-438" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-439"><a href="#cb9-439" aria-hidden="true" tabindex="-1"></a>**Read the shift estimate alongside the static curve, not alone.** Under positivity strain the variance of the LMTP shift estimator can be underestimated and its interval can under-cover. The feasible-shift number is most trustworthy when it is reported next to the static-regime estimates and the support diagnostics above, rather than as a single standalone figure.</span>
-<span id="cb9-440"><a href="#cb9-440" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-441"><a href="#cb9-441" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-442"><a href="#cb9-442" aria-hidden="true" tabindex="-1"></a><span class="fu"># Connection to mediation</span></span>
-<span id="cb9-443"><a href="#cb9-443" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-444"><a href="#cb9-444" aria-hidden="true" tabindex="-1"></a>The quantile-matching analysis provides an informal decomposition of the total drug effect into an adherence-mediated component and a pharmacological (forgiveness) component. This is not formal mediation analysis; it is an approximation based on distribution shifts. For the formal TMLE-based mediation framework with proper identification conditions, see @sec-mediation.</span>
-<span id="cb9-445"><a href="#cb9-445" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-446"><a href="#cb9-446" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-447"><a href="#cb9-447" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and further reading</span></span>
-<span id="cb9-448"><a href="#cb9-448" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-449"><a href="#cb9-449" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Diaz I, Williams N, Hoffman KL, Schenck EJ (2023). Nonparametric causal effects based on longitudinal modified treatment policies. *Journal of the American Statistical Association* 118(542):846-856.</span>
-<span id="cb9-450"><a href="#cb9-450" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Bangsberg DR (2006). Less than 95% adherence to nonnucleoside reverse-transcriptase inhibitor therapy can lead to viral suppression. *Clinical Infectious Diseases* 43(7):939-941.</span>
-<span id="cb9-451"><a href="#cb9-451" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Petersen ML, Schwab J, Gruber S, et al. (2014). Targeted maximum likelihood estimation for dynamic and static longitudinal marginal structural working models. *J Causal Inference* 2(2):147-185.</span>
-<span id="cb9-452"><a href="#cb9-452" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`lmtp`</span> R package: <span class="co">[</span><span class="ot">CRAN</span><span class="co">](https://cran.r-project.org/package=lmtp)</span></span>
+<div class="sourceCode" id="cb10" data-shortcodes="false"><pre class="sourceCode markdown code-with-copy"><code class="sourceCode markdown"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="an">subtitle:</span><span class="co"> "From adherence thresholds to intervention-defined forgiveness curves"</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="an">format:</span><span class="co"> html</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="co">---</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a><span class="fu"># Adherence, Forgiveness, and Distribution-Shift Interventions {#sec-adherence-shift}</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>*Estimated reading time: 55 minutes*</span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a><span class="co">#| include: false</span></span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span>opts_chunk<span class="sc">$</span><span class="fu">set</span>(</span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">collapse =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a>  <span class="at">comment =</span> <span class="st">"#&gt;"</span>,</span>
+<span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.width =</span> <span class="dv">7</span>,</span>
+<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.height =</span> <span class="dv">4</span>,</span>
+<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a>  <span class="at">fig.align =</span> <span class="st">"center"</span></span>
+<span id="cb10-20"><a href="#cb10-20" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb10-21"><a href="#cb10-21" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
+<span id="cb10-22"><a href="#cb10-22" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb10-23"><a href="#cb10-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-24"><a href="#cb10-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-25"><a href="#cb10-25" aria-hidden="true" tabindex="-1"></a><span class="fu"># What this chapter is about</span></span>
+<span id="cb10-26"><a href="#cb10-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-27"><a href="#cb10-27" aria-hidden="true" tabindex="-1"></a>The previous chapters introduced longitudinal TMLE for static interventions ("always maintain high adherence") and LMTP for modified treatment policies. This chapter brings those tools to bear on a clinically important question: how do two antiretroviral drugs compare when we account for realistic adherence patterns? It focuses on the adherence- and forgiveness-specific shift methods; for the full end-to-end LMTP workflow on a dynamic treatment rule, from question to estimate, see @sec-applied-lmtp.</span>
+<span id="cb10-28"><a href="#cb10-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-29"><a href="#cb10-29" aria-hidden="true" tabindex="-1"></a>The key concept is **regimen forgiveness**: a drug is forgiving if patients can miss some doses without a large increase in treatment failure. A drug with a flat adherence-response curve is forgiving; one with a steep curve is not. Forgiveness is a causal quantity, not an observable property of the data, because the adherence-response relationship is confounded by time-varying health status.</span>
+<span id="cb10-30"><a href="#cb10-30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-31"><a href="#cb10-31" aria-hidden="true" tabindex="-1"></a>We use a simulated two-drug HIV cohort designed to capture the essential features of the adherence problem: treatment-confounder feedback between adherence and health, differential forgiveness across drugs, and the positivity challenges that arise when targeting extreme adherence levels. The simulation is calibrated to real pharmacoepidemiologic settings and uses continuous proportion of days covered (PDC) as the adherence measure.</span>
+<span id="cb10-32"><a href="#cb10-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-33"><a href="#cb10-33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-34"><a href="#cb10-34" aria-hidden="true" tabindex="-1"></a>The figure below previews the quantity we are after. A **forgiveness curve** plots the counterfactual risk of virologic failure against the adherence level a patient sustains, one curve per drug. The vertical distance between the two curves is the **forgiveness gap**: how much more a missed-dose pattern costs on the less forgiving regimen. The curve is a causal object, the risk we *would* see if adherence were set to each level, and it is not the same as the risk we observe among patients who happen to adhere at that level. Those two can diverge sharply, and most of this chapter is about why, and how to estimate the causal version.</span>
+<span id="cb10-35"><a href="#cb10-35" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-38"><a href="#cb10-38" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb10-39"><a href="#cb10-39" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-forgiveness-motivation</span></span>
+<span id="cb10-40"><a href="#cb10-40" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "An illustrative forgiveness curve. Counterfactual failure risk rises as sustained adherence falls, and it rises faster for the less forgiving regimen. The vertical distance is the forgiveness gap. This is the causal quantity the chapter estimates; the curve here is a stylized illustration, not yet an estimate from data."</span></span>
+<span id="cb10-41"><a href="#cb10-41" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
+<span id="cb10-42"><a href="#cb10-42" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb10-43"><a href="#cb10-43" aria-hidden="true" tabindex="-1"></a>adh <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="fl">0.30</span>, <span class="dv">1</span>, <span class="at">length.out =</span> <span class="dv">150</span>)</span>
+<span id="cb10-44"><a href="#cb10-44" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
+<span id="cb10-45"><a href="#cb10-45" aria-hidden="true" tabindex="-1"></a>  <span class="at">adherence =</span> <span class="fu">rep</span>(adh, <span class="dv">2</span>),</span>
+<span id="cb10-46"><a href="#cb10-46" aria-hidden="true" tabindex="-1"></a>  <span class="at">risk =</span> <span class="fu">c</span>(<span class="fu">plogis</span>(<span class="sc">-</span><span class="dv">3</span> <span class="sc">+</span> <span class="fl">4.5</span> <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> adh)),</span>
+<span id="cb10-47"><a href="#cb10-47" aria-hidden="true" tabindex="-1"></a>           <span class="fu">plogis</span>(<span class="sc">-</span><span class="dv">3</span> <span class="sc">+</span> <span class="fl">4.5</span> <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> adh) <span class="sc">-</span> <span class="fl">0.8</span> <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> adh))),</span>
+<span id="cb10-48"><a href="#cb10-48" aria-hidden="true" tabindex="-1"></a>  <span class="at">Drug =</span> <span class="fu">rep</span>(<span class="fu">c</span>(<span class="st">"Drug B (less forgiving)"</span>, <span class="st">"Drug A (more forgiving)"</span>), <span class="at">each =</span> <span class="dv">150</span>)</span>
+<span id="cb10-49"><a href="#cb10-49" aria-hidden="true" tabindex="-1"></a>) <span class="sc">|&gt;</span></span>
+<span id="cb10-50"><a href="#cb10-50" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(adherence, risk, <span class="at">color =</span> Drug)) <span class="sc">+</span></span>
+<span id="cb10-51"><a href="#cb10-51" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
+<span id="cb10-52"><a href="#cb10-52" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"segment"</span>, <span class="at">x =</span> <span class="fl">0.5</span>, <span class="at">xend =</span> <span class="fl">0.5</span>, <span class="at">y =</span> <span class="fl">0.16</span>, <span class="at">yend =</span> <span class="fl">0.55</span>,</span>
+<span id="cb10-53"><a href="#cb10-53" aria-hidden="true" tabindex="-1"></a>           <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">color =</span> <span class="st">"grey40"</span>) <span class="sc">+</span></span>
+<span id="cb10-54"><a href="#cb10-54" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(<span class="st">"text"</span>, <span class="at">x =</span> <span class="fl">0.52</span>, <span class="at">y =</span> <span class="fl">0.36</span>, <span class="at">label =</span> <span class="st">"forgiveness</span><span class="sc">\n</span><span class="st">gap"</span>,</span>
+<span id="cb10-55"><a href="#cb10-55" aria-hidden="true" tabindex="-1"></a>           <span class="at">hjust =</span> <span class="dv">0</span>, <span class="at">size =</span> <span class="fl">3.4</span>, <span class="at">color =</span> <span class="st">"grey40"</span>) <span class="sc">+</span></span>
+<span id="cb10-56"><a href="#cb10-56" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_x_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span>percent) <span class="sc">+</span></span>
+<span id="cb10-57"><a href="#cb10-57" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span>percent) <span class="sc">+</span></span>
+<span id="cb10-58"><a href="#cb10-58" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"Drug B (less forgiving)"</span> <span class="ot">=</span> <span class="st">"#EE6677"</span>,</span>
+<span id="cb10-59"><a href="#cb10-59" aria-hidden="true" tabindex="-1"></a>                                <span class="st">"Drug A (more forgiving)"</span> <span class="ot">=</span> <span class="st">"#228833"</span>)) <span class="sc">+</span></span>
+<span id="cb10-60"><a href="#cb10-60" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"Sustained adherence (PDC)"</span>, <span class="at">y =</span> <span class="st">"Virologic failure risk"</span>, <span class="at">color =</span> <span class="cn">NULL</span>) <span class="sc">+</span></span>
+<span id="cb10-61"><a href="#cb10-61" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>() <span class="sc">+</span> <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
+<span id="cb10-62"><a href="#cb10-62" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb10-63"><a href="#cb10-63" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-64"><a href="#cb10-64" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-65"><a href="#cb10-65" aria-hidden="true" tabindex="-1"></a><span class="fu"># The clinical question</span></span>
+<span id="cb10-66"><a href="#cb10-66" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-67"><a href="#cb10-67" aria-hidden="true" tabindex="-1"></a>Consider two antiretroviral regimens for HIV treatment:</span>
+<span id="cb10-68"><a href="#cb10-68" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-69"><a href="#cb10-69" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Drug A** (e.g., a long-acting formulation): pharmacologically forgiving, meaning that occasional missed doses have a smaller impact on viral suppression.</span>
+<span id="cb10-70"><a href="#cb10-70" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Drug B** (e.g., a short half-life oral regimen): less forgiving, where missed doses lead to faster viral rebound.</span>
+<span id="cb10-71"><a href="#cb10-71" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-72"><a href="#cb10-72" aria-hidden="true" tabindex="-1"></a>In practice, both drugs are prescribed and adherence varies. The adherence distributions may differ across drugs (one may be easier to take consistently), and the clinical consequences of low adherence differ (one may be more forgiving). The causal question is: **how much of the observed outcome difference between drugs is due to adherence patterns versus pharmacological forgiveness?**</span>
+<span id="cb10-73"><a href="#cb10-73" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-74"><a href="#cb10-74" aria-hidden="true" tabindex="-1"></a>This question requires separating three components:</span>
+<span id="cb10-75"><a href="#cb10-75" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-76"><a href="#cb10-76" aria-hidden="true" tabindex="-1"></a><span class="ss">1. </span>**Adherence distribution**: Do Drug A and Drug B patients adhere at different rates?</span>
+<span id="cb10-77"><a href="#cb10-77" aria-hidden="true" tabindex="-1"></a><span class="ss">2. </span>**Forgiveness**: At any given adherence level, does one drug produce better outcomes than the other?</span>
+<span id="cb10-78"><a href="#cb10-78" aria-hidden="true" tabindex="-1"></a><span class="ss">3. </span>**Adherence-mediated effect**: How much of the total drug difference operates through the adherence pathway?</span>
+<span id="cb10-79"><a href="#cb10-79" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-80"><a href="#cb10-80" aria-hidden="true" tabindex="-1"></a>Each component requires longitudinal causal methods because adherence and health co-evolve over time.</span>
+<span id="cb10-81"><a href="#cb10-81" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-82"><a href="#cb10-82" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-83"><a href="#cb10-83" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why this needs a causal method</span></span>
+<span id="cb10-84"><a href="#cb10-84" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-85"><a href="#cb10-85" aria-hidden="true" tabindex="-1"></a>Adherence is measured after treatment starts and changes over time, and it sits in a feedback loop with health. Worse health lowers adherence through side effects and complications; lower adherence worsens virologic control; and worse control feeds back into health, which shapes the next period's adherence. The variable that confounds the adherence-to-failure relationship, current health status $L_t$, is therefore also a *consequence* of past adherence.</span>
+<span id="cb10-86"><a href="#cb10-86" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-89"><a href="#cb10-89" aria-hidden="true" tabindex="-1"></a><span class="in">```{mermaid}</span></span>
+<span id="cb10-90"><a href="#cb10-90" aria-hidden="true" tabindex="-1"></a><span class="in">%%| label: fig-adherence-dag</span></span>
+<span id="cb10-91"><a href="#cb10-91" aria-hidden="true" tabindex="-1"></a><span class="in">%%| fig-cap: "Two blocks of the adherence process. Health status L at each block confounds the adherence-to-failure relationship and is itself moved by prior adherence (the feedback arrow from PDC1 to L2). A regression that conditions on L removes the confounding but also blocks the pathway through which past adherence acts; a regression that omits L leaves the confounding in place."</span></span>
+<span id="cb10-92"><a href="#cb10-92" aria-hidden="true" tabindex="-1"></a><span class="in">flowchart LR</span></span>
+<span id="cb10-93"><a href="#cb10-93" aria-hidden="true" tabindex="-1"></a><span class="in">  W["W0, A0&lt;br/&gt;baseline, drug"] --&gt; L1["L1&lt;br/&gt;health"]</span></span>
+<span id="cb10-94"><a href="#cb10-94" aria-hidden="true" tabindex="-1"></a><span class="in">  L1 --&gt; P1["PDC1&lt;br/&gt;adherence"]</span></span>
+<span id="cb10-95"><a href="#cb10-95" aria-hidden="true" tabindex="-1"></a><span class="in">  P1 --&gt; Y["Y&lt;br/&gt;failure"]</span></span>
+<span id="cb10-96"><a href="#cb10-96" aria-hidden="true" tabindex="-1"></a><span class="in">  L1 --&gt; Y</span></span>
+<span id="cb10-97"><a href="#cb10-97" aria-hidden="true" tabindex="-1"></a><span class="in">  P1 --&gt; L2["L2&lt;br/&gt;health"]</span></span>
+<span id="cb10-98"><a href="#cb10-98" aria-hidden="true" tabindex="-1"></a><span class="in">  W --&gt; L2</span></span>
+<span id="cb10-99"><a href="#cb10-99" aria-hidden="true" tabindex="-1"></a><span class="in">  L2 --&gt; P2["PDC2&lt;br/&gt;adherence"]</span></span>
+<span id="cb10-100"><a href="#cb10-100" aria-hidden="true" tabindex="-1"></a><span class="in">  P2 --&gt; Y</span></span>
+<span id="cb10-101"><a href="#cb10-101" aria-hidden="true" tabindex="-1"></a><span class="in">  L2 --&gt; Y</span></span>
+<span id="cb10-102"><a href="#cb10-102" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb10-103"><a href="#cb10-103" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-104"><a href="#cb10-104" aria-hidden="true" tabindex="-1"></a>This is the dilemma that defeats ordinary regression. Conditioning on observed adherence adjusts for the health-status confounding and, at the same time, blocks the adherence effect we want to measure, because that effect runs through health. Leaving health out of the model leaves the confounding in place. No single regression can do both. This is exactly the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it is why estimating a forgiveness curve needs the g-methods developed there.</span>
+<span id="cb10-105"><a href="#cb10-105" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-106"><a href="#cb10-106" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-107"><a href="#cb10-107" aria-hidden="true" tabindex="-1"></a><span class="fu"># The data-generating process</span></span>
+<span id="cb10-108"><a href="#cb10-108" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-109"><a href="#cb10-109" aria-hidden="true" tabindex="-1"></a>We use a simulation that generates longitudinal data with 90-day blocks over one year (K = 4 blocks). The DGP produces treatment-confounder feedback: poor adherence worsens health (higher L), and worse health reduces future adherence. Drug A is more forgiving at low adherence levels, encoded through a drug-by-adherence interaction in the failure hazard.</span>
+<span id="cb10-110"><a href="#cb10-110" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-113"><a href="#cb10-113" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb10-114"><a href="#cb10-114" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: sim-dgp</span></span>
+<span id="cb10-115"><a href="#cb10-115" aria-hidden="true" tabindex="-1"></a><span class="co"># Simplified DGP for the adherence forgiveness simulation</span></span>
+<span id="cb10-116"><a href="#cb10-116" aria-hidden="true" tabindex="-1"></a><span class="co"># Based on sim_v4_dgp.R from the adherence simulation project</span></span>
+<span id="cb10-117"><a href="#cb10-117" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-118"><a href="#cb10-118" aria-hidden="true" tabindex="-1"></a>simulate_adherence_data <span class="ot">&lt;-</span> <span class="cf">function</span>(<span class="at">n =</span> <span class="dv">500</span>, <span class="at">K =</span> <span class="dv">4</span>, <span class="at">seed =</span> <span class="dv">2026</span>) {</span>
+<span id="cb10-119"><a href="#cb10-119" aria-hidden="true" tabindex="-1"></a>  <span class="fu">set.seed</span>(seed)</span>
+<span id="cb10-120"><a href="#cb10-120" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-121"><a href="#cb10-121" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Parameters</span></span>
+<span id="cb10-122"><a href="#cb10-122" aria-hidden="true" tabindex="-1"></a>  alpha0 <span class="ot">&lt;-</span> <span class="fl">1.30</span>; alphaA <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">0.35</span>; alphaW <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">0.20</span>; alphaL <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">0.30</span></span>
+<span id="cb10-123"><a href="#cb10-123" aria-hidden="true" tabindex="-1"></a>  rho <span class="ot">&lt;-</span> <span class="fl">0.45</span>; sigma_u <span class="ot">&lt;-</span> <span class="fl">0.50</span>; sigma_e <span class="ot">&lt;-</span> <span class="fl">0.65</span></span>
+<span id="cb10-124"><a href="#cb10-124" aria-hidden="true" tabindex="-1"></a>  beta0 <span class="ot">&lt;-</span> <span class="fl">0.0</span>; betaW <span class="ot">&lt;-</span> <span class="fl">0.30</span>; betaA <span class="ot">&lt;-</span> <span class="fl">0.0</span>; betaLag <span class="ot">&lt;-</span> <span class="fl">0.35</span>; betaP <span class="ot">&lt;-</span> <span class="fl">0.80</span></span>
+<span id="cb10-125"><a href="#cb10-125" aria-hidden="true" tabindex="-1"></a>  sigma_L <span class="ot">&lt;-</span> <span class="fl">0.50</span></span>
+<span id="cb10-126"><a href="#cb10-126" aria-hidden="true" tabindex="-1"></a>  gamma0 <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">3.80</span>; gammaL <span class="ot">&lt;-</span> <span class="fl">0.50</span>; gammaW <span class="ot">&lt;-</span> <span class="fl">0.30</span></span>
+<span id="cb10-127"><a href="#cb10-127" aria-hidden="true" tabindex="-1"></a>  gammaP <span class="ot">&lt;-</span> <span class="fl">2.50</span>; gammaA <span class="ot">&lt;-</span> <span class="fl">0.0</span>; gammaAP <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">1.20</span></span>
+<span id="cb10-128"><a href="#cb10-128" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-129"><a href="#cb10-129" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Baseline</span></span>
+<span id="cb10-130"><a href="#cb10-130" aria-hidden="true" tabindex="-1"></a>  W0 <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n)</span>
+<span id="cb10-131"><a href="#cb10-131" aria-hidden="true" tabindex="-1"></a>  A0 <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fl">0.5</span>)  <span class="co"># 1 = Drug A, 0 = Drug B</span></span>
+<span id="cb10-132"><a href="#cb10-132" aria-hidden="true" tabindex="-1"></a>  u_i <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, sigma_u)</span>
+<span id="cb10-133"><a href="#cb10-133" aria-hidden="true" tabindex="-1"></a>  mu_i <span class="ot">&lt;-</span> alpha0 <span class="sc">+</span> alphaA <span class="sc">*</span> A0 <span class="sc">+</span> alphaW <span class="sc">*</span> W0 <span class="sc">+</span> u_i</span>
+<span id="cb10-134"><a href="#cb10-134" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-135"><a href="#cb10-135" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Storage</span></span>
+<span id="cb10-136"><a href="#cb10-136" aria-hidden="true" tabindex="-1"></a>  L_mat <span class="ot">&lt;-</span> PDC_mat <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="cn">NA_real_</span>, n, K)</span>
+<span id="cb10-137"><a href="#cb10-137" aria-hidden="true" tabindex="-1"></a>  Y_mat <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="dv">0</span>L, n, K)</span>
+<span id="cb10-138"><a href="#cb10-138" aria-hidden="true" tabindex="-1"></a>  eta_prev <span class="ot">&lt;-</span> <span class="fu">rep</span>(<span class="cn">NA_real_</span>, n)</span>
+<span id="cb10-139"><a href="#cb10-139" aria-hidden="true" tabindex="-1"></a>  failed <span class="ot">&lt;-</span> <span class="fu">rep</span>(<span class="cn">FALSE</span>, n)</span>
+<span id="cb10-140"><a href="#cb10-140" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-141"><a href="#cb10-141" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (t <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>K) {</span>
+<span id="cb10-142"><a href="#cb10-142" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Time-varying health confounder L_t</span></span>
+<span id="cb10-143"><a href="#cb10-143" aria-hidden="true" tabindex="-1"></a>    noise_L <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, sigma_L)</span>
+<span id="cb10-144"><a href="#cb10-144" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (t <span class="sc">==</span> <span class="dv">1</span>) {</span>
+<span id="cb10-145"><a href="#cb10-145" aria-hidden="true" tabindex="-1"></a>      L_mat[, t] <span class="ot">&lt;-</span> beta0 <span class="sc">+</span> betaW <span class="sc">*</span> W0 <span class="sc">+</span> betaA <span class="sc">*</span> A0 <span class="sc">+</span> noise_L</span>
+<span id="cb10-146"><a href="#cb10-146" aria-hidden="true" tabindex="-1"></a>    } <span class="cf">else</span> {</span>
+<span id="cb10-147"><a href="#cb10-147" aria-hidden="true" tabindex="-1"></a>      L_mat[, t] <span class="ot">&lt;-</span> beta0 <span class="sc">+</span> betaW <span class="sc">*</span> W0 <span class="sc">+</span> betaA <span class="sc">*</span> A0 <span class="sc">+</span></span>
+<span id="cb10-148"><a href="#cb10-148" aria-hidden="true" tabindex="-1"></a>        betaLag <span class="sc">*</span> L_mat[, t<span class="dv">-1</span>] <span class="sc">+</span> betaP <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> PDC_mat[, t<span class="dv">-1</span>]) <span class="sc">+</span> noise_L</span>
+<span id="cb10-149"><a href="#cb10-149" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb10-150"><a href="#cb10-150" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-151"><a href="#cb10-151" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Adherence (PDC) on logit scale with AR(1) persistence</span></span>
+<span id="cb10-152"><a href="#cb10-152" aria-hidden="true" tabindex="-1"></a>    noise_e <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, sigma_e)</span>
+<span id="cb10-153"><a href="#cb10-153" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (t <span class="sc">==</span> <span class="dv">1</span>) {</span>
+<span id="cb10-154"><a href="#cb10-154" aria-hidden="true" tabindex="-1"></a>      eta_t <span class="ot">&lt;-</span> mu_i <span class="sc">+</span> noise_e</span>
+<span id="cb10-155"><a href="#cb10-155" aria-hidden="true" tabindex="-1"></a>    } <span class="cf">else</span> {</span>
+<span id="cb10-156"><a href="#cb10-156" aria-hidden="true" tabindex="-1"></a>      eta_t <span class="ot">&lt;-</span> (<span class="dv">1</span> <span class="sc">-</span> rho) <span class="sc">*</span> mu_i <span class="sc">+</span> rho <span class="sc">*</span> eta_prev <span class="sc">+</span> alphaL <span class="sc">*</span> L_mat[, t<span class="dv">-1</span>] <span class="sc">+</span> noise_e</span>
+<span id="cb10-157"><a href="#cb10-157" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb10-158"><a href="#cb10-158" aria-hidden="true" tabindex="-1"></a>    PDC_mat[, t] <span class="ot">&lt;-</span> <span class="fu">plogis</span>(eta_t)</span>
+<span id="cb10-159"><a href="#cb10-159" aria-hidden="true" tabindex="-1"></a>    eta_prev <span class="ot">&lt;-</span> eta_t</span>
+<span id="cb10-160"><a href="#cb10-160" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-161"><a href="#cb10-161" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Virologic failure (absorbing)</span></span>
+<span id="cb10-162"><a href="#cb10-162" aria-hidden="true" tabindex="-1"></a>    at_risk <span class="ot">&lt;-</span> <span class="sc">!</span>failed</span>
+<span id="cb10-163"><a href="#cb10-163" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (<span class="fu">any</span>(at_risk)) {</span>
+<span id="cb10-164"><a href="#cb10-164" aria-hidden="true" tabindex="-1"></a>      lp <span class="ot">&lt;-</span> gamma0 <span class="sc">+</span> gammaL <span class="sc">*</span> L_mat[at_risk, t] <span class="sc">+</span> gammaW <span class="sc">*</span> W0[at_risk] <span class="sc">+</span></span>
+<span id="cb10-165"><a href="#cb10-165" aria-hidden="true" tabindex="-1"></a>        gammaP <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> PDC_mat[at_risk, t]) <span class="sc">+</span> gammaA <span class="sc">*</span> A0[at_risk] <span class="sc">+</span></span>
+<span id="cb10-166"><a href="#cb10-166" aria-hidden="true" tabindex="-1"></a>        gammaAP <span class="sc">*</span> A0[at_risk] <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> PDC_mat[at_risk, t])</span>
+<span id="cb10-167"><a href="#cb10-167" aria-hidden="true" tabindex="-1"></a>      new_fail <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(<span class="fu">sum</span>(at_risk), <span class="dv">1</span>, <span class="fu">plogis</span>(lp)) <span class="sc">==</span> <span class="dv">1</span>L</span>
+<span id="cb10-168"><a href="#cb10-168" aria-hidden="true" tabindex="-1"></a>      idx <span class="ot">&lt;-</span> <span class="fu">which</span>(at_risk)</span>
+<span id="cb10-169"><a href="#cb10-169" aria-hidden="true" tabindex="-1"></a>      Y_mat[idx[new_fail], t] <span class="ot">&lt;-</span> <span class="dv">1</span>L</span>
+<span id="cb10-170"><a href="#cb10-170" aria-hidden="true" tabindex="-1"></a>      failed[idx[new_fail]] <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
+<span id="cb10-171"><a href="#cb10-171" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb10-172"><a href="#cb10-172" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (t <span class="sc">&gt;</span> <span class="dv">1</span>) Y_mat[Y_mat[, t<span class="dv">-1</span>] <span class="sc">==</span> <span class="dv">1</span>L, t] <span class="ot">&lt;-</span> <span class="dv">1</span>L</span>
+<span id="cb10-173"><a href="#cb10-173" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb10-174"><a href="#cb10-174" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-175"><a href="#cb10-175" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Assemble wide data</span></span>
+<span id="cb10-176"><a href="#cb10-176" aria-hidden="true" tabindex="-1"></a>  df <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">id =</span> <span class="dv">1</span><span class="sc">:</span>n, <span class="at">W0 =</span> W0, <span class="at">A0 =</span> A0)</span>
+<span id="cb10-177"><a href="#cb10-177" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (t <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>K) {</span>
+<span id="cb10-178"><a href="#cb10-178" aria-hidden="true" tabindex="-1"></a>    df[[<span class="fu">paste0</span>(<span class="st">"L_"</span>, t)]]   <span class="ot">&lt;-</span> L_mat[, t]</span>
+<span id="cb10-179"><a href="#cb10-179" aria-hidden="true" tabindex="-1"></a>    df[[<span class="fu">paste0</span>(<span class="st">"PDC_"</span>, t)]] <span class="ot">&lt;-</span> PDC_mat[, t]</span>
+<span id="cb10-180"><a href="#cb10-180" aria-hidden="true" tabindex="-1"></a>    df[[<span class="fu">paste0</span>(<span class="st">"Y_"</span>, t)]]   <span class="ot">&lt;-</span> Y_mat[, t]</span>
+<span id="cb10-181"><a href="#cb10-181" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb10-182"><a href="#cb10-182" aria-hidden="true" tabindex="-1"></a>  df<span class="sc">$</span>Y_final <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(<span class="fu">rowSums</span>(Y_mat) <span class="sc">&gt;</span> <span class="dv">0</span>)</span>
+<span id="cb10-183"><a href="#cb10-183" aria-hidden="true" tabindex="-1"></a>  <span class="fu">attr</span>(df, <span class="st">"K"</span>) <span class="ot">&lt;-</span> K</span>
+<span id="cb10-184"><a href="#cb10-184" aria-hidden="true" tabindex="-1"></a>  df</span>
+<span id="cb10-185"><a href="#cb10-185" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb10-186"><a href="#cb10-186" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-187"><a href="#cb10-187" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> <span class="fu">simulate_adherence_data</span>(<span class="at">n =</span> <span class="dv">500</span>, <span class="at">K =</span> <span class="dv">4</span>, <span class="at">seed =</span> <span class="dv">2026</span>)</span>
+<span id="cb10-188"><a href="#cb10-188" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb10-189"><a href="#cb10-189" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-190"><a href="#cb10-190" aria-hidden="true" tabindex="-1"></a>The key structural features of this DGP:</span>
+<span id="cb10-191"><a href="#cb10-191" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-192"><a href="#cb10-192" aria-hidden="true" tabindex="-1"></a>**Treatment-confounder feedback.** Poor adherence (low PDC) at block $t-1$ worsens health ($L_t$), which then reduces adherence at block $t$ (through <span class="in">`alphaL`</span>) and independently increases failure risk (through <span class="in">`gammaL`</span>). This is the same feedback structure discussed in @sec-longitudinal-confounding.</span>
+<span id="cb10-193"><a href="#cb10-193" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-194"><a href="#cb10-194" aria-hidden="true" tabindex="-1"></a>**Drug-by-adherence interaction (the forgiveness mechanism).** The parameter <span class="in">`gammaAP = -1.20`</span> means that Drug A's penalty for poor adherence is smaller than Drug B's. At high adherence, the two drugs perform similarly. At low adherence, Drug A is more forgiving. This interaction is what makes the forgiveness curve differ between drugs.</span>
+<span id="cb10-195"><a href="#cb10-195" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-198"><a href="#cb10-198" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb10-199"><a href="#cb10-199" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-adherence-dist</span></span>
+<span id="cb10-200"><a href="#cb10-200" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "PDC distributions at block 1 by drug. Drug A patients have slightly lower mean adherence (the drug assignment shifts the adherence intercept), but Drug A is more forgiving of that lower adherence."</span></span>
+<span id="cb10-201"><a href="#cb10-201" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
+<span id="cb10-202"><a href="#cb10-202" aria-hidden="true" tabindex="-1"></a>dat <span class="sc">|&gt;</span></span>
+<span id="cb10-203"><a href="#cb10-203" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">Drug =</span> <span class="fu">ifelse</span>(A0 <span class="sc">==</span> <span class="dv">1</span>, <span class="st">"Drug A"</span>, <span class="st">"Drug B"</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb10-204"><a href="#cb10-204" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> PDC_1, <span class="at">fill =</span> Drug)) <span class="sc">+</span></span>
+<span id="cb10-205"><a href="#cb10-205" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_density</span>(<span class="at">alpha =</span> <span class="fl">0.4</span>) <span class="sc">+</span></span>
+<span id="cb10-206"><a href="#cb10-206" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"PDC (block 1)"</span>, <span class="at">y =</span> <span class="st">"Density"</span>) <span class="sc">+</span></span>
+<span id="cb10-207"><a href="#cb10-207" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_fill_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"Drug A"</span> <span class="ot">=</span> <span class="st">"#228833"</span>, <span class="st">"Drug B"</span> <span class="ot">=</span> <span class="st">"#EE6677"</span>)) <span class="sc">+</span></span>
+<span id="cb10-208"><a href="#cb10-208" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>()</span>
+<span id="cb10-209"><a href="#cb10-209" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb10-210"><a href="#cb10-210" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-213"><a href="#cb10-213" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb10-214"><a href="#cb10-214" aria-hidden="true" tabindex="-1"></a><span class="co"># Cohort summary</span></span>
+<span id="cb10-215"><a href="#cb10-215" aria-hidden="true" tabindex="-1"></a>dat <span class="sc">|&gt;</span></span>
+<span id="cb10-216"><a href="#cb10-216" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">Drug =</span> <span class="fu">ifelse</span>(A0 <span class="sc">==</span> <span class="dv">1</span>, <span class="st">"Drug A"</span>, <span class="st">"Drug B"</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb10-217"><a href="#cb10-217" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(Drug) <span class="sc">|&gt;</span></span>
+<span id="cb10-218"><a href="#cb10-218" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(</span>
+<span id="cb10-219"><a href="#cb10-219" aria-hidden="true" tabindex="-1"></a>    <span class="at">n =</span> <span class="fu">n</span>(),</span>
+<span id="cb10-220"><a href="#cb10-220" aria-hidden="true" tabindex="-1"></a>    <span class="at">mean_PDC_1 =</span> <span class="fu">round</span>(<span class="fu">mean</span>(PDC_1), <span class="dv">3</span>),</span>
+<span id="cb10-221"><a href="#cb10-221" aria-hidden="true" tabindex="-1"></a>    <span class="at">failure_pct =</span> <span class="fu">round</span>(<span class="dv">100</span> <span class="sc">*</span> <span class="fu">mean</span>(Y_final), <span class="dv">1</span>),</span>
+<span id="cb10-222"><a href="#cb10-222" aria-hidden="true" tabindex="-1"></a>    <span class="at">.groups =</span> <span class="st">"drop"</span></span>
+<span id="cb10-223"><a href="#cb10-223" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb10-224"><a href="#cb10-224" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as.data.frame</span>()</span>
+<span id="cb10-225"><a href="#cb10-225" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb10-226"><a href="#cb10-226" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-227"><a href="#cb10-227" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-228"><a href="#cb10-228" aria-hidden="true" tabindex="-1"></a><span class="fu"># Why naive adherence analysis is biased</span></span>
+<span id="cb10-229"><a href="#cb10-229" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-230"><a href="#cb10-230" aria-hidden="true" tabindex="-1"></a>A naive analysis would stratify patients by observed adherence level and compare outcomes within strata. This is systematically biased because of treatment-confounder feedback: patients with low adherence tend to be sicker (higher $L_t$), and sicker patients have higher failure risk regardless of adherence. The naive analysis overestimates the effect of adherence because the low-adherence stratum is enriched for patients who were going to fail anyway.</span>
+<span id="cb10-231"><a href="#cb10-231" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-232"><a href="#cb10-232" aria-hidden="true" tabindex="-1"></a>To see the bias rather than just assert it, compare the crude curve against the truth. Because the data come from a known simulation, we can compute the **oracle forgiveness curve**: the actual counterfactual failure risk if every patient sustained a given adherence level, obtained by re-running the data-generating process with adherence held fixed and health allowed to respond. Overlaying it on the crude adherence-stratified curve shows the gap.</span>
+<span id="cb10-233"><a href="#cb10-233" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-236"><a href="#cb10-236" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb10-237"><a href="#cb10-237" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-oracle-vs-naive</span></span>
+<span id="cb10-238"><a href="#cb10-238" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Causal forgiveness curves (lines) versus crude adherence-stratified failure rates (open points). The crude points tend to sit above the causal curve at low adherence and below it at high adherence, because low-adherence patients are sicker for reasons the crude comparison wrongly attributes to adherence. The crude curve is therefore too steep."</span></span>
+<span id="cb10-239"><a href="#cb10-239" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
+<span id="cb10-240"><a href="#cb10-240" aria-hidden="true" tabindex="-1"></a><span class="co"># Oracle: counterfactual 12-month failure risk if PDC is held at `a` every block,</span></span>
+<span id="cb10-241"><a href="#cb10-241" aria-hidden="true" tabindex="-1"></a><span class="co"># for a given drug, with health L allowed to respond to the fixed adherence.</span></span>
+<span id="cb10-242"><a href="#cb10-242" aria-hidden="true" tabindex="-1"></a>oracle_forgiveness <span class="ot">&lt;-</span> <span class="cf">function</span>(a, drug, <span class="at">n =</span> <span class="dv">20000</span>, <span class="at">K =</span> <span class="dv">4</span>, <span class="at">seed =</span> <span class="dv">99</span>) {</span>
+<span id="cb10-243"><a href="#cb10-243" aria-hidden="true" tabindex="-1"></a>  <span class="fu">set.seed</span>(seed)</span>
+<span id="cb10-244"><a href="#cb10-244" aria-hidden="true" tabindex="-1"></a>  betaW <span class="ot">&lt;-</span> <span class="fl">0.30</span>; betaLag <span class="ot">&lt;-</span> <span class="fl">0.35</span>; betaP <span class="ot">&lt;-</span> <span class="fl">0.80</span>; sigma_L <span class="ot">&lt;-</span> <span class="fl">0.50</span></span>
+<span id="cb10-245"><a href="#cb10-245" aria-hidden="true" tabindex="-1"></a>  gamma0 <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">3.80</span>; gammaL <span class="ot">&lt;-</span> <span class="fl">0.50</span>; gammaW <span class="ot">&lt;-</span> <span class="fl">0.30</span>; gammaP <span class="ot">&lt;-</span> <span class="fl">2.50</span>; gammaAP <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fl">1.20</span></span>
+<span id="cb10-246"><a href="#cb10-246" aria-hidden="true" tabindex="-1"></a>  W0 <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n); A0 <span class="ot">&lt;-</span> <span class="fu">rep</span>(drug, n)</span>
+<span id="cb10-247"><a href="#cb10-247" aria-hidden="true" tabindex="-1"></a>  L_prev <span class="ot">&lt;-</span> <span class="cn">NULL</span>; failed <span class="ot">&lt;-</span> <span class="fu">rep</span>(<span class="cn">FALSE</span>, n)</span>
+<span id="cb10-248"><a href="#cb10-248" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (t <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>K) {</span>
+<span id="cb10-249"><a href="#cb10-249" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (t <span class="sc">==</span> <span class="dv">1</span>) L_t <span class="ot">&lt;-</span> betaW <span class="sc">*</span> W0 <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, sigma_L)</span>
+<span id="cb10-250"><a href="#cb10-250" aria-hidden="true" tabindex="-1"></a>    <span class="cf">else</span>        L_t <span class="ot">&lt;-</span> betaW <span class="sc">*</span> W0 <span class="sc">+</span> betaLag <span class="sc">*</span> L_prev <span class="sc">+</span> betaP <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> a) <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="dv">0</span>, sigma_L)</span>
+<span id="cb10-251"><a href="#cb10-251" aria-hidden="true" tabindex="-1"></a>    lp <span class="ot">&lt;-</span> gamma0 <span class="sc">+</span> gammaL <span class="sc">*</span> L_t <span class="sc">+</span> gammaW <span class="sc">*</span> W0 <span class="sc">+</span> gammaP <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> a) <span class="sc">+</span> gammaAP <span class="sc">*</span> A0 <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> a)</span>
+<span id="cb10-252"><a href="#cb10-252" aria-hidden="true" tabindex="-1"></a>    failed <span class="ot">&lt;-</span> failed <span class="sc">|</span> (<span class="fu">runif</span>(n) <span class="sc">&lt;</span> <span class="fu">plogis</span>(lp))</span>
+<span id="cb10-253"><a href="#cb10-253" aria-hidden="true" tabindex="-1"></a>    L_prev <span class="ot">&lt;-</span> L_t</span>
+<span id="cb10-254"><a href="#cb10-254" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb10-255"><a href="#cb10-255" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mean</span>(failed)</span>
+<span id="cb10-256"><a href="#cb10-256" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb10-257"><a href="#cb10-257" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-258"><a href="#cb10-258" aria-hidden="true" tabindex="-1"></a>pdc_grid <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="fl">0.40</span>, <span class="fl">0.95</span>, <span class="at">by =</span> <span class="fl">0.05</span>)</span>
+<span id="cb10-259"><a href="#cb10-259" aria-hidden="true" tabindex="-1"></a>oracle_df <span class="ot">&lt;-</span> <span class="fu">do.call</span>(rbind, <span class="fu">lapply</span>(<span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">1</span>), <span class="cf">function</span>(d)</span>
+<span id="cb10-260"><a href="#cb10-260" aria-hidden="true" tabindex="-1"></a>  <span class="fu">data.frame</span>(<span class="at">PDC =</span> pdc_grid, <span class="at">Drug =</span> <span class="fu">ifelse</span>(d <span class="sc">==</span> <span class="dv">1</span>, <span class="st">"Drug A"</span>, <span class="st">"Drug B"</span>),</span>
+<span id="cb10-261"><a href="#cb10-261" aria-hidden="true" tabindex="-1"></a>             <span class="at">risk =</span> <span class="fu">vapply</span>(pdc_grid, oracle_forgiveness, <span class="fu">numeric</span>(<span class="dv">1</span>), <span class="at">drug =</span> d))))</span>
+<span id="cb10-262"><a href="#cb10-262" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-263"><a href="#cb10-263" aria-hidden="true" tabindex="-1"></a>naive_df <span class="ot">&lt;-</span> dat <span class="sc">|&gt;</span></span>
+<span id="cb10-264"><a href="#cb10-264" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">Drug =</span> <span class="fu">ifelse</span>(A0 <span class="sc">==</span> <span class="dv">1</span>, <span class="st">"Drug A"</span>, <span class="st">"Drug B"</span>),</span>
+<span id="cb10-265"><a href="#cb10-265" aria-hidden="true" tabindex="-1"></a>         <span class="at">mean_PDC =</span> <span class="fu">rowMeans</span>(dplyr<span class="sc">::</span><span class="fu">across</span>(dplyr<span class="sc">::</span><span class="fu">starts_with</span>(<span class="st">"PDC_"</span>))),</span>
+<span id="cb10-266"><a href="#cb10-266" aria-hidden="true" tabindex="-1"></a>         <span class="at">bin =</span> <span class="fu">cut</span>(mean_PDC, <span class="at">breaks =</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">1</span>, <span class="fl">0.1</span>))) <span class="sc">|&gt;</span></span>
+<span id="cb10-267"><a href="#cb10-267" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(Drug, bin) <span class="sc">|&gt;</span></span>
+<span id="cb10-268"><a href="#cb10-268" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(<span class="at">PDC =</span> <span class="fu">mean</span>(mean_PDC), <span class="at">risk =</span> <span class="fu">mean</span>(Y_final), <span class="at">n =</span> <span class="fu">n</span>(), <span class="at">.groups =</span> <span class="st">"drop"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb10-269"><a href="#cb10-269" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(n <span class="sc">&gt;=</span> <span class="dv">10</span>)</span>
+<span id="cb10-270"><a href="#cb10-270" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-271"><a href="#cb10-271" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(oracle_df, <span class="fu">aes</span>(PDC, risk, <span class="at">color =</span> Drug)) <span class="sc">+</span></span>
+<span id="cb10-272"><a href="#cb10-272" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
+<span id="cb10-273"><a href="#cb10-273" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">data =</span> naive_df, <span class="fu">aes</span>(PDC, risk, <span class="at">color =</span> Drug), <span class="at">shape =</span> <span class="dv">1</span>, <span class="at">size =</span> <span class="fl">2.2</span>) <span class="sc">+</span></span>
+<span id="cb10-274"><a href="#cb10-274" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_x_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span>percent) <span class="sc">+</span></span>
+<span id="cb10-275"><a href="#cb10-275" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">labels =</span> scales<span class="sc">::</span>percent) <span class="sc">+</span></span>
+<span id="cb10-276"><a href="#cb10-276" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"Drug A"</span> <span class="ot">=</span> <span class="st">"#228833"</span>, <span class="st">"Drug B"</span> <span class="ot">=</span> <span class="st">"#EE6677"</span>)) <span class="sc">+</span></span>
+<span id="cb10-277"><a href="#cb10-277" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"Sustained adherence (PDC)"</span>, <span class="at">y =</span> <span class="st">"12-month failure risk"</span>, <span class="at">color =</span> <span class="cn">NULL</span>,</span>
+<span id="cb10-278"><a href="#cb10-278" aria-hidden="true" tabindex="-1"></a>       <span class="at">title =</span> <span class="st">"Oracle forgiveness curves (lines) vs crude risk by adherence (points)"</span>) <span class="sc">+</span></span>
+<span id="cb10-279"><a href="#cb10-279" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>() <span class="sc">+</span> <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>)</span>
+<span id="cb10-280"><a href="#cb10-280" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb10-281"><a href="#cb10-281" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-282"><a href="#cb10-282" aria-hidden="true" tabindex="-1"></a>The solid lines are the causal forgiveness curves; the open points are the crude failure rates among patients whose average adherence fell in each bin. The crude points tend to sit above the causal curve where adherence is low and below it where adherence is high: low-adherence patients are sicker for reasons the crude comparison attributes to adherence, so it overstates the cost of poor adherence and understates the benefit of good adherence, exactly the bias the feedback loop predicts. Recovering the causal curve requires g-methods that account for that feedback. The L-TMLE chapter (@sec-illustrated-ltmle) estimates static adherence regimes that trace this curve at fixed levels; the rest of this chapter develops the feasible-shift approach with LMTP.</span>
+<span id="cb10-283"><a href="#cb10-283" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-284"><a href="#cb10-284" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-285"><a href="#cb10-285" aria-hidden="true" tabindex="-1"></a><span class="fu"># Two estimands, and the estimator each one needs</span></span>
+<span id="cb10-286"><a href="#cb10-286" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-287"><a href="#cb10-287" aria-hidden="true" tabindex="-1"></a>The forgiveness question can be made precise in two ways, and they call for different estimators.</span>
+<span id="cb10-288"><a href="#cb10-288" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-289"><a href="#cb10-289" aria-hidden="true" tabindex="-1"></a>The first is a **static adherence regime**: what would the failure risk be if every patient *sustained* a fixed adherence level, say low, medium, or high, for the whole year? This is the estimand that traces the forgiveness curve at fixed points, and the longitudinal TMLE of @sec-illustrated-ltmle estimates it. Its weakness is positivity: very few patients actually sustain low adherence, or perfect adherence, across all four blocks, so the data thin out at the ends of the curve.</span>
+<span id="cb10-290"><a href="#cb10-290" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-291"><a href="#cb10-291" aria-hidden="true" tabindex="-1"></a>The second is a **feasible shift**: what would happen if every patient's adherence were nudged up by a realistic amount, say 10 percentage points, from wherever it currently sits? This is a modified treatment policy, and LMTP estimates it. Because the shifted adherence stays close to what each patient already does, it respects the support of the data and answers a question an adherence-support program could actually act on.</span>
+<span id="cb10-292"><a href="#cb10-292" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-293"><a href="#cb10-293" aria-hidden="true" tabindex="-1"></a>The two are complementary summaries of the same counterfactual risk surface. The static curve shows the whole shape but needs support at every level; the shift gives a stable, policy-relevant slice near the observed distribution. The positivity problem with static extremes is easy to see directly in the data.</span>
+<span id="cb10-294"><a href="#cb10-294" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-297"><a href="#cb10-297" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb10-298"><a href="#cb10-298" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: positivity-sustained</span></span>
+<span id="cb10-299"><a href="#cb10-299" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: show</span></span>
+<span id="cb10-300"><a href="#cb10-300" aria-hidden="true" tabindex="-1"></a><span class="co"># How many patients actually sustain low or high adherence across all four blocks?</span></span>
+<span id="cb10-301"><a href="#cb10-301" aria-hidden="true" tabindex="-1"></a>pdc <span class="ot">&lt;-</span> <span class="fu">as.matrix</span>(dat[, <span class="fu">paste0</span>(<span class="st">"PDC_"</span>, <span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>)])</span>
+<span id="cb10-302"><a href="#cb10-302" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
+<span id="cb10-303"><a href="#cb10-303" aria-hidden="true" tabindex="-1"></a>  <span class="at">regime     =</span> <span class="fu">c</span>(<span class="st">"sustained low (&lt;0.50 every block)"</span>, <span class="st">"sustained high (&gt;0.90 every block)"</span>),</span>
+<span id="cb10-304"><a href="#cb10-304" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_patients =</span> <span class="fu">c</span>(<span class="fu">sum</span>(<span class="fu">rowMeans</span>(pdc <span class="sc">&lt;</span> <span class="fl">0.50</span>) <span class="sc">==</span> <span class="dv">1</span>), <span class="fu">sum</span>(<span class="fu">rowMeans</span>(pdc <span class="sc">&gt;</span> <span class="fl">0.90</span>) <span class="sc">==</span> <span class="dv">1</span>)),</span>
+<span id="cb10-305"><a href="#cb10-305" aria-hidden="true" tabindex="-1"></a>  <span class="at">pct        =</span> <span class="fu">round</span>(<span class="dv">100</span> <span class="sc">*</span> <span class="fu">c</span>(<span class="fu">mean</span>(<span class="fu">rowMeans</span>(pdc <span class="sc">&lt;</span> <span class="fl">0.50</span>) <span class="sc">==</span> <span class="dv">1</span>),</span>
+<span id="cb10-306"><a href="#cb10-306" aria-hidden="true" tabindex="-1"></a>                             <span class="fu">mean</span>(<span class="fu">rowMeans</span>(pdc <span class="sc">&gt;</span> <span class="fl">0.90</span>) <span class="sc">==</span> <span class="dv">1</span>)), <span class="dv">1</span>)</span>
+<span id="cb10-307"><a href="#cb10-307" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb10-308"><a href="#cb10-308" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb10-309"><a href="#cb10-309" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-310"><a href="#cb10-310" aria-hidden="true" tabindex="-1"></a>When only a handful of patients sustain an extreme regime, the static forgiveness-curve estimate at that end rests on almost no data, and its confidence interval understates the true fragility. The longitudinal positivity diagnostic in @sec-positivity-overlap is the general version of this check. A feasible shift sidesteps the problem, which is the motivation for the LMTP approach below.</span>
+<span id="cb10-311"><a href="#cb10-311" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-312"><a href="#cb10-312" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-313"><a href="#cb10-313" aria-hidden="true" tabindex="-1"></a><span class="fu"># LMTP estimation: feasible adherence shifts</span></span>
+<span id="cb10-314"><a href="#cb10-314" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-315"><a href="#cb10-315" aria-hidden="true" tabindex="-1"></a>Rather than targeting extreme static interventions ("force everyone to perfect adherence"), which violate positivity for patients who cannot realistically achieve high adherence, we use LMTP to define feasible adherence shifts <span class="co">[</span><span class="ot">@diaz2021lmtp</span><span class="co">]</span>.</span>
+<span id="cb10-316"><a href="#cb10-316" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-317"><a href="#cb10-317" aria-hidden="true" tabindex="-1"></a>The shift function increases each patient's PDC by a fixed amount (e.g., 10 percentage points), capped at 1.0. This stays within the support of the observed data because no patient is assigned an adherence level that is impossible given their covariate history.</span>
+<span id="cb10-318"><a href="#cb10-318" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-321"><a href="#cb10-321" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb10-322"><a href="#cb10-322" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: lmtp-estimation</span></span>
+<span id="cb10-323"><a href="#cb10-323" aria-hidden="true" tabindex="-1"></a><span class="co">#| cache: true</span></span>
+<span id="cb10-324"><a href="#cb10-324" aria-hidden="true" tabindex="-1"></a><span class="co">#| message: false</span></span>
+<span id="cb10-325"><a href="#cb10-325" aria-hidden="true" tabindex="-1"></a><span class="co">#| warning: false</span></span>
+<span id="cb10-326"><a href="#cb10-326" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(lmtp)</span>
+<span id="cb10-327"><a href="#cb10-327" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-328"><a href="#cb10-328" aria-hidden="true" tabindex="-1"></a><span class="co"># Prepare variable names</span></span>
+<span id="cb10-329"><a href="#cb10-329" aria-hidden="true" tabindex="-1"></a>K <span class="ot">&lt;-</span> <span class="dv">4</span></span>
+<span id="cb10-330"><a href="#cb10-330" aria-hidden="true" tabindex="-1"></a>trt_vars     <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"PDC_"</span>, <span class="dv">1</span><span class="sc">:</span>K)</span>
+<span id="cb10-331"><a href="#cb10-331" aria-hidden="true" tabindex="-1"></a>outcome_vars <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"Y_"</span>, <span class="dv">1</span><span class="sc">:</span>K)</span>
+<span id="cb10-332"><a href="#cb10-332" aria-hidden="true" tabindex="-1"></a>baseline     <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"W0"</span>, <span class="st">"A0"</span>)</span>
+<span id="cb10-333"><a href="#cb10-333" aria-hidden="true" tabindex="-1"></a>time_vary    <span class="ot">&lt;-</span> <span class="fu">lapply</span>(<span class="dv">1</span><span class="sc">:</span>K, <span class="cf">function</span>(t) <span class="fu">paste0</span>(<span class="st">"L_"</span>, t))</span>
+<span id="cb10-334"><a href="#cb10-334" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-335"><a href="#cb10-335" aria-hidden="true" tabindex="-1"></a><span class="co"># Additive shift: increase PDC by 10 percentage points</span></span>
+<span id="cb10-336"><a href="#cb10-336" aria-hidden="true" tabindex="-1"></a>shift_up <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) {</span>
+<span id="cb10-337"><a href="#cb10-337" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pmin</span>(data[[trt]] <span class="sc">+</span> <span class="fl">0.10</span>, <span class="fl">1.0</span>)</span>
+<span id="cb10-338"><a href="#cb10-338" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb10-339"><a href="#cb10-339" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-340"><a href="#cb10-340" aria-hidden="true" tabindex="-1"></a><span class="co"># Natural course (no intervention)</span></span>
+<span id="cb10-341"><a href="#cb10-341" aria-hidden="true" tabindex="-1"></a>shift_natural <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) data[[trt]]</span>
+<span id="cb10-342"><a href="#cb10-342" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-343"><a href="#cb10-343" aria-hidden="true" tabindex="-1"></a><span class="co"># Estimate outcomes under each regime</span></span>
+<span id="cb10-344"><a href="#cb10-344" aria-hidden="true" tabindex="-1"></a>fit_shifted <span class="ot">&lt;-</span> <span class="fu">lmtp_tmle</span>(</span>
+<span id="cb10-345"><a href="#cb10-345" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat, <span class="at">trt =</span> trt_vars, <span class="at">outcome =</span> outcome_vars,</span>
+<span id="cb10-346"><a href="#cb10-346" aria-hidden="true" tabindex="-1"></a>  <span class="at">baseline =</span> baseline, <span class="at">time_vary =</span> time_vary,</span>
+<span id="cb10-347"><a href="#cb10-347" aria-hidden="true" tabindex="-1"></a>  <span class="at">shift =</span> shift_up, <span class="at">mtp =</span> <span class="cn">TRUE</span>, <span class="at">outcome_type =</span> <span class="st">"survival"</span>,</span>
+<span id="cb10-348"><a href="#cb10-348" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_outcome =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
+<span id="cb10-349"><a href="#cb10-349" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_trt =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
+<span id="cb10-350"><a href="#cb10-350" aria-hidden="true" tabindex="-1"></a>  <span class="at">folds =</span> <span class="dv">2</span></span>
+<span id="cb10-351"><a href="#cb10-351" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb10-352"><a href="#cb10-352" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-353"><a href="#cb10-353" aria-hidden="true" tabindex="-1"></a>fit_natural <span class="ot">&lt;-</span> <span class="fu">lmtp_tmle</span>(</span>
+<span id="cb10-354"><a href="#cb10-354" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat, <span class="at">trt =</span> trt_vars, <span class="at">outcome =</span> outcome_vars,</span>
+<span id="cb10-355"><a href="#cb10-355" aria-hidden="true" tabindex="-1"></a>  <span class="at">baseline =</span> baseline, <span class="at">time_vary =</span> time_vary,</span>
+<span id="cb10-356"><a href="#cb10-356" aria-hidden="true" tabindex="-1"></a>  <span class="at">shift =</span> shift_natural, <span class="at">mtp =</span> <span class="cn">TRUE</span>, <span class="at">outcome_type =</span> <span class="st">"survival"</span>,</span>
+<span id="cb10-357"><a href="#cb10-357" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_outcome =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
+<span id="cb10-358"><a href="#cb10-358" aria-hidden="true" tabindex="-1"></a>  <span class="at">learners_trt =</span> <span class="fu">c</span>(<span class="st">"SL.glm"</span>, <span class="st">"SL.mean"</span>),</span>
+<span id="cb10-359"><a href="#cb10-359" aria-hidden="true" tabindex="-1"></a>  <span class="at">folds =</span> <span class="dv">2</span></span>
+<span id="cb10-360"><a href="#cb10-360" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb10-361"><a href="#cb10-361" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-362"><a href="#cb10-362" aria-hidden="true" tabindex="-1"></a><span class="co"># Contrast: effect of shifting adherence up by 10pp</span></span>
+<span id="cb10-363"><a href="#cb10-363" aria-hidden="true" tabindex="-1"></a>contrast <span class="ot">&lt;-</span> <span class="fu">lmtp_contrast</span>(fit_shifted, <span class="at">ref =</span> fit_natural, <span class="at">type =</span> <span class="st">"additive"</span>)</span>
+<span id="cb10-364"><a href="#cb10-364" aria-hidden="true" tabindex="-1"></a>contrast</span>
+<span id="cb10-365"><a href="#cb10-365" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb10-366"><a href="#cb10-366" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-367"><a href="#cb10-367" aria-hidden="true" tabindex="-1"></a>The contrast estimates how much the failure rate would change if every patient's adherence increased by 10 percentage points at each visit. Because <span class="in">`lmtp`</span> uses <span class="in">`outcome_type = "survival"`</span>, it returns $P(\text{survive})$, so the risk is $1 - \theta$. A negative risk difference means the shift reduces failure.</span>
+<span id="cb10-368"><a href="#cb10-368" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-369"><a href="#cb10-369" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-370"><a href="#cb10-370" aria-hidden="true" tabindex="-1"></a><span class="fu"># Alternative shift approaches</span></span>
+<span id="cb10-371"><a href="#cb10-371" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-372"><a href="#cb10-372" aria-hidden="true" tabindex="-1"></a>The additive shift is one way to operationalize "what if adherence were better?" Other approaches answer subtly different questions.</span>
+<span id="cb10-373"><a href="#cb10-373" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-374"><a href="#cb10-374" aria-hidden="true" tabindex="-1"></a><span class="fu">## Quantile matching: what if Drug B adhered like Drug A?</span></span>
+<span id="cb10-375"><a href="#cb10-375" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-376"><a href="#cb10-376" aria-hidden="true" tabindex="-1"></a>This maps each Drug B patient's adherence to the corresponding quantile of Drug A's distribution. A patient at the 30th percentile of Drug B adherence gets mapped to the 30th percentile of Drug A adherence. This answers: what would happen to Drug B's outcomes if its patients had Drug A's adherence profile?</span>
+<span id="cb10-377"><a href="#cb10-377" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-380"><a href="#cb10-380" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb10-381"><a href="#cb10-381" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: quantile-shift</span></span>
+<span id="cb10-382"><a href="#cb10-382" aria-hidden="true" tabindex="-1"></a><span class="co">#| eval: false</span></span>
+<span id="cb10-383"><a href="#cb10-383" aria-hidden="true" tabindex="-1"></a><span class="co"># Build quantile-matching shift function</span></span>
+<span id="cb10-384"><a href="#cb10-384" aria-hidden="true" tabindex="-1"></a>ecdf_B <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb10-385"><a href="#cb10-385" aria-hidden="true" tabindex="-1"></a>sorted_A <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb10-386"><a href="#cb10-386" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (t <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>K) {</span>
+<span id="cb10-387"><a href="#cb10-387" aria-hidden="true" tabindex="-1"></a>  col <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">"PDC_"</span>, t)</span>
+<span id="cb10-388"><a href="#cb10-388" aria-hidden="true" tabindex="-1"></a>  ecdf_B[[t]] <span class="ot">&lt;-</span> <span class="fu">ecdf</span>(dat[[col]][dat<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">0</span>])</span>
+<span id="cb10-389"><a href="#cb10-389" aria-hidden="true" tabindex="-1"></a>  sorted_A[[t]] <span class="ot">&lt;-</span> <span class="fu">sort</span>(dat[[col]][dat<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">1</span>])</span>
+<span id="cb10-390"><a href="#cb10-390" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb10-391"><a href="#cb10-391" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-392"><a href="#cb10-392" aria-hidden="true" tabindex="-1"></a>shift_match_A <span class="ot">&lt;-</span> <span class="cf">function</span>(data, trt) {</span>
+<span id="cb10-393"><a href="#cb10-393" aria-hidden="true" tabindex="-1"></a>  t_idx <span class="ot">&lt;-</span> <span class="fu">as.integer</span>(<span class="fu">gsub</span>(<span class="st">"PDC_"</span>, <span class="st">""</span>, trt))</span>
+<span id="cb10-394"><a href="#cb10-394" aria-hidden="true" tabindex="-1"></a>  a_obs <span class="ot">&lt;-</span> data[[trt]]</span>
+<span id="cb10-395"><a href="#cb10-395" aria-hidden="true" tabindex="-1"></a>  a_shifted <span class="ot">&lt;-</span> a_obs</span>
+<span id="cb10-396"><a href="#cb10-396" aria-hidden="true" tabindex="-1"></a>  is_b <span class="ot">&lt;-</span> data<span class="sc">$</span>A0 <span class="sc">==</span> <span class="dv">0</span></span>
+<span id="cb10-397"><a href="#cb10-397" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">any</span>(is_b)) {</span>
+<span id="cb10-398"><a href="#cb10-398" aria-hidden="true" tabindex="-1"></a>    p_rank <span class="ot">&lt;-</span> ecdf_B[[t_idx]](a_obs[is_b])</span>
+<span id="cb10-399"><a href="#cb10-399" aria-hidden="true" tabindex="-1"></a>    p_rank <span class="ot">&lt;-</span> <span class="fu">pmax</span>(<span class="fl">0.01</span>, <span class="fu">pmin</span>(<span class="fl">0.99</span>, p_rank))</span>
+<span id="cb10-400"><a href="#cb10-400" aria-hidden="true" tabindex="-1"></a>    a_shifted[is_b] <span class="ot">&lt;-</span> sorted_A[[t_idx]][</span>
+<span id="cb10-401"><a href="#cb10-401" aria-hidden="true" tabindex="-1"></a>      <span class="fu">pmin</span>(<span class="fu">length</span>(sorted_A[[t_idx]]),</span>
+<span id="cb10-402"><a href="#cb10-402" aria-hidden="true" tabindex="-1"></a>           <span class="fu">ceiling</span>(p_rank <span class="sc">*</span> <span class="fu">length</span>(sorted_A[[t_idx]])))</span>
+<span id="cb10-403"><a href="#cb10-403" aria-hidden="true" tabindex="-1"></a>    ]</span>
+<span id="cb10-404"><a href="#cb10-404" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb10-405"><a href="#cb10-405" aria-hidden="true" tabindex="-1"></a>  a_shifted</span>
+<span id="cb10-406"><a href="#cb10-406" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb10-407"><a href="#cb10-407" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb10-408"><a href="#cb10-408" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-409"><a href="#cb10-409" aria-hidden="true" tabindex="-1"></a><span class="fu">## Mean-calibrated additive shift</span></span>
+<span id="cb10-410"><a href="#cb10-410" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-411"><a href="#cb10-411" aria-hidden="true" tabindex="-1"></a>Add a constant to every Drug B patient's adherence so that Drug B's mean matches Drug A's mean. This is the simplest cross-drug comparison: it shifts the location of the distribution but preserves the shape.</span>
+<span id="cb10-412"><a href="#cb10-412" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-413"><a href="#cb10-413" aria-hidden="true" tabindex="-1"></a><span class="fu">## Fixed additive shift (policy evaluation)</span></span>
+<span id="cb10-414"><a href="#cb10-414" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-415"><a href="#cb10-415" aria-hidden="true" tabindex="-1"></a>The +10pp shift applied to everyone, regardless of drug. This answers a purely policy question: what would a universal adherence support program achieve? It does not reference the other drug at all and has the strongest positivity properties because the shift is small and uniform.</span>
+<span id="cb10-416"><a href="#cb10-416" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-417"><a href="#cb10-417" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-418"><a href="#cb10-418" aria-hidden="true" tabindex="-1"></a><span class="fu"># The forgiveness curve</span></span>
+<span id="cb10-419"><a href="#cb10-419" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-420"><a href="#cb10-420" aria-hidden="true" tabindex="-1"></a>The forgiveness curve maps sustained adherence level to counterfactual failure risk for each drug:</span>
+<span id="cb10-421"><a href="#cb10-421" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-422"><a href="#cb10-422" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb10-423"><a href="#cb10-423" aria-hidden="true" tabindex="-1"></a>r_d(a) = P\big(Y = 1 \mid \text{do}(\bar{A} = a), D = d\big)</span>
+<span id="cb10-424"><a href="#cb10-424" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb10-425"><a href="#cb10-425" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-426"><a href="#cb10-426" aria-hidden="true" tabindex="-1"></a>A flat curve means the drug is forgiving (patients can miss doses without large increases in failure risk). A steep curve means small adherence drops produce large outcome differences.</span>
+<span id="cb10-427"><a href="#cb10-427" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-428"><a href="#cb10-428" aria-hidden="true" tabindex="-1"></a>Static-regime L-TMLE traces this curve by estimating the failure risk at a grid of fixed PDC thresholds. The LMTP shift approach provides a complementary view: it estimates the marginal benefit of a small adherence improvement, integrated over the observed adherence distribution. The two approaches are different summaries of the same counterfactual risk surface.</span>
+<span id="cb10-429"><a href="#cb10-429" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-430"><a href="#cb10-430" aria-hidden="true" tabindex="-1"></a>The curve is well-estimated only where there is adequate positivity. Below approximately PDC 0.70, few patients sustain such low adherence for four consecutive blocks, so the estimates become unstable. LMTP shift interventions avoid this problem because they stay close to the observed distribution.</span>
+<span id="cb10-431"><a href="#cb10-431" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-432"><a href="#cb10-432" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-433"><a href="#cb10-433" aria-hidden="true" tabindex="-1"></a><span class="fu"># Interpretation</span></span>
+<span id="cb10-434"><a href="#cb10-434" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-435"><a href="#cb10-435" aria-hidden="true" tabindex="-1"></a>**Feasible, not hypothetical.** The +10pp shift corresponds to something a real adherence support program might achieve. The estimate answers a concrete policy question.</span>
+<span id="cb10-436"><a href="#cb10-436" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-437"><a href="#cb10-437" aria-hidden="true" tabindex="-1"></a>**Causal, not descriptive.** The LMTP framework accounts for the treatment-confounder feedback between adherence and health. When adherence changes, health status changes too, and those changes are propagated through the sequential regression structure.</span>
+<span id="cb10-438"><a href="#cb10-438" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-439"><a href="#cb10-439" aria-hidden="true" tabindex="-1"></a>**Drug-specific effects.** Running the analysis separately by drug reveals whether the marginal return to improved adherence differs by regimen. If Drug A is more forgiving, the benefit of an adherence intervention is smaller for Drug A patients (they are already doing relatively well at moderate adherence) and larger for Drug B patients.</span>
+<span id="cb10-440"><a href="#cb10-440" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-441"><a href="#cb10-441" aria-hidden="true" tabindex="-1"></a>**Read the shift estimate alongside the static curve, not alone.** Under positivity strain the variance of the LMTP shift estimator can be underestimated and its interval can under-cover. The feasible-shift number is most trustworthy when it is reported next to the static-regime estimates and the support diagnostics above, rather than as a single standalone figure.</span>
+<span id="cb10-442"><a href="#cb10-442" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-443"><a href="#cb10-443" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-444"><a href="#cb10-444" aria-hidden="true" tabindex="-1"></a><span class="fu"># Connection to mediation</span></span>
+<span id="cb10-445"><a href="#cb10-445" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-446"><a href="#cb10-446" aria-hidden="true" tabindex="-1"></a>The quantile-matching analysis provides an informal decomposition of the total drug effect into an adherence-mediated component and a pharmacological (forgiveness) component. This is not formal mediation analysis; it is an approximation based on distribution shifts. For the formal TMLE-based mediation framework with proper identification conditions, see @sec-mediation.</span>
+<span id="cb10-447"><a href="#cb10-447" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-448"><a href="#cb10-448" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-449"><a href="#cb10-449" aria-hidden="true" tabindex="-1"></a><span class="fu">## Sources and further reading</span></span>
+<span id="cb10-450"><a href="#cb10-450" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-451"><a href="#cb10-451" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Diaz I, Williams N, Hoffman KL, Schenck EJ (2023). Nonparametric causal effects based on longitudinal modified treatment policies. *Journal of the American Statistical Association* 118(542):846-856.</span>
+<span id="cb10-452"><a href="#cb10-452" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Bangsberg DR (2006). Less than 95% adherence to nonnucleoside reverse-transcriptase inhibitor therapy can lead to viral suppression. *Clinical Infectious Diseases* 43(7):939-941.</span>
+<span id="cb10-453"><a href="#cb10-453" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Petersen ML, Schwab J, Gruber S, et al. (2014). Targeted maximum likelihood estimation for dynamic and static longitudinal marginal structural working models. *J Causal Inference* 2(2):147-185.</span>
+<span id="cb10-454"><a href="#cb10-454" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="in">`lmtp`</span> R package: <span class="co">[</span><span class="ot">CRAN</span><span class="co">](https://cran.r-project.org/package=lmtp)</span></span>
 </code><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></pre></div>
 </div></div></div></div></div>
 </div> <!-- /content -->
