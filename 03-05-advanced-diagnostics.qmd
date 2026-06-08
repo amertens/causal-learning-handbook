@@ -30,9 +30,15 @@ The chapter closes with a practical workflow for what to check first, followed b
 ::: {.callout-note}
 ## Learning objectives
 - Distinguish among assumption diagnostics, model diagnostics, estimator diagnostics, and design diagnostics
+- Distinguish statistical uncertainty (sampling variability) from causal uncertainty (assumption violations)
 - Diagnose positivity violations through propensity score analysis, clever covariate inspection, and effective sample size calculations
 - Evaluate nuisance model performance using Super Learner diagnostics, calibration, and covariate balance
 - Interpret efficient influence function diagnostics for TMLE and AIPW
+- Compute and interpret E-values for unmeasured confounding
+- Perform quantitative bias analysis for a single unmeasured confounder, including sensitivity contour plots
+- Conduct truncation sensitivity analysis for propensity score bounds
+- Understand the role of negative controls in assessing residual bias and implement a negative control analysis in R
+- Use learner library sensitivity to assess model dependence
 - Apply sensitivity analysis frameworks including E-values, quantitative bias analysis, and truncation sensitivity
 - Implement estimand adaptation strategies when identifying assumptions fail
 :::
@@ -143,7 +149,210 @@ E-values have several important limitations that the analyst should communicate 
 
 **Quantitative bias analysis.** A more flexible framework for assessing sensitivity to unmeasured confounding is quantitative bias analysis (QBA), which directly models the potential bias as a function of parameters that describe the unmeasured confounder. The analyst specifies a set of bias parameters, typically the prevalence of the unmeasured confounder $U$ in the exposed and unexposed groups, and the association between $U$ and the outcome, and then computes the bias-adjusted estimate under each combination of parameter values. Probabilistic QBA extends this framework by placing prior distributions over the bias parameters, reflecting the analyst's uncertainty about the unmeasured confounding structure. The R packages **episensr** and **causalsens** provide tools for implementing QBA in practice.
 
-For complete worked examples of E-value computation, probabilistic quantitative bias analysis with `episensr`, truncation sensitivity, negative control outcomes, and learner library sensitivity, see [the Sensitivity Analysis chapter](03-12-sensitivity-analysis.qmd). That chapter provides the detailed implementations; here we focus on the conceptual role of these tools within the broader diagnostic framework.
+The following subsections provide complete worked implementations of these tools, using a simulated pharmacoepidemiologic example.
+
+**Two kinds of uncertainty — a framing note.** Every causal estimate from observational data carries two distinct types of uncertainty:
+
+| Type | Source | Addressed by |
+|------|--------|-------------|
+| **Statistical** | Finite sample size | Confidence intervals, standard errors |
+| **Causal** | Untestable assumptions | Sensitivity analysis |
+
+A confidence interval that excludes zero tells you the estimate is unlikely to be due to chance, *given that the identification assumptions hold*. Sensitivity analysis asks: how badly would those assumptions need to be violated to change the conclusion? As a reporting principle, every observational causal analysis should include at least one formal sensitivity analysis.
+
+**Simulated pharmacoepi example.** The following code generates a running example used throughout this section. An unmeasured confounder (`frailty`) affects both treatment and outcome, and we pretend it is unavailable.
+
+```{r}
+#| code-fold: true
+library(tidyverse)
+
+set.seed(2026)
+n_sa <- 3000
+
+# Measured confounders
+age_sa    <- rnorm(n_sa, 65, 10)
+cvd_sa    <- rbinom(n_sa, 1, plogis(-1.5 + 0.03 * (age_sa - 60)))
+statin_sa <- rbinom(n_sa, 1, 0.4)
+
+# Unmeasured confounder (frailty) - simulated but "unobserved"
+frailty_sa <- rnorm(n_sa, 0, 1)
+
+# Treatment model (affected by both measured and unmeasured confounders)
+A_sa <- rbinom(n_sa, 1, plogis(-0.5 + 0.02 * (age_sa - 60) + 0.5 * cvd_sa +
+                                 0.3 * statin_sa + 0.4 * frailty_sa))
+
+# Outcome model (also affected by unmeasured confounder)
+Y_sa <- rbinom(n_sa, 1, plogis(-2.5 + 0.3 * A_sa + 0.04 * (age_sa - 60) +
+                                 0.6 * cvd_sa + 0.2 * statin_sa +
+                                 0.5 * frailty_sa))
+
+dat_sa <- tibble(age = age_sa, cvd = cvd_sa, statin = statin_sa,
+                 frailty = frailty_sa, A = A_sa, Y = Y_sa)
+
+# Analysis ignoring frailty (what the analyst would actually do)
+ps_sa  <- glm(A ~ age + cvd + statin, family = binomial, data = dat_sa)
+out_sa <- glm(Y ~ A + age + cvd + statin, family = binomial, data = dat_sa)
+
+dat1_sa <- dat_sa %>% mutate(A = 1)
+dat0_sa <- dat_sa %>% mutate(A = 0)
+p1_sa <- predict(out_sa, newdata = dat1_sa, type = "response")
+p0_sa <- predict(out_sa, newdata = dat0_sa, type = "response")
+naive_ate_sa <- mean(p1_sa - p0_sa)
+
+cat("Estimated ATE (ignoring frailty):", round(naive_ate_sa, 4), "\n")
+```
+
+**E-value computation.** The `e_value()` function below converts a risk ratio to the corresponding E-value and can be applied to both the point estimate and the confidence limit closest to the null.
+
+```{r}
+# Convert risk difference to approximate risk ratio for E-value
+rr_sa <- mean(p1_sa) / mean(p0_sa)
+
+# E-value function
+e_value <- function(rr) {
+  rr <- max(rr, 1 / rr)  # ensure RR >= 1
+  rr + sqrt(rr * (rr - 1))
+}
+
+cat("Approximate risk ratio:", round(rr_sa, 2), "\n")
+cat("E-value:", round(e_value(rr_sa), 2), "\n")
+```
+
+:::{.callout-tip}
+## E-Value Interpretation Guide
+
+| E-value | Interpretation |
+|---------|---------------|
+| < 1.5 | Very weak: almost any unmeasured confounder could explain it |
+| 1.5 to 2.0 | Moderate: a moderately strong confounder could explain it |
+| 2.0 to 3.0 | Reasonably robust |
+| > 3.0 | Strong: would require a very powerful unmeasured confounder |
+
+Context matters. If the E-value is 2.5 but you know that unmeasured lifestyle factors (smoking, exercise) are likely to have risk ratios of 3 or more with both treatment and outcome, the finding is still vulnerable.
+:::
+
+:::{.callout-warning}
+## E-Value Limitations
+
+E-values are a useful screening tool, but they have important limitations:
+
+- They assume a single unmeasured confounder. Multiple weak confounders can jointly produce large bias.
+- They operate on the risk ratio scale, which may not match your estimand (risk difference).
+- A large E-value does not prove that unmeasured confounding is absent. It only quantifies the strength required.
+- E-values cannot replace subject-matter reasoning about what confounders might be missing.
+:::
+
+**Quantitative bias analysis — worked example.** Suppose we believe frailty (binary) is the unmeasured confounder. Based on clinical literature, we hypothesize that frail patients are 15 percentage points more likely to receive treatment ($p_1 - p_0 = 0.15$) and that frailty increases risk of the outcome by 8 percentage points ($\gamma = 0.08$).
+
+```{r}
+# Simple bias formula: Bias ≈ gamma * (p1 - p0)
+gamma_sa  <- 0.08   # effect of frailty on outcome (risk difference scale)
+delta_p_sa <- 0.15  # difference in frailty prevalence between treated/untreated
+
+bias_sa          <- gamma_sa * delta_p_sa
+corrected_ate_sa <- naive_ate_sa - bias_sa
+
+tibble(
+  Quantity = c("Observed ATE", "Estimated bias", "Bias-corrected ATE"),
+  Value = round(c(naive_ate_sa, bias_sa, corrected_ate_sa), 4)
+)
+```
+
+Since the exact confounder parameters are unknown, vary them over a plausible range to obtain a full sensitivity surface:
+
+```{r}
+#| label: fig-bias-contour
+#| fig-cap: "Bias-corrected ATE across a grid of unmeasured-confounder assumptions. The red contour marks the combinations of confounder-outcome effect and confounder-prevalence difference that would pull the corrected ATE to zero. A finding is robust when the plausible region sits well away from that line."
+#| code-fold: true
+# Grid of bias parameters
+bias_grid_sa <- expand_grid(
+  gamma   = seq(0.02, 0.15, by = 0.01),
+  delta_p = seq(0.05, 0.30, by = 0.05)
+) %>%
+  mutate(
+    bias      = gamma * delta_p,
+    corrected = naive_ate_sa - bias,
+    would_flip = corrected < 0
+  )
+
+ggplot(bias_grid_sa, aes(x = delta_p, y = gamma, fill = corrected)) +
+  geom_tile() +
+  geom_contour(aes(z = corrected), breaks = 0, color = "red", linewidth = 1) +
+  scale_fill_gradient2(low = "steelblue", mid = "white", high = "tomato",
+                       midpoint = 0, name = "Corrected\nATE") +
+  labs(
+    x = "Difference in confounder prevalence (treated vs. untreated)",
+    y = "Effect of confounder on outcome (risk difference)",
+    title = "Bias-corrected ATE under different confounder assumptions",
+    subtitle = "Red line: where corrected ATE = 0 (finding explained away)"
+  ) +
+  theme_minimal()
+```
+
+The red contour line shows combinations of confounder strength that would reduce the corrected ATE to zero. If most plausible combinations fall below and to the left of this line, the finding is reasonably robust.
+
+**Truncation sensitivity — worked code.** The code below varies the propensity score truncation threshold and computes the IPTW ATE at each level, producing both a numeric table and a plot.
+
+```{r}
+#| label: fig-truncation-sens
+#| fig-cap: "IPTW ATE estimate as a function of the propensity-score truncation threshold. A flat line indicates the estimate does not hinge on extreme weights; a steep slope signals fragility driven by near-violations of positivity."
+#| code-fold: true
+ps_sa_hat <- predict(ps_sa, type = "response")
+truncation_levels_sa <- c(0.01, 0.025, 0.05, 0.10, 0.15)
+
+iptw_results_sa <- map_dfr(truncation_levels_sa, function(delta) {
+  ps_trunc <- pmin(pmax(ps_sa_hat, delta), 1 - delta)
+  w <- ifelse(dat_sa$A == 1, 1 / ps_trunc, 1 / (1 - ps_trunc))
+  risk1_t <- sum(w * dat_sa$Y * (dat_sa$A == 1)) / sum(w * (dat_sa$A == 1))
+  risk0_t <- sum(w * dat_sa$Y * (dat_sa$A == 0)) / sum(w * (dat_sa$A == 0))
+  tibble(truncation = delta, ate = risk1_t - risk0_t,
+         max_weight = max(w), ess = sum(w)^2 / sum(w^2))
+})
+
+print(iptw_results_sa)
+
+ggplot(iptw_results_sa, aes(x = truncation, y = ate)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray60") +
+  labs(
+    x = "Propensity score truncation threshold",
+    y = "IPTW ATE estimate",
+    title = "Truncation sensitivity: how does the estimate change?",
+    subtitle = "Stable estimates across thresholds suggest adequate positivity"
+  ) +
+  theme_minimal()
+```
+
+**Negative controls — worked code.** The following code estimates the "effect" of treatment on a negative control outcome (one that treatment cannot causally affect). A statistically meaningful non-null estimate is evidence of residual bias.
+
+```{r}
+# Simulate a negative control outcome (unrelated to treatment A)
+dat_sa <- dat_sa %>%
+  mutate(
+    neg_control = rbinom(n_sa, 1, plogis(-3 + 0.03 * (age - 60) +
+                                           0.3 * cvd + 0.4 * frailty))
+    # Note: no A term — treatment truly has no effect on this outcome
+  )
+
+# Estimate "effect" on negative control using same analysis
+nc_mod_sa <- glm(neg_control ~ A + age + cvd + statin,
+                 family = binomial, data = dat_sa)
+nc_p1_sa  <- predict(nc_mod_sa, newdata = dat1_sa, type = "response")
+nc_p0_sa  <- predict(nc_mod_sa, newdata = dat0_sa, type = "response")
+nc_effect_sa <- mean(nc_p1_sa - nc_p0_sa)
+
+cat("Estimated effect on negative control:", round(nc_effect_sa, 4), "\n")
+cat("(Should be ~0 if confounding is controlled)\n")
+```
+
+A substantially non-null result on the negative control outcome is empirical evidence that unmeasured confounding (here, frailty) is biasing the results.
+
+**Missing data and measurement error.** Two further threats sit alongside unmeasured confounding, and an analysis that ignores them can be precise and still wrong. Both deserve a sentence in the limitations of any real-world-evidence study, and both can be probed with tools already in this section.
+
+Measurement error means a variable is recorded imperfectly: an exposure inferred from pharmacy fills rather than actual ingestion, an outcome captured only when it triggers a claim, or a confounder such as smoking abstracted from incomplete notes. Mismeasuring the outcome or the exposure threatens the consistency assumption, and mismeasuring a confounder leaves residual confounding even when that confounder is nominally adjusted for, because adjustment can only remove the part of the confounding the recorded version captures. When the error is unrelated to the other variables (nondifferential) it often, though not always, biases the effect toward the null; when it is related to them (differential, for example an outcome ascertained more completely in treated patients) it can bias in either direction. The quantitative bias analysis introduced above extends directly to misclassification: posit a sensitivity and specificity for the mismeasured variable, ideally from a validation substudy, and propagate the implied bias.
+
+Missing data is the second threat. A complete-case analysis that drops patients with a missing covariate or outcome is unbiased only when data are missing completely at random, which is rarely credible. When missingness depends on measured variables, multiple imputation or inverse-probability-of-missingness weighting recovers an unbiased estimate under that weaker assumption, and the weighting approach uses the same machinery as the censoring weights for informative dropout (@sec-tte-competing). When missingness depends on unmeasured variables, no method repairs it from the data alone, and the honest response is a sensitivity analysis across plausible missingness mechanisms. A full treatment of imputation and missingness weighting is beyond this handbook, but every applied analysis should state how missing data were handled and what assumption that handling relies on.
 
 #### 2.1.4 Structural Versus Random Confounding
 
@@ -501,6 +710,46 @@ cat("\nRange of ATE estimates:",
 ```
 
 The library sensitivity analysis serves a fundamentally different purpose from the cross-validated risk comparison. The cross-validated risk comparison identifies which learners fit the data best. The library sensitivity analysis identifies whether the causal estimate is sensitive to the choice of learners. It is possible for the cross-validated risk to be similar across libraries (because all libraries fit the data reasonably well) while the causal estimates diverge (because the libraries differ in their extrapolation behavior in regions of the covariate space that are important for the causal contrast). It is also possible for the cross-validated risks to differ substantially while the causal estimates agree (because the differences in model fit occur in regions that are irrelevant to the causal parameter).
+
+The following more concrete example uses three TMLE runs, each with a different library specification, on the simulated pharmacoepi dataset from Section 2.1.3, and compares the resulting estimates side by side:
+
+```{r}
+#| warning: false
+#| message: false
+library(SuperLearner)
+library(tmle)
+
+# Library 1: Minimal (parametric only)
+lib_minimal    <- c("SL.glm", "SL.mean")
+# Library 2: Standard
+lib_standard   <- c("SL.glm", "SL.glmnet", "SL.earth", "SL.ranger", "SL.mean")
+# Library 3: Aggressive (many flexible learners)
+lib_aggressive <- c("SL.glm", "SL.glmnet", "SL.earth", "SL.ranger",
+                    "SL.glm.interaction", "SL.mean")
+
+lib_results_sa <- list()
+for (lib_name in c("Minimal", "Standard", "Aggressive")) {
+  lib <- switch(lib_name,
+                Minimal    = lib_minimal,
+                Standard   = lib_standard,
+                Aggressive = lib_aggressive)
+  fit_sa <- tmle(Y = dat_sa$Y, A = dat_sa$A,
+                 W = dat_sa %>% select(age, cvd, statin),
+                 family = "binomial",
+                 Q.SL.library = lib, g.SL.library = lib)
+  lib_results_sa[[lib_name]] <- tibble(
+    Library    = lib_name,
+    ATE        = fit_sa$estimates$ATE$psi,
+    SE         = sqrt(fit_sa$estimates$ATE$var.psi),
+    CI_lower   = fit_sa$estimates$ATE$CI[1],
+    CI_upper   = fit_sa$estimates$ATE$CI[2]
+  )
+}
+
+bind_rows(lib_results_sa)
+```
+
+If the three estimates are similar, the result is not sensitive to the library choice. If they diverge substantially, the nuisance function estimation is unstable and warrants further investigation.
 
 #### 3.1.4 Overfitting Detection
 
@@ -2342,6 +2591,36 @@ Because patients with very low baseline CD4 are nearly always treated, untreated
 
 ---
 
+## Sensitivity Analysis Applied: Antiretroviral Therapy Cohort {#sec-sensitivity-haart}
+
+```{r}
+#| eval: false
+#| code-fold: true
+source("_data/load-haart-cohort.R")
+```
+
+See the [Running Case Study](00-case-study.qmd) for the full data description.
+
+Sensitivity analysis is especially important for the HAART cohort. The measured confounders (`age`, `sex`, and `cd4.sqrt`) capture key drivers of treatment decisions and mortality, but several plausible confounders are not available in the data. Medication adherence, WHO clinical staging, and socioeconomic factors all plausibly influence both the decision to initiate HAART (`haartind`) and the risk of death (`event`). If any of these unmeasured variables are strong enough, they could bias the estimated treatment effect.
+
+The E-value framework lets us quantify how strong such confounding would need to be. Suppose a prior analysis (using g-computation, IPTW, or TMLE) estimates a protective risk ratio of approximately 0.70 for HAART on mortality.
+
+```{r}
+# Suppose the estimated risk ratio for HAART on mortality is:
+# RR = 0.70 (protective). The E-value quantifies robustness.
+rr_haart <- 1 / 0.70
+e_val_haart <- rr_haart + sqrt(rr_haart * (rr_haart - 1))
+cat("E-value for HAART mortality estimate:", round(e_val_haart, 2), "\n")
+
+# Interpretation: an unmeasured confounder (e.g., adherence) would need
+# to be associated with both HAART initiation and mortality by a risk
+# ratio of at least this magnitude to fully explain away the result.
+```
+
+Adherence is the most plausible unmeasured confounder in this setting. Patients who adhere to HAART tend to be healthier and more engaged with care, which could inflate the apparent treatment benefit. The quantitative bias analysis approach from @sec-advanced-diagnostics can be applied here: specify plausible values for adherence prevalence among treated and untreated patients, and for the effect of adherence on mortality, then compute a bias-corrected estimate. If the corrected estimate remains protective, the finding is more credible. The truncation sensitivity analysis is also relevant, since patients with very low or very high propensity for HAART initiation (driven by extreme CD4 values or `dropout` patterns) can produce unstable weights. In the full longitudinal analysis using `haartdat`, these diagnostics become more involved: propensity scores for `haartind` must be estimated at each 100-day interval, and the cumulative product of inverse-probability weights across time points can amplify instability further.
+
+---
+
 ## Reporting and governance toolkit
 
 Beyond model diagnostics, credible RWE analyses require structured reporting that enables external review. The following frameworks provide standardized templates; we recommend selecting the one(s) most relevant to your study type and regulatory context.
@@ -2381,6 +2660,27 @@ An assumption diagnostic evaluates whether the identification assumptions, excha
 A model diagnostic evaluates the quality of the fitted nuisance functions ($\bar{Q}$ and $g$) that the estimator uses to compute the statistical estimand. These diagnostics are purely statistical: a failure means the estimator may be biased, imprecise, or produce invalid confidence intervals, even if all identification assumptions hold perfectly. Examples include cross-validated risk, calibration plots, covariate balance after weighting, and Super Learner coefficient inspection.
 
 The distinction matters because the remedies differ. Assumption failures often require changing the estimand (restricting the population, switching to a modified treatment policy). Model failures require improving the nuisance estimation (expanding the learner library, adjusting regularization, adding relevant covariates).
+
+</details>
+
+<details>
+<summary><strong>Q4. Your TMLE estimate has an E-value of 1.3. A reviewer asks whether this is robust to unmeasured confounding. What do you say?</strong></summary>
+
+An E-value of 1.3 means that an unmeasured confounder associated with both treatment and outcome by a risk ratio of only 1.3 could fully explain the finding. This is a weak level of robustness: many common confounders (smoking, socioeconomic status, comorbidity burden) have risk ratios substantially larger than 1.3 with both treatment and outcome. You should honestly report that the finding is vulnerable to even moderate unmeasured confounding, and consider whether any plausible unmeasured confounder could have associations this strong.
+
+</details>
+
+<details>
+<summary><strong>Q5. You run a negative control analysis and find that your method estimates a risk difference of 0.04 (95% CI: 0.01, 0.07) for a negative control outcome. What does this tell you?</strong></summary>
+
+A statistically significant "effect" on a negative control outcome is evidence of residual bias. Since the treatment should not affect this outcome, the non-null estimate suggests that unmeasured confounding (or some other bias) is present in your analysis. The magnitude (0.04) gives a rough sense of how large the bias might be for your primary outcome as well, though the bias may differ depending on the relationship between the unmeasured confounder and each outcome. This finding should temper your confidence in the primary result and be prominently reported.
+
+</details>
+
+<details>
+<summary><strong>Q6. Your truncation sensitivity analysis shows that the IPTW estimate is 0.08 at a threshold of 0.01 but jumps to 0.15 at a threshold of 0.10. What does this suggest?</strong></summary>
+
+This pattern suggests that the estimate at the less aggressive threshold (0.01) is being pulled toward zero by a few observations with extreme weights. When those extreme weights are truncated (threshold 0.10), the estimate increases. This indicates positivity problems: some individuals have propensity scores near 0 or 1, meaning the data provide limited support for the causal contrast in certain covariate strata. The sensitivity of the estimate to truncation is itself informative. You should examine which patients have extreme scores, consider whether the target population should be restricted to the overlap region, and report both estimates with an explanation of the trade-off between bias (from truncation) and variance (from extreme weights).
 
 </details>
 
