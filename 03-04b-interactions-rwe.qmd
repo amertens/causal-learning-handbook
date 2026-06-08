@@ -493,6 +493,51 @@ heterogeneity. Before any modeling decision, the analyst should write down:
   or clinically motivated.
 - **Causal assumptions** the analysis will rely on.
 
+::: {.callout-important}
+## Design challenges in two-drug and comorbidity-by-treatment analyses
+
+When both exposures are drugs or treatments that patients can initiate
+at different times, standard single-new-user design rules require
+extension. Decide the following before building the analysis.
+
+- **Common time zero: the joint new-user design.** Both $A$ and $E$ must
+  be treatment-naive at a shared eligibility date. A patient who starts
+  $A$ one month before $E$ is naive to neither at the later date. The
+  analyst must choose between requiring near-simultaneous initiation or
+  anchoring time zero to one drug and treating the other as a baseline
+  or time-varying covariate. That choice determines which counterfactual
+  the estimand corresponds to and therefore which of the estimands in
+  Section 2 is actually targeted.
+- **Immortal time bias from co-initiation requirements.** If eligibility
+  requires that both drugs be initiated within a short window, any
+  outcome-free interval before the second drug is dispensed is immortal:
+  the patient could not have experienced the outcome before the second
+  drug started without being excluded. Assigning that interval to the
+  "jointly exposed" group inflates apparent safety in the doubly exposed
+  cell. Anchor time zero consistently for both exposures to avoid this
+  [@hernan2016target; @hernan2025whatif].
+- **Estimand coherence and the definition of "jointly exposed."**
+  Simultaneous-initiation and overlap-window definitions both index a
+  joint intervention on $(A, E)$ and map to the four-counterfactual
+  interaction estimand of Section 2. A design that fixes $E$ at baseline
+  and varies only $A$ corresponds to effect modification, not causal
+  interaction. Using an overlap-window definition while calling the
+  result a "causal interaction" conflates these two scientific questions,
+  because the counterfactual being estimated changes with how exposure is
+  operationalized.
+- **Cross-indication and polypharmacy confounding.** Co-initiators may
+  differ systematically from single-drug users in ways not captured by
+  the standard confounder set: polypharmacy indication, frailty index,
+  comorbidity burden, or prescriber preference. Extend the confounder
+  list to include such indicators and run the joint positivity check
+  within each $(A, E)$ cell separately.
+- **Anchor the design in a target trial protocol.** Before any modeling
+  begins, document the joint eligibility criteria, the common time zero,
+  how "jointly exposed" is operationalized, which estimand that
+  operationalization corresponds to, and the confounders specific to the
+  co-exposure pattern---using the checklist above [@hernan2016target].
+:::
+
 If any of these are decided after looking at the outcome, you risk
 manufacturing apparent heterogeneity through differential immortal time,
 selection bias, or post-hoc subgroup tuning.
@@ -1278,6 +1323,104 @@ object inside `tmle3` for the additive interaction contrast; or
 the four targeted regime means, and compute $\widehat\psi_{\text{add}}$
 and the bootstrapped CI from those.
 
+The block below implements path (ii): estimate $g(A, E \mid W)$ with
+`sl3`, construct the per-regime clever covariates to show the targeting
+direction, run `ltmle` with `Anodes = c("A", "E")` for each of the four
+joint regimes, and combine the regime-specific influence curves for a
+Wald CI on $\widehat\psi_{\text{add}}$.
+
+```{r}
+#| label: layer2-tmle-full
+#| eval: false
+
+# -----------------------------------------------------------------------
+# Layer 2: TMLE targeting and influence-function CI for psi_add.
+# Requires: dat, Q_fit, predict_under(), Q_11, Q_10, Q_01, Q_00, psi_add
+# from the Layer 1 block above.
+# -----------------------------------------------------------------------
+
+library(sl3)
+library(ltmle)
+
+# --- Step 1. Estimate the joint treatment mechanism g(A, E | W) --------
+# Factor as P(A | E, W) * P(E | W); fitting two binary models avoids
+# estimating a four-cell joint density, which is unstable when any joint
+# cell is sparse.
+g_lib <- Lrnr_sl$new(
+  learners = list(Lrnr_glm_fast$new(), Lrnr_ranger$new())
+)
+
+# P(E = 1 | W)
+g_E_task <- make_sl3_Task(
+  data = dat, outcome = "E", covariates = c("W1", "W2", "W3")
+)
+g_E_pred <- g_lib$train(g_E_task)$predict(g_E_task)
+
+# P(A = 1 | E, W) — include E because A can depend on E at baseline
+g_A_task <- make_sl3_Task(
+  data = dat, outcome = "A", covariates = c("E", "W1", "W2", "W3")
+)
+g_A_pred <- g_lib$train(g_A_task)$predict(g_A_task)
+
+# --- Step 2. Per-regime clever covariates --------------------------------
+# H_ae(O_i) = I(A_i = a, E_i = e) / [P(A = a | E_i, W_i) * P(E = e | W_i)].
+# This reweights observations in cell (a, e) by the inverse probability of
+# being in that cell; it is the direction in which the TMLE update corrects
+# the initial plug-in estimate for E[Y^{a,e}]. It is non-zero only for
+# observations whose observed (A, E) matches the target cell.
+make_H <- function(a, e) {
+  g_a <- if (a == 1) g_A_pred else 1 - g_A_pred   # P(A = a | E, W)
+  g_e <- if (e == 1) g_E_pred else 1 - g_E_pred   # P(E = e | W)
+  ifelse(dat$A == a & dat$E == e, 1 / (g_a * g_e), 0)
+}
+H_11 <- make_H(1, 1);  H_10 <- make_H(1, 0)
+H_01 <- make_H(0, 1);  H_00 <- make_H(0, 0)
+# Note: the clever covariate for psi_add as a single parameter is
+# H_11 - H_10 - H_01 + H_00. The per-regime approach below is equivalent
+# and also yields correct individual regime-mean CIs.
+
+# --- Step 3. ltmle with two Anodes: four targeted counterfactual means ---
+# Column order must be: W nodes, A nodes, Y node.
+# Anodes = c("A", "E") tells ltmle to treat both as jointly intervened-on
+# nodes at a single time point, targeting E[Y^{a_val, e_val}].
+ltmle_dat <- dat[, c("W1", "W2", "W3", "A", "E", "Y")]
+
+run_regime <- function(a_val, e_val) {
+  ltmle(
+    data       = ltmle_dat,
+    Anodes     = c("A", "E"),
+    Ynodes     = "Y",
+    abar       = c(a_val, e_val),   # set A = a_val, E = e_val for everyone
+    SL.library = c("SL.mean", "SL.glm", "SL.ranger"),
+    estimate.time = FALSE
+  )
+}
+
+fit_11 <- run_regime(1, 1);  fit_10 <- run_regime(1, 0)
+fit_01 <- run_regime(0, 1);  fit_00 <- run_regime(0, 0)
+
+# --- Step 4. TMLE point estimates for the four counterfactual means ------
+# $estimates is a named vector with elements "tmle", "iptw", and "gcomp".
+# Comparing them is a useful internal coherence check.
+p11 <- fit_11$estimates["tmle"];  p10 <- fit_10$estimates["tmle"]
+p01 <- fit_01$estimates["tmle"];  p00 <- fit_00$estimates["tmle"]
+
+psi_add_tmle <- p11 - p10 - p01 + p00
+
+# --- Step 5. Influence-function CI for the additive interaction contrast -
+# psi_add is a linear contrast of four means, so its efficient influence
+# curve is the same linear combination of the four individual ICs.
+# fit$IC$tmle is an n-vector of per-observation influence curve contributions
+# for the TMLE estimator of that regime mean.
+IC_add <- fit_11$IC$tmle - fit_10$IC$tmle - fit_01$IC$tmle + fit_00$IC$tmle
+se_add <- sqrt(var(IC_add) / nrow(dat))
+ci_add <- psi_add_tmle + c(-1.96, 1.96) * se_add
+
+cat(sprintf("Plug-in g-comp  psi_add : %.4f\n", psi_add))
+cat(sprintf("TMLE (Layer 2)  psi_add : %.4f   95%% CI [%.4f, %.4f]\n",
+            psi_add_tmle, ci_add[1], ci_add[2]))
+```
+
 ### Diagnose overlap within joint exposure cells
 
 Before estimating any causal contrast, fit the propensity score and
@@ -1719,6 +1862,96 @@ single baseline analysis is no longer enough. The longitudinal version
 of TMLE walks through the data one time step at a time, adjusting at
 each step for what has already changed.
 
+### Survival-outcome interaction at a single follow-up horizon
+
+The two-Anode pattern from Section 6 extends directly to time-to-event
+outcomes. When the target is a cumulative incidence
+$F^{a,e}(t^*) = P(T^{a,e} \le t^*)$ at a prespecified horizon $t^*$,
+both exposures remain fixed at baseline and `ltmle` handles
+informative censoring through a `Cnode`. The four counterfactual
+cumulative incidences populate the same 2×2 table as the binary-outcome
+example; $\psi_{\text{add}}$ and RERI are computed from them directly.
+
+::: {.callout-note}
+## Sketch: two baseline exposures, time-to-event outcome
+
+This code sketch assumes the analyst has already constructed a
+wide-format dataset `surv_dat` following `ltmle`'s column-ordering
+conventions. Replace the node vectors with the actual column names from
+your dataset.
+:::
+
+```{r}
+#| label: ltmle-survival-interaction
+#| eval: false
+
+# -----------------------------------------------------------------------
+# Sketch: survival-outcome interaction with two binary exposures at baseline,
+# single follow-up horizon t* (here t* = time of last observed Y node).
+#
+# Required data layout (wide format, one row per subject):
+#   W1, W2, W3  baseline confounders
+#   A, E        binary exposures set at baseline (treated as joint Anodes)
+#   C           censoring indicator at t* (1 = uncensored, 0 = censored
+#               before t*); add C1...Ck for multiple time points
+#   Y           event indicator at t* (1 = event occurred by t*, 0 = not)
+#               for multiple time points, use Y1...Yk with the Y absorbing
+#               the previous values (once 1, stays 1)
+#
+# Column order in surv_dat must follow: W nodes, A nodes, then (C, Y) pairs.
+# For a single horizon: surv_dat <- dat[, c("W1","W2","W3","A","E","C","Y")]
+# -----------------------------------------------------------------------
+
+library(ltmle)
+
+run_surv_regime <- function(a_val, e_val) {
+  ltmle(
+    data       = surv_dat,
+    Anodes     = c("A", "E"),
+    Cnodes     = "C",           # use c("C1","C2","C3") for multiple time points
+    Ynodes     = "Y",           # use c("Y1","Y2","Y3") for multiple time points
+    abar       = c(a_val, e_val),
+    SL.library = c("SL.mean", "SL.glm", "SL.ranger"),
+    estimate.time = FALSE
+  )
+}
+
+# Four targeted cumulative incidences F^{a,e}(t*)
+fit_11 <- run_surv_regime(1, 1);  fit_10 <- run_surv_regime(1, 0)
+fit_01 <- run_surv_regime(0, 1);  fit_00 <- run_surv_regime(0, 0)
+
+# ltmle returns F^{a,e}(t*) = P(T^{a,e} <= t*) in $estimates["tmle"]
+F11 <- fit_11$estimates["tmle"];  F10 <- fit_10$estimates["tmle"]
+F01 <- fit_01$estimates["tmle"];  F00 <- fit_00$estimates["tmle"]
+
+# Additive interaction on the cumulative-incidence scale at t*
+psi_add_surv <- F11 - F10 - F01 + F00
+
+# RERI: relative excess risk due to interaction, using F00 as reference
+RR11 <- F11 / F00;  RR10 <- F10 / F00;  RR01 <- F01 / F00
+RERI <- RR11 - RR10 - RR01 + 1
+
+# Influence-function CI for psi_add(t*)
+# The same linear-contrast logic applies: IC_psi = IC_11 - IC_10 - IC_01 + IC_00
+IC_surv <- fit_11$IC$tmle - fit_10$IC$tmle - fit_01$IC$tmle + fit_00$IC$tmle
+se_surv <- sqrt(var(IC_surv) / nrow(surv_dat))
+ci_surv <- psi_add_surv + c(-1.96, 1.96) * se_surv
+
+cat(sprintf("F^{1,1}(t*) = %.4f   F^{1,0}(t*) = %.4f\n", F11, F10))
+cat(sprintf("F^{0,1}(t*) = %.4f   F^{0,0}(t*) = %.4f\n", F01, F00))
+cat(sprintf("psi_add(t*) = %.4f   95%% CI [%.4f, %.4f]\n",
+            psi_add_surv, ci_surv[1], ci_surv[2]))
+cat(sprintf("RERI(t*)    = %.4f\n", RERI))
+```
+
+For continuous or time-varying exposures, replace the `ltmle` call with
+`lmtp_tmle()` from the `lmtp` package [@diaz2021lmtp; @williams2025lmtp],
+setting `outcome_type = "survival"` and supplying a shift function for
+each exposure. The MTP-based interaction parameter is then the contrast
+of counterfactual cumulative incidences under a joint shift of $(A, E)$
+versus the two individual shifts; the influence-function CI follows the
+same linear-contrast arithmetic above.
+
 ### Marginal structural models for interaction
 
 An alternative is to fit a marginal structural model (MSM) with the
@@ -2078,11 +2311,12 @@ psi_mult <- (mean(Q_11) / mean(Q_01)) /
 
 list(psi_add = psi_add, psi_mult = psi_mult)
 
-# To obtain a fully targeted estimate with influence-function-based
-# inference, wrap the same nuisance estimates in a tmle3 workflow with
-# a custom parameter for psi_add, or fit ltmle with two intervention
-# nodes (A and E) and contrast the four counterfactual means.
-# See Section 11 for time-varying / MSM extensions.
+# Layer 2 implementation is in the "layer2-tmle-full" code block in
+# Section 6: estimate g(A, E | W) factored as P(A|E,W)*P(E|W) with sl3,
+# construct per-regime clever covariates H_ae, run ltmle with
+# Anodes = c("A","E") for each of the four joint regimes, and combine
+# the regime-specific influence curves for a Wald CI on psi_add.
+# For survival and longitudinal extensions see the Section 11 sketch.
 ```
 
 ---
