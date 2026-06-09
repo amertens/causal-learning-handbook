@@ -84,13 +84,15 @@ W_vl_bl  <- rnorm(n, mean = 4.2, sd = 0.7)
 W <- 0.01 * (W_age - 40) - 0.001 * (W_cd4_bl - 350) + 0.2 * W_vl_bl - 0.1 * W_male
 
 A1 <- rbinom(n, 1, plogis(0.3 + 0.5 * W))
-L1 <- rnorm(n, mean = 0.3 * W + 1.2 * A1, sd = 1)  # strong treatment -> confounder
-A2 <- rbinom(n, 1, plogis(-0.5 + 0.8 * L1 + 0.3 * A1))  # strong confounder -> treatment
+L1 <- rnorm(n, mean = 0.3 * W + 1.2 * A1, sd = 1)  # <1>
+A2 <- rbinom(n, 1, plogis(-0.5 + 0.8 * L1 + 0.3 * A1))  # <2>
 Y  <- rbinom(n, 1, plogis(-0.8 - 0.4 * A1 - 0.5 * A2 - 0.6 * L1 + 0.2 * W))  # strong L1 effect
 
 dat <- tibble(W, A1, L1, A2, Y)
 cat("Failure rate:", round(mean(Y), 3), "\n")
 ```
+1. A1 causes L1 (coefficient 1.2): prior adherence improves the intermediate biomarker. This is the *first half* of treatment-confounder feedback — L1 is a consequence of past treatment.
+2. L1 strongly predicts A2 (coefficient 0.8 on L1): a worse biomarker at visit 1 reduces the probability of adhering at visit 2. This closes the loop — L1 is simultaneously a *consequence* of A1 and a *confounder* of A2, making a single regression on all time points invalid.
 
 
 # The backwards regression idea
@@ -183,14 +185,16 @@ dat_ltmle <- data.frame(W = dat$W, A1 = dat$A1, L1 = dat$L1, A2 = dat$A2, Y = da
 result <- ltmle(
   data = dat_ltmle,
   Anodes = c("A1", "A2"),
-  Lnodes = c("L1"),
+  Lnodes = c("L1"),  # <1>
   Ynodes = "Y",
-  abar = list(treatment = c(1, 1), control = c(0, 0)),
+  abar = list(treatment = c(1, 1), control = c(0, 0)),  # <2>
   SL.library = c("SL.glm", "SL.mean")
 )
 
 summary(result)
 ```
+1. `Lnodes` declares which columns are time-varying confounders sitting *between* treatment nodes in the causal graph. Omitting this argument makes ltmle treat L1 as a baseline covariate, breaking the sequential g-computation logic and invalidating the estimate under treatment-confounder feedback.
+2. `abar` specifies the joint static intervention at every treatment time point. The named list is optional but clarifying: `treatment = c(1, 1)` sets $(A_1, A_2) = (1, 1)$; `control = c(0, 0)` sets both to 0. ltmle returns $E[Y^{(1,1)}] - E[Y^{(0,0)}]$ with a 95% confidence interval.
 
 For realistic interventions estimated with `lmtp`, see the [adherence-shift methods chapter](03-03b-adherence-shift-methods.qmd) and the [applied workflow chapter](05-01-applied-lmtp-workflow.qmd).
 

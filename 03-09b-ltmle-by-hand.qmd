@@ -72,7 +72,7 @@ At each time point, estimate the probability of receiving treatment conditional 
 ```{r}
 # Time 1: P(A1 = 1 | W)
 g1_mod <- glm(A1 ~ W, family = binomial, data = dat)
-g1_hat <- pmax(0.01, pmin(0.99, predict(g1_mod, type = "response")))
+g1_hat <- pmax(0.01, pmin(0.99, predict(g1_mod, type = "response")))  # <1>
 
 # Time 2: P(A2 = 1 | A1, L1, W)
 g2_mod <- glm(A2 ~ L1 + A1 + W, family = binomial, data = dat)
@@ -80,12 +80,15 @@ g2_hat <- pmax(0.01, pmin(0.99, predict(g2_mod, type = "response")))
 
 # Evaluate g2 under the intervention value A1=1
 g2_under_a1 <- pmax(0.01, pmin(0.99,
-  predict(g2_mod, newdata = dat %>% mutate(A1 = 1), type = "response")))
+  predict(g2_mod, newdata = dat %>% mutate(A1 = 1), type = "response")))  # <2>
 
 # Cumulative probability of following "always adhere"
-g_cumulative <- g1_hat * g2_under_a1
+g_cumulative <- g1_hat * g2_under_a1  # <3>
 cat("Cumulative g range:", round(range(g_cumulative), 3), "\n")
 ```
+1. `pmax(0.01, pmin(0.99, ...))` clips propensity scores to $[0.01, 0.99]$ to prevent division by zero in the clever covariate. The 0.01 floor is a common default; tighter truncation (e.g. 0.025) reduces variance from extreme weights at some cost in bias.
+2. `predict(g2_mod, newdata = dat %>% mutate(A1 = 1), ...)` evaluates $\hat{g}_2(A_1 = 1, L_1, W)$ for every observation — the probability of adhering at visit 2 *under the target regime* (A1 forced to 1), not the observed A1. Feeding the counterfactual history through the model is required to build the correct regime probability.
+3. Under "always adhere," the joint regime probability factors as $P(A_1=1 \mid W) \times P(A_2=1 \mid A_1=1, L_1, W)$ by the chain rule for sequential treatments. Small values here flag near-positivity violations — observations who would very rarely follow the full target regime.
 
 
 # Phase B: Sequential outcome regression (backwards)
@@ -125,36 +128,41 @@ H_2 = \frac{I(A_1 = 1, A_2 = 1)}{\hat{g}_1(W) \times \hat{g}_2(1, L_1, W)}
 $$
 
 ```{r}
-H2 <- (dat$A1 == 1 & dat$A2 == 1) / (g1_hat * g2_under_a1)
+H2 <- (dat$A1 == 1 & dat$A2 == 1) / (g1_hat * g2_under_a1)  # <1>
 QA_init_t2 <- predict(Q2_mod, type = "response")
 
 # Fluctuation model
-fluc2 <- glm(dat$Y ~ -1 + offset(logit(QA_init_t2)) + H2, family = binomial)
+fluc2 <- glm(dat$Y ~ -1 + offset(logit(QA_init_t2)) + H2, family = binomial)  # <2>
 eps2 <- coef(fluc2)
 
 # Update Q2 predictions under A2=1
-Q2_star <- plogis(logit(Q2_A2is1) + eps2 / (g1_hat * g2_under_a1))
+Q2_star <- plogis(logit(Q2_A2is1) + eps2 / (g1_hat * g2_under_a1))  # <3>
 cat("Epsilon at time 2:", round(eps2, 5), "\n")
 ```
+1. The clever covariate $H_2 = I(A_1=1, A_2=1) / \hat{g}_{\text{cum}}$ is non-zero only for observations who actually followed the "always adhere" regime at both visits; for all others it is zero. It is the importance-weighting term that re-orients the observed data toward the target intervention.
+2. `-1` suppresses the intercept; `offset(logit(QA_init_t2))` anchors the logit of the initial $\hat{Q}_2$ as the starting value, so the model estimates only the scalar shift $\hat{\epsilon}_2$. A near-zero $\hat{\epsilon}_2$ means the outcome model was already well-calibrated for the causal estimand.
+3. The TMLE update applies $\hat{\epsilon}_2$ on the logit scale, evaluated under $A_2=1$ using the cumulative propensity score in the denominator. The `plogis(logit(...) + eps / g)` pattern is the canonical targeting-step update formula for a binary outcome.
 
 The coefficient $\hat{\epsilon}_2$ measures how much the initial outcome model needs correcting. A small value means the outcome model was already well-calibrated for the causal estimand.
 
 ## Target at time 1
 
 ```{r}
-Q1_mod_updated <- glm(Q2_star ~ A1 + W, family = quasibinomial, data = dat)
+Q1_mod_updated <- glm(Q2_star ~ A1 + W, family = quasibinomial, data = dat)  # <1>
 Q1_updated <- predict(Q1_mod_updated, type = "response")
 Q1_under_a1 <- predict(Q1_mod_updated, newdata = dat %>% mutate(A1 = 1), type = "response")
 
 H1 <- (dat$A1 == 1) / g1_hat
 
-fluc1 <- glm(Q2_star ~ -1 + offset(logit(Q1_updated)) + H1, family = quasibinomial)
+fluc1 <- glm(Q2_star ~ -1 + offset(logit(Q1_updated)) + H1, family = quasibinomial)  # <2>
 eps1 <- coef(fluc1)
 
-Q1_star <- plogis(logit(Q1_under_a1) + eps1 / g1_hat)
+Q1_star <- plogis(logit(Q1_under_a1) + eps1 / g1_hat)  # <3>
 cat("Epsilon at time 1:", round(eps1, 5), "\n")
 ```
-
+1. The *outcome* for the time-1 backwards regression is `Q2_star` — the *targeted* visit-2 predictions — not the original binary `Y`. Using `Q2_star` propagates the time-2 correction backward; using `Y` directly would re-introduce $L_1$ as a confounder of $A_1$.
+2. `quasibinomial` is needed because `Q2_star` is a continuous probability in $(0,1)$, not 0/1. It keeps the logit link and binomial variance function but allows overdispersion $> 1$, making it valid for fractional pseudo-outcomes.
+3. The update applies $\hat{\epsilon}_1$ to `Q1_under_a1` — the *counterfactual* prediction at $A_1 = 1$ — not the observed-treatment prediction. The sample mean of `Q1_star` is the L-TMLE estimate $\hat{E}[Y^{(1,1)}]$.
 
 # The final L-TMLE estimate
 

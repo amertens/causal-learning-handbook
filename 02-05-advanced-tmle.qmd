@@ -226,8 +226,8 @@ g_cv <- pmin(pmax(g_cv, 0.025), 0.975)
 H1 <- d$ever_haart / g_cv
 H0 <- -(1 - d$ever_haart) / (1 - g_cv)
 
-Q_logit_A <- qlogis(ifelse(d$ever_haart == 1, Qbar_cv[, 2], Qbar_cv[, 1]))
-eps_fit <- glm(d$died ~ -1 + offset(Q_logit_A) + H1 + H0, family = binomial)
+Q_logit_A <- qlogis(ifelse(d$ever_haart == 1, Qbar_cv[, 2], Qbar_cv[, 1]))  # <1>
+eps_fit <- glm(d$died ~ -1 + offset(Q_logit_A) + H1 + H0, family = binomial)  # <2>
 eps <- coef(eps_fit)
 
 Q1_star <- plogis(qlogis(Qbar_cv[, 2]) + eps["H1"] / g_cv)
@@ -244,6 +244,8 @@ se_cv <- sqrt(var(IC_cv) / n)
 cat(sprintf("CV-TMLE (manual, %d-fold) ATE: %.4f (95%% CI: %.4f, %.4f)\n",
             V, ate_cv, ate_cv - 1.96 * se_cv, ate_cv + 1.96 * se_cv))
 ```
+1. For each observation, select the predicted outcome at the *observed* treatment — $\hat{Q}(A_i, W_i)$ — then map to logit scale. Using the observed-treatment prediction as the offset means the fluctuation starts from the correct conditional mean for each individual, rather than from either counterfactual arm.
+2. `H1` and `H0` enter as *separate covariates* in one logistic regression, but `H1 = 0` for controls and `H0 = 0` for treated, so each coefficient targets exactly one arm. Running one joint model is algebraically equivalent to two sequential targeting steps but converges in a single pass and shares residual degrees of freedom.
 
 Putting the three estimators side by side shows how little the point estimate moves on this well-behaved cohort---the value of CV-TMLE is not a different number but *trustworthy inference* when the nuisance models are fit with aggressive machine learning:
 
@@ -349,7 +351,7 @@ Q_init <- SuperLearner(
 )
 Q0 <- predict(Q_init, newdata = data.frame(A = 0, W_mat))$pred[, 1]
 Q1 <- predict(Q_init, newdata = data.frame(A = 1, W_mat))$pred[, 1]
-Q_mat <- cbind(QAW = ifelse(A == 1, Q1, Q0), Q0W = Q0, Q1W = Q1)
+Q_mat <- cbind(QAW = ifelse(A == 1, Q1, Q0), Q0W = Q0, Q1W = Q1)  # <1>
 
 # Step 2: Get LASSO regularization path for the propensity score
 glmnet_fit <- glmnet::glmnet(x = W_mat, y = A, family = "binomial", nlambda = 20)
@@ -374,6 +376,7 @@ cat(sprintf("Best lambda index: %d (of %d along path)\n",
 cat("Compare to standard TMLE above---C-TMLE may differ when\n")
 cat("it selects a simpler propensity score to stabilize estimation.\n")
 ```
+1. `ctmleGlmnet` requires the initial outcome model as a matrix with exactly three named columns: `QAW` (predicted outcome at the *observed* treatment, used to compute initial residuals), `Q0W` (predictions under $A=0$), and `Q1W` (predictions under $A=1$). The `ifelse(A == 1, Q1, Q0)` constructs `QAW` from the two counterfactual predictions already available.
 
 The difference between standard TMLE and C-TMLE is most visible when there are near-positivity violations. In the ART cohort, patients with very low CD4 counts are almost always treated, creating near-violations. C-TMLE automatically finds the propensity score complexity that balances confounding adjustment against instability from extreme weights.
 
