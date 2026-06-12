@@ -552,6 +552,19 @@ Learning objectives
 <p>Suppose we have an observational HIV cohort and want to know whether patients who ever initiated <strong>highly active antiretroviral therapy (HAART)</strong> had a different risk of death than patients who never initiated it. The causal question is straightforward: if we could assign everyone in this population to HAART versus to no HAART, would the mortality risk differ, and by how much?</p>
 <p>The standard approach is to fit a <strong>Cox proportional hazards model</strong>, adjust for confounders like age, sex, and baseline CD4 count, and report the adjusted hazard ratio. Let’s see what that looks like on the running HAART cohort <span class="citation" data-cites="vanderwal2011ipw">(<a href="references.html#ref-vanderwal2011ipw" role="doc-biblioref">Wal and Geskus 2011</a>)</span> (introduced in the <a href="./00-case-study.html">Running Case Study</a> and used as a point-treatment baseline snapshot here).</p>
 <p>We adjust for age, sex, and baseline (square-root) CD4 count using a Cox model:</p>
+<div class="callout callout-style-default callout-warning callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+A simplification with a known cost: immortal time
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>This point-treatment analysis defines treatment as “ever initiated HAART during follow-up” and then analyzes it as if it were a baseline exposure. Because <code>haartind</code> is an absorbing event collapsed to a single label, patients counted as initiators are guaranteed to have survived until their initiation time, which induces <strong>immortal time bias</strong> by construction, exactly the error <a href="01-02-causal-roadmap.html" class="quarto-xref"><span>Chapter 5</span></a> teaches you to avoid. We accept it here only to demonstrate estimator mechanics on one familiar dataset; the unbiased treatment of this question requires the longitudinal g-methods in Part III. See the <a href="./00-case-study.html#cohort-summary-of-baseline-characteristics">case study caveat</a> for the full statement.</p>
+</div>
+</div>
 <div class="cell" data-layout-align="center">
 <details class="code-fold">
 <summary>Show code</summary>
@@ -651,7 +664,7 @@ The Hazard Ratio Is NOT the Causal Effect You Want
 </section>
 <section id="enter-the-counterfactual-framework" class="level2" data-number="4.2">
 <h2 data-number="4.2" class="anchored" data-anchor-id="enter-the-counterfactual-framework"><span class="header-section-number">4.2</span> Enter the Counterfactual Framework</h2>
-<p>For each person we imagine two hypothetical worlds: <strong>Y(1)</strong> (outcome if they had initiated HAART) and <strong>Y(0)</strong> (outcome if they had not) <span class="citation" data-cites="hernan2025whatif">(<a href="references.html#ref-hernan2025whatif" role="doc-biblioref">Hernán and Robins 2025</a>)</span>. The <strong>average treatment effect (ATE)</strong> is:</p>
+<p>For each person we imagine two hypothetical worlds: <strong>Y(1)</strong> (outcome if they had initiated HAART) and <strong>Y(0)</strong> (outcome if they had not) <span class="citation" data-cites="hernan2025whatif">(<a href="references.html#ref-hernan2025whatif" role="doc-biblioref">Hernán and Robins 2025</a>)</span>; these are the potential outcome <span class="math inline">\(Y(a)\)</span> written out for the two treatment levels <span class="math inline">\(a = 1\)</span> and <span class="math inline">\(a = 0\)</span>, and later chapters use the general <span class="math inline">\(Y(a)\)</span> form when treatment takes more than two values or varies over time. The <strong>average treatment effect (ATE)</strong> is:</p>
 <p><span class="math display">\[
 ATE = E[Y(1) - Y(0)]
 \]</span></p>
@@ -827,7 +840,8 @@ Figure&nbsp;4.1: Two answers to one question, from one dataset. The g-computatio
 </div>
 </div>
 </div>
-<p>The Cox model and the logistic g-computation are fitted on the same data, but they answer different questions. The hazard ratio is a conditional, instantaneous rate ratio that does not directly tell us how many deaths would be averted by HAART, and it is non-collapsible: the conditional HR differs from the marginal HR even without confounding. The g-computation risk difference tells you: “X more people per 100 would have died over follow-up if no one had been initiated on HAART compared to if everyone had been.” That is the kind of number patients and clinicians need to make decisions.</p>
+<p>The Cox model and the logistic g-computation are fitted on the same data, but they answer different questions. The hazard ratio is a conditional, instantaneous rate ratio that does not directly tell us how many deaths would be averted by HAART, and it is non-collapsible: the conditional HR differs from the marginal HR even without confounding. The g-computation risk difference <span class="math inline">\(E[Y(1)] - E[Y(0)]\)</span> is <strong>negative</strong> here, because HAART is protective: the figure and table print a number like <span class="math inline">\(-X\)</span> per 100, meaning that initiating HAART in everyone rather than no one <em>lowers</em> cumulative mortality by about <span class="math inline">\(X\)</span> per 100. Read the other way round, about <span class="math inline">\(X\)</span> more people per 100 would have died if no one had been initiated on HAART compared to if everyone had been. That is the kind of number patients and clinicians need to make decisions.</p>
+<!-- editor note: reconciled the sign per the editorial spec. The figure/table annotate the signed risk difference 100*risk_diff (= risk1 - risk0, negative for a protective treatment); the prose now reads that negative number correctly instead of asserting a positive value next to a negative printed one. -->
 <section id="longitudinal-failure-treatment-confounder-feedback" class="level3" data-number="4.3.1">
 <h3 data-number="4.3.1" class="anchored" data-anchor-id="longitudinal-failure-treatment-confounder-feedback"><span class="header-section-number">4.3.1</span> Longitudinal failure: treatment-confounder feedback</h3>
 <p>The point-treatment analysis above already shows that the <em>estimand</em> matters. The HAART setting also illustrates a deeper, structural problem that no choice of point-treatment estimator can fix. In the longitudinal HAART data, CD4 count is measured at each visit and used to guide treatment decisions. But CD4 is also affected by prior treatment: HAART improves CD4 counts. This creates <strong>treatment–confounder feedback</strong>, a structure where the same variable (CD4) is simultaneously a confounder of future treatment and a consequence of past treatment.</p>
@@ -1452,180 +1466,188 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 <span id="cb5-71"><a href="#cb5-71" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb5-72"><a href="#cb5-72" aria-hidden="true" tabindex="-1"></a>We adjust for age, sex, and baseline (square-root) CD4 count using a Cox model:</span>
 <span id="cb5-73"><a href="#cb5-73" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-76"><a href="#cb5-76" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb5-77"><a href="#cb5-77" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
-<span id="cb5-78"><a href="#cb5-78" aria-hidden="true" tabindex="-1"></a>cox_model <span class="ot">&lt;-</span> <span class="fu">coxph</span>(</span>
-<span id="cb5-79"><a href="#cb5-79" aria-hidden="true" tabindex="-1"></a>  <span class="fu">Surv</span>(total_fup_days, died) <span class="sc">~</span> ever_haart <span class="sc">+</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
-<span id="cb5-80"><a href="#cb5-80" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat</span>
-<span id="cb5-81"><a href="#cb5-81" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb5-82"><a href="#cb5-82" aria-hidden="true" tabindex="-1"></a><span class="fu">tidy</span>(cox_model, <span class="at">conf.int =</span> <span class="cn">TRUE</span>, <span class="at">exponentiate =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
-<span id="cb5-83"><a href="#cb5-83" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">3</span>, <span class="at">caption =</span> <span class="st">"Adjusted Cox proportional hazards model (hazard ratios)"</span>)</span>
-<span id="cb5-84"><a href="#cb5-84" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb5-85"><a href="#cb5-85" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-86"><a href="#cb5-86" aria-hidden="true" tabindex="-1"></a>:::{.callout-warning}</span>
-<span id="cb5-87"><a href="#cb5-87" aria-hidden="true" tabindex="-1"></a><span class="fu">## The Hazard Ratio Is NOT the Causal Effect You Want</span></span>
-<span id="cb5-88"><a href="#cb5-88" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-89"><a href="#cb5-89" aria-hidden="true" tabindex="-1"></a>The adjusted hazard ratio for <span class="in">`ever_haart`</span> quantifies an instantaneous rate ratio for death within strata of age, sex, and baseline CD4. But what does a clinician or policymaker actually need to know? They need to know: **if we initiated HAART in everyone eligible compared with no one, how would the cumulative mortality risk over follow-up change?** That quantity, the **marginal risk difference** in mortality, is the natural scale for comparing treatments and making decisions.</span>
+<span id="cb5-74"><a href="#cb5-74" aria-hidden="true" tabindex="-1"></a>:::{.callout-warning}</span>
+<span id="cb5-75"><a href="#cb5-75" aria-hidden="true" tabindex="-1"></a><span class="fu">## A simplification with a known cost: immortal time</span></span>
+<span id="cb5-76"><a href="#cb5-76" aria-hidden="true" tabindex="-1"></a>This point-treatment analysis defines treatment as "ever initiated HAART during follow-up" and then analyzes it as if it were a baseline exposure. Because <span class="in">`haartind`</span> is an absorbing event collapsed to a single label, patients counted as initiators are guaranteed to have survived until their initiation time, which induces **immortal time bias** by construction, exactly the error @sec-roadmap teaches you to avoid. We accept it here only to demonstrate estimator mechanics on one familiar dataset; the unbiased treatment of this question requires the longitudinal g-methods in Part III. See the <span class="co">[</span><span class="ot">case study caveat</span><span class="co">](00-case-study.qmd#cohort-summary-of-baseline-characteristics)</span> for the full statement.</span>
+<span id="cb5-77"><a href="#cb5-77" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb5-78"><a href="#cb5-78" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-81"><a href="#cb5-81" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb5-82"><a href="#cb5-82" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
+<span id="cb5-83"><a href="#cb5-83" aria-hidden="true" tabindex="-1"></a>cox_model <span class="ot">&lt;-</span> <span class="fu">coxph</span>(</span>
+<span id="cb5-84"><a href="#cb5-84" aria-hidden="true" tabindex="-1"></a>  <span class="fu">Surv</span>(total_fup_days, died) <span class="sc">~</span> ever_haart <span class="sc">+</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
+<span id="cb5-85"><a href="#cb5-85" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat</span>
+<span id="cb5-86"><a href="#cb5-86" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb5-87"><a href="#cb5-87" aria-hidden="true" tabindex="-1"></a><span class="fu">tidy</span>(cox_model, <span class="at">conf.int =</span> <span class="cn">TRUE</span>, <span class="at">exponentiate =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb5-88"><a href="#cb5-88" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">3</span>, <span class="at">caption =</span> <span class="st">"Adjusted Cox proportional hazards model (hazard ratios)"</span>)</span>
+<span id="cb5-89"><a href="#cb5-89" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
 <span id="cb5-90"><a href="#cb5-90" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-91"><a href="#cb5-91" aria-hidden="true" tabindex="-1"></a>The Cox hazard ratio does not answer that question. It is a **conditional, instantaneous rate ratio** that:</span>
-<span id="cb5-92"><a href="#cb5-92" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-93"><a href="#cb5-93" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Assumes **proportional hazards** (that the treatment effect is constant over time), which is often violated in practice.</span>
-<span id="cb5-94"><a href="#cb5-94" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Is **non-collapsible**: the conditional HR and marginal HR differ even without confounding, so the coefficient does not have a straightforward population-level interpretation.</span>
-<span id="cb5-95"><a href="#cb5-95" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Does not directly translate to a risk difference or survival probability contrast without additional computation.</span>
-<span id="cb5-96"><a href="#cb5-96" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Is also confounded by indication in observational HIV data: sicker patients (lower CD4) were more likely to start HAART, so the unadjusted association conflates the drug's benefit with baseline severity. We will return to this in the longitudinal section below.</span>
+<span id="cb5-91"><a href="#cb5-91" aria-hidden="true" tabindex="-1"></a>:::{.callout-warning}</span>
+<span id="cb5-92"><a href="#cb5-92" aria-hidden="true" tabindex="-1"></a><span class="fu">## The Hazard Ratio Is NOT the Causal Effect You Want</span></span>
+<span id="cb5-93"><a href="#cb5-93" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-94"><a href="#cb5-94" aria-hidden="true" tabindex="-1"></a>The adjusted hazard ratio for <span class="in">`ever_haart`</span> quantifies an instantaneous rate ratio for death within strata of age, sex, and baseline CD4. But what does a clinician or policymaker actually need to know? They need to know: **if we initiated HAART in everyone eligible compared with no one, how would the cumulative mortality risk over follow-up change?** That quantity, the **marginal risk difference** in mortality, is the natural scale for comparing treatments and making decisions.</span>
+<span id="cb5-95"><a href="#cb5-95" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-96"><a href="#cb5-96" aria-hidden="true" tabindex="-1"></a>The Cox hazard ratio does not answer that question. It is a **conditional, instantaneous rate ratio** that:</span>
 <span id="cb5-97"><a href="#cb5-97" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-98"><a href="#cb5-98" aria-hidden="true" tabindex="-1"></a>In later chapters, we introduce **longitudinal TMLE (L-TMLE)**, which directly estimates causal survival curves and risk differences at specific time points without relying on the proportional hazards assumption.</span>
-<span id="cb5-99"><a href="#cb5-99" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb5-100"><a href="#cb5-100" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-101"><a href="#cb5-101" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-102"><a href="#cb5-102" aria-hidden="true" tabindex="-1"></a><span class="fu">## Enter the Counterfactual Framework</span></span>
-<span id="cb5-103"><a href="#cb5-103" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-104"><a href="#cb5-104" aria-hidden="true" tabindex="-1"></a>For each person we imagine two hypothetical worlds: **Y(1)** (outcome if they had initiated HAART) and **Y(0)** (outcome if they had not) [@hernan2025whatif]. The **average treatment effect (ATE)** is:</span>
+<span id="cb5-98"><a href="#cb5-98" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Assumes **proportional hazards** (that the treatment effect is constant over time), which is often violated in practice.</span>
+<span id="cb5-99"><a href="#cb5-99" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Is **non-collapsible**: the conditional HR and marginal HR differ even without confounding, so the coefficient does not have a straightforward population-level interpretation.</span>
+<span id="cb5-100"><a href="#cb5-100" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Does not directly translate to a risk difference or survival probability contrast without additional computation.</span>
+<span id="cb5-101"><a href="#cb5-101" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Is also confounded by indication in observational HIV data: sicker patients (lower CD4) were more likely to start HAART, so the unadjusted association conflates the drug's benefit with baseline severity. We will return to this in the longitudinal section below.</span>
+<span id="cb5-102"><a href="#cb5-102" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-103"><a href="#cb5-103" aria-hidden="true" tabindex="-1"></a>In later chapters, we introduce **longitudinal TMLE (L-TMLE)**, which directly estimates causal survival curves and risk differences at specific time points without relying on the proportional hazards assumption.</span>
+<span id="cb5-104"><a href="#cb5-104" aria-hidden="true" tabindex="-1"></a>:::</span>
 <span id="cb5-105"><a href="#cb5-105" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-106"><a href="#cb5-106" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb5-107"><a href="#cb5-107" aria-hidden="true" tabindex="-1"></a>ATE = E<span class="co">[</span><span class="ot">Y(1) - Y(0)</span><span class="co">]</span></span>
-<span id="cb5-108"><a href="#cb5-108" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb5-109"><a href="#cb5-109" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-110"><a href="#cb5-110" aria-hidden="true" tabindex="-1"></a>The fundamental problem of causal inference is that each person only receives one treatment. We observe Y(1) or Y(0), never both. Under three key identification assumptions, **exchangeability** (no unmeasured confounding), **consistency** (the observed outcome under the treatment actually received equals the potential outcome), and **positivity** (every individual has a nonzero probability of receiving either treatment given their covariates), we can identify the causal ATE from observed data using the **g-computation formula**:</span>
-<span id="cb5-111"><a href="#cb5-111" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-112"><a href="#cb5-112" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb5-113"><a href="#cb5-113" aria-hidden="true" tabindex="-1"></a>ATE = E_W\big<span class="co">[</span><span class="ot"> E[Y \mid A = 1, W] - E[Y \mid A = 0, W] \big</span><span class="co">]</span></span>
-<span id="cb5-114"><a href="#cb5-114" aria-hidden="true" tabindex="-1"></a>$$</span>
-<span id="cb5-115"><a href="#cb5-115" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-116"><a href="#cb5-116" aria-hidden="true" tabindex="-1"></a>where W represents the measured confounders and A is the treatment. This expression says: within each confounder stratum, compute the difference in expected outcomes between treated and untreated, then average over the distribution of confounders in the population.</span>
-<span id="cb5-117"><a href="#cb5-117" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-118"><a href="#cb5-118" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-119"><a href="#cb5-119" aria-hidden="true" tabindex="-1"></a><span class="fu">## When Regression Fails</span></span>
+<span id="cb5-106"><a href="#cb5-106" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-107"><a href="#cb5-107" aria-hidden="true" tabindex="-1"></a><span class="fu">## Enter the Counterfactual Framework</span></span>
+<span id="cb5-108"><a href="#cb5-108" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-109"><a href="#cb5-109" aria-hidden="true" tabindex="-1"></a>For each person we imagine two hypothetical worlds: **Y(1)** (outcome if they had initiated HAART) and **Y(0)** (outcome if they had not) [@hernan2025whatif]; these are the potential outcome $Y(a)$ written out for the two treatment levels $a = 1$ and $a = 0$, and later chapters use the general $Y(a)$ form when treatment takes more than two values or varies over time. The **average treatment effect (ATE)** is:</span>
+<span id="cb5-110"><a href="#cb5-110" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-111"><a href="#cb5-111" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb5-112"><a href="#cb5-112" aria-hidden="true" tabindex="-1"></a>ATE = E<span class="co">[</span><span class="ot">Y(1) - Y(0)</span><span class="co">]</span></span>
+<span id="cb5-113"><a href="#cb5-113" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb5-114"><a href="#cb5-114" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-115"><a href="#cb5-115" aria-hidden="true" tabindex="-1"></a>The fundamental problem of causal inference is that each person only receives one treatment. We observe Y(1) or Y(0), never both. Under three key identification assumptions, **exchangeability** (no unmeasured confounding), **consistency** (the observed outcome under the treatment actually received equals the potential outcome), and **positivity** (every individual has a nonzero probability of receiving either treatment given their covariates), we can identify the causal ATE from observed data using the **g-computation formula**:</span>
+<span id="cb5-116"><a href="#cb5-116" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-117"><a href="#cb5-117" aria-hidden="true" tabindex="-1"></a>$$</span>
+<span id="cb5-118"><a href="#cb5-118" aria-hidden="true" tabindex="-1"></a>ATE = E_W\big<span class="co">[</span><span class="ot"> E[Y \mid A = 1, W] - E[Y \mid A = 0, W] \big</span><span class="co">]</span></span>
+<span id="cb5-119"><a href="#cb5-119" aria-hidden="true" tabindex="-1"></a>$$</span>
 <span id="cb5-120"><a href="#cb5-120" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-121"><a href="#cb5-121" aria-hidden="true" tabindex="-1"></a>:::{.callout-warning}</span>
-<span id="cb5-122"><a href="#cb5-122" aria-hidden="true" tabindex="-1"></a><span class="fu">## Model Misspecification Can Silently Bias Your Results</span></span>
+<span id="cb5-121"><a href="#cb5-121" aria-hidden="true" tabindex="-1"></a>where W represents the measured confounders and A is the treatment. This expression says: within each confounder stratum, compute the difference in expected outcomes between treated and untreated, then average over the distribution of confounders in the population.</span>
+<span id="cb5-122"><a href="#cb5-122" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb5-123"><a href="#cb5-123" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-124"><a href="#cb5-124" aria-hidden="true" tabindex="-1"></a>Misspecification bias is **silent**. A regression with the wrong functional form still produces coefficients and p-values with no warning. This motivates semiparametric estimators (like TMLE with machine learning <span class="co">[</span><span class="ot">@vanderLaan2006tmle; @bang2005doubly</span><span class="co">]</span>) that relax parametric assumptions.</span>
-<span id="cb5-125"><a href="#cb5-125" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb5-126"><a href="#cb5-126" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-127"><a href="#cb5-127" aria-hidden="true" tabindex="-1"></a>Let's compare the Cox approach to g-computation, which directly targets the marginal risk difference for mortality over follow-up. Both models are fit on the *same* data and adjust for the *same* confounders; the only thing that changes is what we ask the fitted model to report.</span>
+<span id="cb5-124"><a href="#cb5-124" aria-hidden="true" tabindex="-1"></a><span class="fu">## When Regression Fails</span></span>
+<span id="cb5-125"><a href="#cb5-125" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-126"><a href="#cb5-126" aria-hidden="true" tabindex="-1"></a>:::{.callout-warning}</span>
+<span id="cb5-127"><a href="#cb5-127" aria-hidden="true" tabindex="-1"></a><span class="fu">## Model Misspecification Can Silently Bias Your Results</span></span>
 <span id="cb5-128"><a href="#cb5-128" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-131"><a href="#cb5-131" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb5-132"><a href="#cb5-132" aria-hidden="true" tabindex="-1"></a><span class="co"># G-computation: fit a logistic outcome model, then standardize</span></span>
-<span id="cb5-133"><a href="#cb5-133" aria-hidden="true" tabindex="-1"></a>gcomp_model <span class="ot">&lt;-</span> <span class="fu">glm</span>(</span>
-<span id="cb5-134"><a href="#cb5-134" aria-hidden="true" tabindex="-1"></a>  died <span class="sc">~</span> ever_haart <span class="sc">+</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
-<span id="cb5-135"><a href="#cb5-135" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> binomial, <span class="at">data =</span> dat</span>
-<span id="cb5-136"><a href="#cb5-136" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb5-137"><a href="#cb5-137" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-138"><a href="#cb5-138" aria-hidden="true" tabindex="-1"></a><span class="co"># Predict each person's counterfactual mortality risk under both strategies,</span></span>
-<span id="cb5-139"><a href="#cb5-139" aria-hidden="true" tabindex="-1"></a><span class="co"># then average to get the marginal (population-level) risks</span></span>
-<span id="cb5-140"><a href="#cb5-140" aria-hidden="true" tabindex="-1"></a>risk1 <span class="ot">&lt;-</span> <span class="fu">mean</span>(<span class="fu">predict</span>(gcomp_model, <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">1</span>), <span class="at">type =</span> <span class="st">"response"</span>))</span>
-<span id="cb5-141"><a href="#cb5-141" aria-hidden="true" tabindex="-1"></a>risk0 <span class="ot">&lt;-</span> <span class="fu">mean</span>(<span class="fu">predict</span>(gcomp_model, <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">0</span>), <span class="at">type =</span> <span class="st">"response"</span>))</span>
-<span id="cb5-142"><a href="#cb5-142" aria-hidden="true" tabindex="-1"></a>risk_diff <span class="ot">&lt;-</span> risk1 <span class="sc">-</span> risk0</span>
-<span id="cb5-143"><a href="#cb5-143" aria-hidden="true" tabindex="-1"></a>risk_ratio <span class="ot">&lt;-</span> risk1 <span class="sc">/</span> risk0</span>
-<span id="cb5-144"><a href="#cb5-144" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-145"><a href="#cb5-145" aria-hidden="true" tabindex="-1"></a><span class="co"># Cox model on the same data: the conditional hazard ratio</span></span>
-<span id="cb5-146"><a href="#cb5-146" aria-hidden="true" tabindex="-1"></a>cox_hr <span class="ot">&lt;-</span> <span class="fu">exp</span>(<span class="fu">coef</span>(cox_model)[<span class="st">"ever_haart"</span>])</span>
-<span id="cb5-147"><a href="#cb5-147" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb5-148"><a href="#cb5-148" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-149"><a href="#cb5-149" aria-hidden="true" tabindex="-1"></a>G-computation **predicts** counterfactual outcomes for every person under treatment and under control, then **averages** the difference. The result is a **marginal risk difference**, a population-level quantity directly relevant to decision-making, unlike the conditional hazard ratio from the Cox model. Placing the two side by side makes the gap concrete:</span>
-<span id="cb5-150"><a href="#cb5-150" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-153"><a href="#cb5-153" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb5-154"><a href="#cb5-154" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: tbl-cox-vs-gcomp</span></span>
-<span id="cb5-155"><a href="#cb5-155" aria-hidden="true" tabindex="-1"></a><span class="co">#| tbl-cap: "The same data and the same confounders, two different estimands. The Cox hazard ratio lives on an instantaneous rate scale and does not translate into how many deaths a treatment policy would avert; the g-computation contrasts live on the risk scale and do."</span></span>
-<span id="cb5-156"><a href="#cb5-156" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
-<span id="cb5-157"><a href="#cb5-157" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
-<span id="cb5-158"><a href="#cb5-158" aria-hidden="true" tabindex="-1"></a>  <span class="at">Quantity =</span> <span class="fu">c</span>(</span>
-<span id="cb5-159"><a href="#cb5-159" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Cox hazard ratio (ever vs never HAART)"</span>,</span>
-<span id="cb5-160"><a href="#cb5-160" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Risk if everyone initiated HAART, E[Y(1)]"</span>,</span>
-<span id="cb5-161"><a href="#cb5-161" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Risk if no one initiated HAART, E[Y(0)]"</span>,</span>
-<span id="cb5-162"><a href="#cb5-162" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Marginal risk difference, E[Y(1)] - E[Y(0)]"</span>,</span>
-<span id="cb5-163"><a href="#cb5-163" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Marginal risk ratio, E[Y(1)] / E[Y(0)]"</span></span>
-<span id="cb5-164"><a href="#cb5-164" aria-hidden="true" tabindex="-1"></a>  ),</span>
-<span id="cb5-165"><a href="#cb5-165" aria-hidden="true" tabindex="-1"></a>  <span class="at">Value =</span> <span class="fu">c</span>(</span>
-<span id="cb5-166"><a href="#cb5-166" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sprintf</span>(<span class="st">"%.2f"</span>, cox_hr),</span>
-<span id="cb5-167"><a href="#cb5-167" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sprintf</span>(<span class="st">"%.1f%%"</span>, <span class="dv">100</span> <span class="sc">*</span> risk1),</span>
-<span id="cb5-168"><a href="#cb5-168" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sprintf</span>(<span class="st">"%.1f%%"</span>, <span class="dv">100</span> <span class="sc">*</span> risk0),</span>
-<span id="cb5-169"><a href="#cb5-169" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sprintf</span>(<span class="st">"%+.1f per 100"</span>, <span class="dv">100</span> <span class="sc">*</span> risk_diff),</span>
-<span id="cb5-170"><a href="#cb5-170" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sprintf</span>(<span class="st">"%.2f"</span>, risk_ratio)</span>
-<span id="cb5-171"><a href="#cb5-171" aria-hidden="true" tabindex="-1"></a>  ),</span>
-<span id="cb5-172"><a href="#cb5-172" aria-hidden="true" tabindex="-1"></a>  <span class="at">Scale =</span> <span class="fu">c</span>(</span>
-<span id="cb5-173"><a href="#cb5-173" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Conditional, instantaneous rate ratio"</span>,</span>
-<span id="cb5-174"><a href="#cb5-174" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Probability"</span>, <span class="st">"Probability"</span>,</span>
-<span id="cb5-175"><a href="#cb5-175" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Probability difference"</span>, <span class="st">"Probability ratio"</span></span>
-<span id="cb5-176"><a href="#cb5-176" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb5-177"><a href="#cb5-177" aria-hidden="true" tabindex="-1"></a>) <span class="sc">|&gt;</span></span>
-<span id="cb5-178"><a href="#cb5-178" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">caption =</span> <span class="cn">NULL</span>, <span class="at">align =</span> <span class="fu">c</span>(<span class="st">"l"</span>, <span class="st">"r"</span>, <span class="st">"l"</span>))</span>
-<span id="cb5-179"><a href="#cb5-179" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb5-180"><a href="#cb5-180" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-183"><a href="#cb5-183" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
-<span id="cb5-184"><a href="#cb5-184" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-cox-vs-gcomp</span></span>
-<span id="cb5-185"><a href="#cb5-185" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Two answers to one question, from one dataset. The g-computation bars show the marginal cumulative-mortality risk the population would experience if *everyone* versus *no one* initiated HAART; the gap between them is the causal risk difference a clinician can act on. The Cox model fit to the very same data returns only the single hazard ratio in the subtitle, a conditional rate ratio that cannot be read off the risk axis at all."</span></span>
-<span id="cb5-186"><a href="#cb5-186" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
-<span id="cb5-187"><a href="#cb5-187" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-width: 7</span></span>
-<span id="cb5-188"><a href="#cb5-188" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-height: 4</span></span>
-<span id="cb5-189"><a href="#cb5-189" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
-<span id="cb5-190"><a href="#cb5-190" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-191"><a href="#cb5-191" aria-hidden="true" tabindex="-1"></a>gcomp_df <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
-<span id="cb5-192"><a href="#cb5-192" aria-hidden="true" tabindex="-1"></a>  <span class="at">strategy =</span> <span class="fu">factor</span>(</span>
-<span id="cb5-193"><a href="#cb5-193" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="st">"Everyone initiates</span><span class="sc">\n</span><span class="st">HAART  (E[Y(1)])"</span>, <span class="st">"No one initiates</span><span class="sc">\n</span><span class="st">HAART  (E[Y(0)])"</span>),</span>
-<span id="cb5-194"><a href="#cb5-194" aria-hidden="true" tabindex="-1"></a>    <span class="at">levels =</span> <span class="fu">c</span>(<span class="st">"No one initiates</span><span class="sc">\n</span><span class="st">HAART  (E[Y(0)])"</span>, <span class="st">"Everyone initiates</span><span class="sc">\n</span><span class="st">HAART  (E[Y(1)])"</span>)</span>
-<span id="cb5-195"><a href="#cb5-195" aria-hidden="true" tabindex="-1"></a>  ),</span>
-<span id="cb5-196"><a href="#cb5-196" aria-hidden="true" tabindex="-1"></a>  <span class="at">risk =</span> <span class="fu">c</span>(risk1, risk0)</span>
-<span id="cb5-197"><a href="#cb5-197" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb5-198"><a href="#cb5-198" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-199"><a href="#cb5-199" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(gcomp_df, <span class="fu">aes</span>(strategy, risk, <span class="at">fill =</span> strategy)) <span class="sc">+</span></span>
-<span id="cb5-200"><a href="#cb5-200" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_col</span>(<span class="at">width =</span> <span class="fl">0.6</span>, <span class="at">show.legend =</span> <span class="cn">FALSE</span>) <span class="sc">+</span></span>
-<span id="cb5-201"><a href="#cb5-201" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> <span class="fu">sprintf</span>(<span class="st">"%.1f%%"</span>, <span class="dv">100</span> <span class="sc">*</span> risk)), <span class="at">vjust =</span> <span class="sc">-</span><span class="fl">0.5</span>, <span class="at">size =</span> <span class="dv">4</span>) <span class="sc">+</span></span>
-<span id="cb5-202"><a href="#cb5-202" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(</span>
-<span id="cb5-203"><a href="#cb5-203" aria-hidden="true" tabindex="-1"></a>    <span class="st">"label"</span>, <span class="at">x =</span> <span class="fl">1.5</span>, <span class="at">y =</span> <span class="fu">max</span>(gcomp_df<span class="sc">$</span>risk) <span class="sc">*</span> <span class="fl">1.18</span>,</span>
-<span id="cb5-204"><a href="#cb5-204" aria-hidden="true" tabindex="-1"></a>    <span class="at">label =</span> <span class="fu">sprintf</span>(<span class="st">"Causal risk difference</span><span class="sc">\n</span><span class="st">%+.1f per 100"</span>, <span class="dv">100</span> <span class="sc">*</span> risk_diff),</span>
-<span id="cb5-205"><a href="#cb5-205" aria-hidden="true" tabindex="-1"></a>    <span class="at">size =</span> <span class="fl">3.5</span>, <span class="at">label.size =</span> <span class="dv">0</span></span>
-<span id="cb5-206"><a href="#cb5-206" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
-<span id="cb5-207"><a href="#cb5-207" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(</span>
-<span id="cb5-208"><a href="#cb5-208" aria-hidden="true" tabindex="-1"></a>    <span class="at">labels =</span> <span class="cf">function</span>(x) <span class="fu">paste0</span>(<span class="dv">100</span> <span class="sc">*</span> x, <span class="st">"%"</span>),</span>
-<span id="cb5-209"><a href="#cb5-209" aria-hidden="true" tabindex="-1"></a>    <span class="at">expand =</span> <span class="fu">expansion</span>(<span class="at">mult =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="fl">0.30</span>))</span>
-<span id="cb5-210"><a href="#cb5-210" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
-<span id="cb5-211"><a href="#cb5-211" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_fill_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"#9ecae1"</span>, <span class="st">"#3182bd"</span>)) <span class="sc">+</span></span>
-<span id="cb5-212"><a href="#cb5-212" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
-<span id="cb5-213"><a href="#cb5-213" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="cn">NULL</span>, <span class="at">y =</span> <span class="st">"Cumulative mortality risk"</span>,</span>
-<span id="cb5-214"><a href="#cb5-214" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="st">"G-computation reports a marginal, decision-relevant contrast"</span>,</span>
-<span id="cb5-215"><a href="#cb5-215" aria-hidden="true" tabindex="-1"></a>    <span class="at">subtitle =</span> <span class="fu">sprintf</span>(</span>
-<span id="cb5-216"><a href="#cb5-216" aria-hidden="true" tabindex="-1"></a>      <span class="st">"The Cox model on the same data reports only HR = %.2f (a conditional rate ratio, not a risk)"</span>,</span>
-<span id="cb5-217"><a href="#cb5-217" aria-hidden="true" tabindex="-1"></a>      cox_hr</span>
-<span id="cb5-218"><a href="#cb5-218" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb5-219"><a href="#cb5-219" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
-<span id="cb5-220"><a href="#cb5-220" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
-<span id="cb5-221"><a href="#cb5-221" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">plot.title.position =</span> <span class="st">"plot"</span>)</span>
-<span id="cb5-222"><a href="#cb5-222" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb5-223"><a href="#cb5-223" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-224"><a href="#cb5-224" aria-hidden="true" tabindex="-1"></a>The Cox model and the logistic g-computation are fitted on the same data, but they answer different questions. The hazard ratio is a conditional, instantaneous rate ratio that does not directly tell us how many deaths would be averted by HAART, and it is non-collapsible: the conditional HR differs from the marginal HR even without confounding. The g-computation risk difference tells you: "X more people per 100 would have died over follow-up if no one had been initiated on HAART compared to if everyone had been." That is the kind of number patients and clinicians need to make decisions.</span>
-<span id="cb5-225"><a href="#cb5-225" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-226"><a href="#cb5-226" aria-hidden="true" tabindex="-1"></a><span class="fu">### Longitudinal failure: treatment-confounder feedback</span></span>
-<span id="cb5-227"><a href="#cb5-227" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-228"><a href="#cb5-228" aria-hidden="true" tabindex="-1"></a>The point-treatment analysis above already shows that the *estimand* matters. The HAART setting also illustrates a deeper, structural problem that no choice of point-treatment estimator can fix. In the longitudinal HAART data, CD4 count is measured at each visit and used to guide treatment decisions. But CD4 is also affected by prior treatment: HAART improves CD4 counts. This creates **treatment–confounder feedback**, a structure where the same variable (CD4) is simultaneously a confounder of future treatment and a consequence of past treatment.</span>
-<span id="cb5-229"><a href="#cb5-229" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-230"><a href="#cb5-230" aria-hidden="true" tabindex="-1"></a>Standard regression faces an impossible choice in this setting. If you do not adjust for time-varying CD4, you leave confounding of future treatment decisions unaddressed. If you do adjust for it, you block part of the causal pathway from HAART through improved CD4 to reduced mortality. Neither approach produces a consistent estimate of the total treatment effect. This is not a matter of choosing the right covariates or the right functional form. It is a structural limitation of the regression framework when applied to longitudinal data with feedback.</span>
-<span id="cb5-231"><a href="#cb5-231" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-232"><a href="#cb5-232" aria-hidden="true" tabindex="-1"></a>The g-methods developed in this handbook (g-computation, IPTW with marginal structural models, and longitudinal TMLE) were designed for exactly this structure. We return to the longitudinal HAART data in the <span class="co">[</span><span class="ot">Running Case Study</span><span class="co">](00-case-study.qmd)</span> and develop the necessary methods in Part III.</span>
+<span id="cb5-129"><a href="#cb5-129" aria-hidden="true" tabindex="-1"></a>Misspecification bias is **silent**. A regression with the wrong functional form still produces coefficients and p-values with no warning. This motivates semiparametric estimators (like TMLE with machine learning <span class="co">[</span><span class="ot">@vanderLaan2006tmle; @bang2005doubly</span><span class="co">]</span>) that relax parametric assumptions.</span>
+<span id="cb5-130"><a href="#cb5-130" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb5-131"><a href="#cb5-131" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-132"><a href="#cb5-132" aria-hidden="true" tabindex="-1"></a>Let's compare the Cox approach to g-computation, which directly targets the marginal risk difference for mortality over follow-up. Both models are fit on the *same* data and adjust for the *same* confounders; the only thing that changes is what we ask the fitted model to report.</span>
+<span id="cb5-133"><a href="#cb5-133" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-136"><a href="#cb5-136" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb5-137"><a href="#cb5-137" aria-hidden="true" tabindex="-1"></a><span class="co"># G-computation: fit a logistic outcome model, then standardize</span></span>
+<span id="cb5-138"><a href="#cb5-138" aria-hidden="true" tabindex="-1"></a>gcomp_model <span class="ot">&lt;-</span> <span class="fu">glm</span>(</span>
+<span id="cb5-139"><a href="#cb5-139" aria-hidden="true" tabindex="-1"></a>  died <span class="sc">~</span> ever_haart <span class="sc">+</span> age <span class="sc">+</span> sex <span class="sc">+</span> cd4_sqrt_baseline,</span>
+<span id="cb5-140"><a href="#cb5-140" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> binomial, <span class="at">data =</span> dat</span>
+<span id="cb5-141"><a href="#cb5-141" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb5-142"><a href="#cb5-142" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-143"><a href="#cb5-143" aria-hidden="true" tabindex="-1"></a><span class="co"># Predict each person's counterfactual mortality risk under both strategies,</span></span>
+<span id="cb5-144"><a href="#cb5-144" aria-hidden="true" tabindex="-1"></a><span class="co"># then average to get the marginal (population-level) risks</span></span>
+<span id="cb5-145"><a href="#cb5-145" aria-hidden="true" tabindex="-1"></a>risk1 <span class="ot">&lt;-</span> <span class="fu">mean</span>(<span class="fu">predict</span>(gcomp_model, <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">1</span>), <span class="at">type =</span> <span class="st">"response"</span>))</span>
+<span id="cb5-146"><a href="#cb5-146" aria-hidden="true" tabindex="-1"></a>risk0 <span class="ot">&lt;-</span> <span class="fu">mean</span>(<span class="fu">predict</span>(gcomp_model, <span class="fu">mutate</span>(dat, <span class="at">ever_haart =</span> <span class="dv">0</span>), <span class="at">type =</span> <span class="st">"response"</span>))</span>
+<span id="cb5-147"><a href="#cb5-147" aria-hidden="true" tabindex="-1"></a>risk_diff <span class="ot">&lt;-</span> risk1 <span class="sc">-</span> risk0</span>
+<span id="cb5-148"><a href="#cb5-148" aria-hidden="true" tabindex="-1"></a>risk_ratio <span class="ot">&lt;-</span> risk1 <span class="sc">/</span> risk0</span>
+<span id="cb5-149"><a href="#cb5-149" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-150"><a href="#cb5-150" aria-hidden="true" tabindex="-1"></a><span class="co"># Cox model on the same data: the conditional hazard ratio</span></span>
+<span id="cb5-151"><a href="#cb5-151" aria-hidden="true" tabindex="-1"></a>cox_hr <span class="ot">&lt;-</span> <span class="fu">exp</span>(<span class="fu">coef</span>(cox_model)[<span class="st">"ever_haart"</span>])</span>
+<span id="cb5-152"><a href="#cb5-152" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb5-153"><a href="#cb5-153" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-154"><a href="#cb5-154" aria-hidden="true" tabindex="-1"></a>G-computation **predicts** counterfactual outcomes for every person under treatment and under control, then **averages** the difference. The result is a **marginal risk difference**, a population-level quantity directly relevant to decision-making, unlike the conditional hazard ratio from the Cox model. Placing the two side by side makes the gap concrete:</span>
+<span id="cb5-155"><a href="#cb5-155" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-158"><a href="#cb5-158" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb5-159"><a href="#cb5-159" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: tbl-cox-vs-gcomp</span></span>
+<span id="cb5-160"><a href="#cb5-160" aria-hidden="true" tabindex="-1"></a><span class="co">#| tbl-cap: "The same data and the same confounders, two different estimands. The Cox hazard ratio lives on an instantaneous rate scale and does not translate into how many deaths a treatment policy would avert; the g-computation contrasts live on the risk scale and do."</span></span>
+<span id="cb5-161"><a href="#cb5-161" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
+<span id="cb5-162"><a href="#cb5-162" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(</span>
+<span id="cb5-163"><a href="#cb5-163" aria-hidden="true" tabindex="-1"></a>  <span class="at">Quantity =</span> <span class="fu">c</span>(</span>
+<span id="cb5-164"><a href="#cb5-164" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Cox hazard ratio (ever vs never HAART)"</span>,</span>
+<span id="cb5-165"><a href="#cb5-165" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Risk if everyone initiated HAART, E[Y(1)]"</span>,</span>
+<span id="cb5-166"><a href="#cb5-166" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Risk if no one initiated HAART, E[Y(0)]"</span>,</span>
+<span id="cb5-167"><a href="#cb5-167" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Marginal risk difference, E[Y(1)] - E[Y(0)]"</span>,</span>
+<span id="cb5-168"><a href="#cb5-168" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Marginal risk ratio, E[Y(1)] / E[Y(0)]"</span></span>
+<span id="cb5-169"><a href="#cb5-169" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb5-170"><a href="#cb5-170" aria-hidden="true" tabindex="-1"></a>  <span class="at">Value =</span> <span class="fu">c</span>(</span>
+<span id="cb5-171"><a href="#cb5-171" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sprintf</span>(<span class="st">"%.2f"</span>, cox_hr),</span>
+<span id="cb5-172"><a href="#cb5-172" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sprintf</span>(<span class="st">"%.1f%%"</span>, <span class="dv">100</span> <span class="sc">*</span> risk1),</span>
+<span id="cb5-173"><a href="#cb5-173" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sprintf</span>(<span class="st">"%.1f%%"</span>, <span class="dv">100</span> <span class="sc">*</span> risk0),</span>
+<span id="cb5-174"><a href="#cb5-174" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sprintf</span>(<span class="st">"%+.1f per 100"</span>, <span class="dv">100</span> <span class="sc">*</span> risk_diff),</span>
+<span id="cb5-175"><a href="#cb5-175" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sprintf</span>(<span class="st">"%.2f"</span>, risk_ratio)</span>
+<span id="cb5-176"><a href="#cb5-176" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb5-177"><a href="#cb5-177" aria-hidden="true" tabindex="-1"></a>  <span class="at">Scale =</span> <span class="fu">c</span>(</span>
+<span id="cb5-178"><a href="#cb5-178" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Conditional, instantaneous rate ratio"</span>,</span>
+<span id="cb5-179"><a href="#cb5-179" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Probability"</span>, <span class="st">"Probability"</span>,</span>
+<span id="cb5-180"><a href="#cb5-180" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Probability difference"</span>, <span class="st">"Probability ratio"</span></span>
+<span id="cb5-181"><a href="#cb5-181" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb5-182"><a href="#cb5-182" aria-hidden="true" tabindex="-1"></a>) <span class="sc">|&gt;</span></span>
+<span id="cb5-183"><a href="#cb5-183" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">caption =</span> <span class="cn">NULL</span>, <span class="at">align =</span> <span class="fu">c</span>(<span class="st">"l"</span>, <span class="st">"r"</span>, <span class="st">"l"</span>))</span>
+<span id="cb5-184"><a href="#cb5-184" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb5-185"><a href="#cb5-185" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-188"><a href="#cb5-188" aria-hidden="true" tabindex="-1"></a><span class="in">```{r}</span></span>
+<span id="cb5-189"><a href="#cb5-189" aria-hidden="true" tabindex="-1"></a><span class="co">#| label: fig-cox-vs-gcomp</span></span>
+<span id="cb5-190"><a href="#cb5-190" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-cap: "Two answers to one question, from one dataset. The g-computation bars show the marginal cumulative-mortality risk the population would experience if *everyone* versus *no one* initiated HAART; the gap between them is the causal risk difference a clinician can act on. The Cox model fit to the very same data returns only the single hazard ratio in the subtitle, a conditional rate ratio that cannot be read off the risk axis at all."</span></span>
+<span id="cb5-191"><a href="#cb5-191" aria-hidden="true" tabindex="-1"></a><span class="co">#| code-fold: true</span></span>
+<span id="cb5-192"><a href="#cb5-192" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-width: 7</span></span>
+<span id="cb5-193"><a href="#cb5-193" aria-hidden="true" tabindex="-1"></a><span class="co">#| fig-height: 4</span></span>
+<span id="cb5-194"><a href="#cb5-194" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb5-195"><a href="#cb5-195" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-196"><a href="#cb5-196" aria-hidden="true" tabindex="-1"></a>gcomp_df <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb5-197"><a href="#cb5-197" aria-hidden="true" tabindex="-1"></a>  <span class="at">strategy =</span> <span class="fu">factor</span>(</span>
+<span id="cb5-198"><a href="#cb5-198" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="st">"Everyone initiates</span><span class="sc">\n</span><span class="st">HAART  (E[Y(1)])"</span>, <span class="st">"No one initiates</span><span class="sc">\n</span><span class="st">HAART  (E[Y(0)])"</span>),</span>
+<span id="cb5-199"><a href="#cb5-199" aria-hidden="true" tabindex="-1"></a>    <span class="at">levels =</span> <span class="fu">c</span>(<span class="st">"No one initiates</span><span class="sc">\n</span><span class="st">HAART  (E[Y(0)])"</span>, <span class="st">"Everyone initiates</span><span class="sc">\n</span><span class="st">HAART  (E[Y(1)])"</span>)</span>
+<span id="cb5-200"><a href="#cb5-200" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb5-201"><a href="#cb5-201" aria-hidden="true" tabindex="-1"></a>  <span class="at">risk =</span> <span class="fu">c</span>(risk1, risk0)</span>
+<span id="cb5-202"><a href="#cb5-202" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb5-203"><a href="#cb5-203" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-204"><a href="#cb5-204" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(gcomp_df, <span class="fu">aes</span>(strategy, risk, <span class="at">fill =</span> strategy)) <span class="sc">+</span></span>
+<span id="cb5-205"><a href="#cb5-205" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_col</span>(<span class="at">width =</span> <span class="fl">0.6</span>, <span class="at">show.legend =</span> <span class="cn">FALSE</span>) <span class="sc">+</span></span>
+<span id="cb5-206"><a href="#cb5-206" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> <span class="fu">sprintf</span>(<span class="st">"%.1f%%"</span>, <span class="dv">100</span> <span class="sc">*</span> risk)), <span class="at">vjust =</span> <span class="sc">-</span><span class="fl">0.5</span>, <span class="at">size =</span> <span class="dv">4</span>) <span class="sc">+</span></span>
+<span id="cb5-207"><a href="#cb5-207" aria-hidden="true" tabindex="-1"></a>  <span class="fu">annotate</span>(</span>
+<span id="cb5-208"><a href="#cb5-208" aria-hidden="true" tabindex="-1"></a>    <span class="st">"label"</span>, <span class="at">x =</span> <span class="fl">1.5</span>, <span class="at">y =</span> <span class="fu">max</span>(gcomp_df<span class="sc">$</span>risk) <span class="sc">*</span> <span class="fl">1.18</span>,</span>
+<span id="cb5-209"><a href="#cb5-209" aria-hidden="true" tabindex="-1"></a>    <span class="at">label =</span> <span class="fu">sprintf</span>(<span class="st">"Causal risk difference</span><span class="sc">\n</span><span class="st">%+.1f per 100"</span>, <span class="dv">100</span> <span class="sc">*</span> risk_diff),</span>
+<span id="cb5-210"><a href="#cb5-210" aria-hidden="true" tabindex="-1"></a>    <span class="at">size =</span> <span class="fl">3.5</span>, <span class="at">label.size =</span> <span class="dv">0</span></span>
+<span id="cb5-211"><a href="#cb5-211" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb5-212"><a href="#cb5-212" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(</span>
+<span id="cb5-213"><a href="#cb5-213" aria-hidden="true" tabindex="-1"></a>    <span class="at">labels =</span> <span class="cf">function</span>(x) <span class="fu">paste0</span>(<span class="dv">100</span> <span class="sc">*</span> x, <span class="st">"%"</span>),</span>
+<span id="cb5-214"><a href="#cb5-214" aria-hidden="true" tabindex="-1"></a>    <span class="at">expand =</span> <span class="fu">expansion</span>(<span class="at">mult =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="fl">0.30</span>))</span>
+<span id="cb5-215"><a href="#cb5-215" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb5-216"><a href="#cb5-216" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_fill_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"#9ecae1"</span>, <span class="st">"#3182bd"</span>)) <span class="sc">+</span></span>
+<span id="cb5-217"><a href="#cb5-217" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb5-218"><a href="#cb5-218" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="cn">NULL</span>, <span class="at">y =</span> <span class="st">"Cumulative mortality risk"</span>,</span>
+<span id="cb5-219"><a href="#cb5-219" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="st">"G-computation reports a marginal, decision-relevant contrast"</span>,</span>
+<span id="cb5-220"><a href="#cb5-220" aria-hidden="true" tabindex="-1"></a>    <span class="at">subtitle =</span> <span class="fu">sprintf</span>(</span>
+<span id="cb5-221"><a href="#cb5-221" aria-hidden="true" tabindex="-1"></a>      <span class="st">"The Cox model on the same data reports only HR = %.2f (a conditional rate ratio, not a risk)"</span>,</span>
+<span id="cb5-222"><a href="#cb5-222" aria-hidden="true" tabindex="-1"></a>      cox_hr</span>
+<span id="cb5-223"><a href="#cb5-223" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb5-224"><a href="#cb5-224" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb5-225"><a href="#cb5-225" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">12</span>) <span class="sc">+</span></span>
+<span id="cb5-226"><a href="#cb5-226" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">plot.title.position =</span> <span class="st">"plot"</span>)</span>
+<span id="cb5-227"><a href="#cb5-227" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb5-228"><a href="#cb5-228" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-229"><a href="#cb5-229" aria-hidden="true" tabindex="-1"></a>The Cox model and the logistic g-computation are fitted on the same data, but they answer different questions. The hazard ratio is a conditional, instantaneous rate ratio that does not directly tell us how many deaths would be averted by HAART, and it is non-collapsible: the conditional HR differs from the marginal HR even without confounding. The g-computation risk difference $E<span class="co">[</span><span class="ot">Y(1)</span><span class="co">]</span> - E<span class="co">[</span><span class="ot">Y(0)</span><span class="co">]</span>$ is **negative** here, because HAART is protective: the figure and table print a number like $-X$ per 100, meaning that initiating HAART in everyone rather than no one *lowers* cumulative mortality by about $X$ per 100. Read the other way round, about $X$ more people per 100 would have died if no one had been initiated on HAART compared to if everyone had been. That is the kind of number patients and clinicians need to make decisions.</span>
+<span id="cb5-230"><a href="#cb5-230" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-231"><a href="#cb5-231" aria-hidden="true" tabindex="-1"></a><span class="co">&lt;!-- editor note: reconciled the sign per the editorial spec. The figure/table annotate the signed risk difference 100*risk_diff (= risk1 - risk0, negative for a protective treatment); the prose now reads that negative number correctly instead of asserting a positive value next to a negative printed one. --&gt;</span></span>
+<span id="cb5-232"><a href="#cb5-232" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb5-233"><a href="#cb5-233" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-234"><a href="#cb5-234" aria-hidden="true" tabindex="-1"></a><span class="fu">## Summary</span></span>
+<span id="cb5-234"><a href="#cb5-234" aria-hidden="true" tabindex="-1"></a><span class="fu">### Longitudinal failure: treatment-confounder feedback</span></span>
 <span id="cb5-235"><a href="#cb5-235" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-236"><a href="#cb5-236" aria-hidden="true" tabindex="-1"></a>:::{.callout-tip}</span>
-<span id="cb5-237"><a href="#cb5-237" aria-hidden="true" tabindex="-1"></a><span class="fu">## Key Takeaways</span></span>
-<span id="cb5-238"><a href="#cb5-238" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-239"><a href="#cb5-239" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Regression is not inherently causal.** It estimates conditional associations under strong model assumptions. An adjusted coefficient is not the same as a causal effect.</span>
-<span id="cb5-240"><a href="#cb5-240" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Causal inference starts with a question, not a model.** Define your causal question and target estimand (e.g., the ATE on the risk difference scale) *before* choosing an analytic method.</span>
-<span id="cb5-241"><a href="#cb5-241" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**The counterfactual framework clarifies what we want to estimate.** Y(1), Y(0), and the ATE give us precise, model-free definitions of causal effects.</span>
-<span id="cb5-242"><a href="#cb5-242" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**G-computation, IPTW, and TMLE estimate marginal causal effects.** These methods target the population-level quantity defined by the g-computation formula, rather than relying on regression coefficients that conflate the estimand with the model <span class="co">[</span><span class="ot">@smith2023systematic</span><span class="co">]</span>.</span>
-<span id="cb5-243"><a href="#cb5-243" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**The hazard ratio from Cox regression is not the ATE.** Hazard ratios are conditional, instantaneous rate measures that do not directly translate to risk differences. This is perhaps the single most important distinction for epidemiologists moving from traditional regression to causal inference methods.</span>
-<span id="cb5-244"><a href="#cb5-244" aria-hidden="true" tabindex="-1"></a>:::</span>
-<span id="cb5-245"><a href="#cb5-245" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-246"><a href="#cb5-246" aria-hidden="true" tabindex="-1"></a><span class="fu">## What comes next</span></span>
-<span id="cb5-247"><a href="#cb5-247" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-248"><a href="#cb5-248" aria-hidden="true" tabindex="-1"></a>Now that you understand why regression coefficients are not causal effects, the next chapter introduces the **Causal Roadmap**: a structured workflow that turns a scientific question into a defensible analysis plan, from question definition through estimation and interpretation.</span>
-<span id="cb5-249"><a href="#cb5-249" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-250"><a href="#cb5-250" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
-<span id="cb5-251"><a href="#cb5-251" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-252"><a href="#cb5-252" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
-<span id="cb5-253"><a href="#cb5-253" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. Why can't you interpret an adjusted logistic regression coefficient as the ATE?&lt;/strong&gt;&lt;/summary&gt;</span>
-<span id="cb5-254"><a href="#cb5-254" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-255"><a href="#cb5-255" aria-hidden="true" tabindex="-1"></a>The adjusted coefficient from logistic regression is a **conditional log-odds ratio**. It describes the association between treatment and outcome within strata defined by the covariates in the model. This differs from the ATE (a marginal risk difference) in at least two ways. First, the odds ratio is **non-collapsible**: even without confounding, a conditional odds ratio and a marginal odds ratio will differ, so you cannot read the coefficient as a population-level summary. Second, the coefficient li</span>
+<span id="cb5-236"><a href="#cb5-236" aria-hidden="true" tabindex="-1"></a>The point-treatment analysis above already shows that the *estimand* matters. The HAART setting also illustrates a deeper, structural problem that no choice of point-treatment estimator can fix. In the longitudinal HAART data, CD4 count is measured at each visit and used to guide treatment decisions. But CD4 is also affected by prior treatment: HAART improves CD4 counts. This creates **treatment–confounder feedback**, a structure where the same variable (CD4) is simultaneously a confounder of future treatment and a consequence of past treatment.</span>
+<span id="cb5-237"><a href="#cb5-237" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-238"><a href="#cb5-238" aria-hidden="true" tabindex="-1"></a>Standard regression faces an impossible choice in this setting. If you do not adjust for time-varying CD4, you leave confounding of future treatment decisions unaddressed. If you do adjust for it, you block part of the causal pathway from HAART through improved CD4 to reduced mortality. Neither approach produces a consistent estimate of the total treatment effect. This is not a matter of choosing the right covariates or the right functional form. It is a structural limitation of the regression framework when applied to longitudinal data with feedback.</span>
+<span id="cb5-239"><a href="#cb5-239" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-240"><a href="#cb5-240" aria-hidden="true" tabindex="-1"></a>The g-methods developed in this handbook (g-computation, IPTW with marginal structural models, and longitudinal TMLE) were designed for exactly this structure. We return to the longitudinal HAART data in the <span class="co">[</span><span class="ot">Running Case Study</span><span class="co">](00-case-study.qmd)</span> and develop the necessary methods in Part III.</span>
+<span id="cb5-241"><a href="#cb5-241" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-242"><a href="#cb5-242" aria-hidden="true" tabindex="-1"></a><span class="fu">## Summary</span></span>
+<span id="cb5-243"><a href="#cb5-243" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-244"><a href="#cb5-244" aria-hidden="true" tabindex="-1"></a>:::{.callout-tip}</span>
+<span id="cb5-245"><a href="#cb5-245" aria-hidden="true" tabindex="-1"></a><span class="fu">## Key Takeaways</span></span>
+<span id="cb5-246"><a href="#cb5-246" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-247"><a href="#cb5-247" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Regression is not inherently causal.** It estimates conditional associations under strong model assumptions. An adjusted coefficient is not the same as a causal effect.</span>
+<span id="cb5-248"><a href="#cb5-248" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**Causal inference starts with a question, not a model.** Define your causal question and target estimand (e.g., the ATE on the risk difference scale) *before* choosing an analytic method.</span>
+<span id="cb5-249"><a href="#cb5-249" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**The counterfactual framework clarifies what we want to estimate.** Y(1), Y(0), and the ATE give us precise, model-free definitions of causal effects.</span>
+<span id="cb5-250"><a href="#cb5-250" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**G-computation, IPTW, and TMLE estimate marginal causal effects.** These methods target the population-level quantity defined by the g-computation formula, rather than relying on regression coefficients that conflate the estimand with the model <span class="co">[</span><span class="ot">@smith2023systematic</span><span class="co">]</span>.</span>
+<span id="cb5-251"><a href="#cb5-251" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>**The hazard ratio from Cox regression is not the ATE.** Hazard ratios are conditional, instantaneous rate measures that do not directly translate to risk differences. This is perhaps the single most important distinction for epidemiologists moving from traditional regression to causal inference methods.</span>
+<span id="cb5-252"><a href="#cb5-252" aria-hidden="true" tabindex="-1"></a>:::</span>
+<span id="cb5-253"><a href="#cb5-253" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-254"><a href="#cb5-254" aria-hidden="true" tabindex="-1"></a><span class="fu">## What comes next</span></span>
+<span id="cb5-255"><a href="#cb5-255" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-256"><a href="#cb5-256" aria-hidden="true" tabindex="-1"></a>Now that you understand why regression coefficients are not causal effects, the next chapter introduces the **Causal Roadmap**: a structured workflow that turns a scientific question into a defensible analysis plan, from question definition through estimation and interpretation.</span>
+<span id="cb5-257"><a href="#cb5-257" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-258"><a href="#cb5-258" aria-hidden="true" tabindex="-1"></a><span class="fu">## Check your understanding</span></span>
+<span id="cb5-259"><a href="#cb5-259" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-260"><a href="#cb5-260" aria-hidden="true" tabindex="-1"></a>&lt;details&gt;</span>
+<span id="cb5-261"><a href="#cb5-261" aria-hidden="true" tabindex="-1"></a>&lt;summary&gt;&lt;strong&gt;Q1. Why can't you interpret an adjusted logistic regression coefficient as the ATE?&lt;/strong&gt;&lt;/summary&gt;</span>
+<span id="cb5-262"><a href="#cb5-262" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-263"><a href="#cb5-263" aria-hidden="true" tabindex="-1"></a>The adjusted coefficient from logistic regression is a **conditional log-odds ratio**. It describes the association between treatment and outcome within strata defined by the covariates in the model. This differs from the ATE (a marginal risk difference) in at least two ways. First, the odds ratio is **non-collapsible**: even without confounding, a conditional odds ratio and a marginal odds ratio will differ, so you cannot read the coefficient as a population-level summary. Second, the coefficient li</span>
 </code><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></pre></div>
 </div></div></div></div></div>
 </div> <!-- /content -->

@@ -20,13 +20,15 @@ IPTW reweights observational data so that, in the weighted sample, treatment app
 The **propensity score** [@rosenbaum1983propensity] is the probability of receiving treatment given measured covariates:
 
 $$
-e(W) = P(A = 1 \mid W)
+g(W) = P(A = 1 \mid W)
 $$
+
+We write the propensity score $g(W)$ throughout this handbook; some texts write it $e(W)$ for the same quantity.
 
 IPTW weights are constructed from the propensity score:
 
-- For treated:  \( \displaystyle w_i = \frac{1}{e(W_i)} \)
-- For control: \( \displaystyle w_i = \frac{1}{1 - e(W_i)} \)
+- For treated:  \( \displaystyle w_i = \frac{1}{g(W_i)} \)
+- For control: \( \displaystyle w_i = \frac{1}{1 - g(W_i)} \)
 
 The propensity score is a **balancing score**: conditioning on it is sufficient to remove confounding by all measured covariates $W$. This is why a single scalar summary can replace adjustment for many covariates.
 :::
@@ -41,16 +43,16 @@ The propensity score is a **balancing score**: conditioning on it is sufficient 
 Under the same identification assumptions from @sec-roadmap (consistency, exchangeability, and positivity), the average potential outcome under treatment can be expressed as
 
 $$
-E[Y(1)] = E\left[ \frac{I(A = 1) Y}{e(W)} \right]
+E[Y(1)] = E\left[ \frac{I(A = 1) Y}{g(W)} \right]
 $$
 
 and under control
 
 $$
-E[Y(0)] = E\left[ \frac{I(A = 0) Y}{1 - e(W)} \right]
+E[Y(0)] = E\left[ \frac{I(A = 0) Y}{1 - g(W)} \right]
 $$
 
-In plain terms, we recover the average outcome under treatment by upweighting treated individuals who were unlikely to be treated (given their covariates) and downweighting those who were very likely to be treated. The IPTW estimator replaces the expectation with the sample average and replaces the true \( e(W) \) with an estimated one.
+In plain terms, we recover the average outcome under treatment by upweighting treated individuals who were unlikely to be treated (given their covariates) and downweighting those who were very likely to be treated. The IPTW estimator replaces the expectation with the sample average and replaces the true \( g(W) \) with an estimated one.
 :::
 
 This is called a **Horvitz-Thompson type** estimator because it has the same structure as the survey sampling estimator that reweights observations by the inverse of their selection probability. In our setting, "selection" is selection into a treatment group. We upweight patients whose treatment assignment was unlikely given their covariates.
@@ -66,8 +68,7 @@ We use the HIV antiretroviral therapy cohort from `_data/load-haart-cohort.R` [@
 #| code-fold: true
 library(tidyverse)
 
-download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")
-source("load-haart-cohort.R")
+source("_data/load-haart-cohort.R")
 dat <- as_tibble(haart_baseline)
 dat %>% head()
 ```
@@ -132,7 +133,7 @@ As a rule of thumb, be concerned if propensity scores for either group pile up n
 
 # Constructing IPTW Weights
 
-**Definition.** Unstabilized weights are the simplest form of IPTW weights. For each individual, the weight is the inverse of the probability of receiving the treatment they actually received: for the treated ($A = 1$), $w_i = 1 / e(W_i)$; for the untreated ($A = 0$), $w_i = 1 / (1 - e(W_i))$.
+**Definition.** Unstabilized weights are the simplest form of IPTW weights. For each individual, the weight is the inverse of the probability of receiving the treatment they actually received: for the treated ($A = 1$), $w_i = 1 / g(W_i)$; for the untreated ($A = 0$), $w_i = 1 / (1 - g(W_i))$.
 
 These weights create a pseudo-population where treatment is independent of measured confounders, but they can be highly variable when some propensity scores are close to 0 or 1. For example, an untreated patient with a propensity score of 0.95 (very likely to be treated, yet was not) receives a weight of $1 / (1 - 0.95) = 20$, meaning this single person counts as 20 in the pseudo-population.
 
@@ -160,7 +161,7 @@ Stabilized weights multiply the standard IPTW weights by the **marginal probabil
 For a binary treatment, the stabilized weight for individual $i$ is:
 
 $$
-SW_i = \frac{P(A = 1)}{e(W_i)} \quad \text{if } A_i = 1, \qquad SW_i = \frac{P(A = 0)}{1 - e(W_i)} \quad \text{if } A_i = 0
+SW_i = \frac{P(A = 1)}{g(W_i)} \quad \text{if } A_i = 1, \qquad SW_i = \frac{P(A = 0)}{1 - g(W_i)} \quad \text{if } A_i = 0
 $$
 
 where $P(A = 1)$ is the marginal probability of treatment (estimated as the sample proportion treated) and $P(A = 0) = 1 - P(A = 1)$ is the marginal probability of control. Note that the numerator uses the marginal probability of the treatment *actually received*: $P(A = 1)$ for treated, $P(A = 0)$ for untreated, not a single value for both groups.
@@ -170,7 +171,7 @@ Unstabilized weights create a pseudo-population that is larger than the original
 In epidemiologic practice, stabilized weights are often preferred for the Horvitz-Thompson estimator. However, the choice is not automatic:
 
 - When fitting a **marginal structural model** [@petersen2007msm; @robins1994estimation] (weighted regression with covariates in the numerator), the numerator of the stabilized weight should include those covariates, not just the marginal treatment probability.
-- When the **Hajek estimator** (ratio of weighted sums) is used, stabilization has less impact because the estimator self-normalizes.
+- When the **Hajek estimator** (ratio of weighted sums) is used, stabilization leaves the point estimate **unchanged**: multiplying every weight by the constant marginal treatment probability cancels exactly in the self-normalizing ratio. Stabilization still matters for non-self-normalizing (Horvitz-Thompson) forms and for marginal structural model fitting.
 - Unstabilized weights are appropriate when estimating **total counts** of events in the pseudo-population, since stabilization rescales the population size.
 - Always check weight diagnostics (Section 8 below) regardless of whether weights are stabilized.
 
@@ -438,7 +439,7 @@ The two failure modes call for different responses. Poor overlap is a positivity
 <details>
 <summary><strong>Q1. Why does IPTW depend on correct specification of the treatment model rather than the outcome model?</strong></summary>
 
-IPTW estimates causal effects by reweighting observations using the inverse of the propensity score $e(W) = P(A = 1 \mid W)$. The weights are constructed entirely from the treatment model; the outcome model is never used. If the propensity score model is misspecified, the weights will not correctly balance confounders across treatment groups, and the pseudo-population will still be confounded. By contrast, g-computation relies on the outcome model and never uses the treatment model. This distinction is why doubly robust methods, which use both models, are attractive.
+IPTW estimates causal effects by reweighting observations using the inverse of the propensity score $g(W) = P(A = 1 \mid W)$. The weights are constructed entirely from the treatment model; the outcome model is never used. If the propensity score model is misspecified, the weights will not correctly balance confounders across treatment groups, and the pseudo-population will still be confounded. By contrast, g-computation relies on the outcome model and never uses the treatment model. This distinction is why doubly robust methods, which use both models, are attractive.
 
 </details>
 
@@ -452,7 +453,7 @@ Without diagnostics, several problems can go undetected. Near-violations of posi
 <details>
 <summary><strong>Q3. What is the difference between stabilized and unstabilized weights, and why do we prefer stabilized weights?</strong></summary>
 
-Unstabilized weights are simply $1 / e(W)$ for the treated and $1 / (1 - e(W))$ for the untreated. Stabilized weights multiply these by the marginal probability of treatment: $P(A) / e(W)$ for the treated and $(1 - P(A)) / (1 - e(W))$ for the untreated. This rescaling brings the weights closer to 1 on average and preserves the original sample size in expectation. Stabilized weights produce narrower confidence intervals and more stable point estimates without introducing bias for the marginal causal effect. In practice, stabilized weights should be the default choice.
+Unstabilized weights are simply $1 / g(W)$ for the treated and $1 / (1 - g(W))$ for the untreated. Stabilized weights multiply these by the marginal probability of treatment: $P(A) / g(W)$ for the treated and $(1 - P(A)) / (1 - g(W))$ for the untreated. This rescaling brings the weights closer to 1 on average and preserves the original sample size in expectation. Stabilized weights produce narrower confidence intervals and more stable point estimates without introducing bias for the marginal causal effect. In practice, stabilized weights should be the default choice.
 
 </details>
 

@@ -76,21 +76,21 @@ Note that "doubly robust" is a *consistency* property: it guarantees the estimat
 Let:
 
 - $g(W) = P(A = 1 \mid W)$ be the propensity score
-- $m(a, W) = E[Y \mid A = a, W]$ be the outcome regression
+- $Q(a, W) = E[Y \mid A = a, W]$ be the outcome regression
 
 Then:
 
 $$
-\hat{\mu}_1 = \frac{1}{n} \sum_i \left[ m(1, W_i) + \frac{A_i}{g(W_i)} \big(Y_i - m(1, W_i)\big) \right]
+\hat{\mu}_1 = \frac{1}{n} \sum_i \left[ Q(1, W_i) + \frac{A_i}{g(W_i)} \big(Y_i - Q(1, W_i)\big) \right]
 $$
 
 $$
-\hat{\mu}_0 = \frac{1}{n} \sum_i \left[ m(0, W_i) + \frac{1 - A_i}{1 - g(W_i)} \big(Y_i - m(0, W_i)\big) \right]
+\hat{\mu}_0 = \frac{1}{n} \sum_i \left[ Q(0, W_i) + \frac{1 - A_i}{1 - g(W_i)} \big(Y_i - Q(0, W_i)\big) \right]
 $$
 
 ATE = $\hat{\mu}_1 - \hat{\mu}_0$
 
-The structure is *G-computation plus an EIF correction*: the first term, $m(a, W_i)$, is the outcome-model prediction (the G-computation ingredient); the second term is an IPW-weighted residual that corrects any bias in the outcome model. If $m$ is correct, the residuals average to zero and the correction vanishes (we recover G-computation). If $m$ is wrong but $g$ is correct, the IPW correction fixes the bias (we recover IPTW-style behaviour). The "augmentation" in AIPW's name refers exactly to adding this correction to the G-computation plug-in.
+The structure is *G-computation plus an EIF correction*: the first term, $Q(a, W_i)$, is the outcome-model prediction (the G-computation ingredient); the second term is an IPW-weighted residual that corrects any bias in the outcome model. If $Q$ is correct, the residuals average to zero and the correction vanishes (we recover G-computation). If $Q$ is wrong but $g$ is correct, the IPW correction fixes the bias (we recover IPTW-style behaviour). The "augmentation" in AIPW's name refers exactly to adding this correction to the G-computation plug-in.
 
 ---
 
@@ -103,8 +103,7 @@ We use the same point-treatment HAART cohort from @sec-gcomputation and @sec-ipt
 #| code-fold: true
 library(tidyverse)
 
-download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")
-source("load-haart-cohort.R")
+source("_data/load-haart-cohort.R")
 dat <- as_tibble(haart_baseline)
 n <- nrow(dat)
 ```
@@ -143,7 +142,7 @@ aipw_est <- with(dat, {
 aipw_est
 ```
 
-Each AIPW component starts with the outcome-model prediction and adds a weighted residual correction. For instance, `Q1 + ever_haart * (died - Q1) / ps` corrects $m(1, W)$ by upweighting the residual $(\text{died} - Q1)$ for treated individuals. This structure gives AIPW its doubly robust property: even if $Q$ is wrong, the IPW correction fixes the bias (and vice versa).
+Each AIPW component starts with the outcome-model prediction and adds a weighted residual correction. For instance, `Q1 + ever_haart * (died - Q1) / ps` corrects $Q(1, W)$ by upweighting the residual $(\text{died} - Q1)$ for treated individuals. This structure gives AIPW its doubly robust property: even if $Q$ is wrong, the IPW correction fixes the bias (and vice versa).
 
 ---
 
@@ -251,7 +250,7 @@ tmle_ate
 2. Apply the fluctuation on the logit scale, then `plogis()` maps back to probability; guaranteeing all targeted predictions stay in $[0,1]$, unlike AIPW which can violate these bounds
 3. The TMLE **substitution estimator**: simply take the sample mean of each arm's targeted predictions. No explicit weighting needed; the clever covariate already incorporated the propensity score.
 
-The initial outcome and propensity score models do not have to be simple GLMs. They can be estimated with Super Learner [@vanderLaan2007superlearner], an ensemble machine learning approach covered in the next chapter, which reduces sensitivity to model misspecification.
+The initial outcome and propensity score models do not have to be simple GLMs. They can be estimated with Super Learner [@vanderLaan2007superlearner], an ensemble machine learning approach covered in the next chapter, which reduces sensitivity to model misspecification. In plain language, Super Learner uses cross-validation to combine many candidate models into a single prediction; it is formally introduced in @sec-superlearner, and for now the `Q.SL.library` and `g.SL.library` arguments below can be read as a flexible stand-in for the single GLM nuisance fits.
 
 ---
 
@@ -266,7 +265,7 @@ $$
 Equivalently, expanding $H$ into its treatment-arm-specific components $H_1(W) = 1/g(W)$ and $H_0(W) = -1/(1-g(W))$ (which already include the sign for each arm):
 
 $$
-D_i = \frac{A_i}{e(W_i)}\big(Y_i - Q_1^*(W_i)\big) - \frac{1-A_i}{1-e(W_i)}\big(Y_i - Q_0^*(W_i)\big) + Q_1^*(W_i) - Q_0^*(W_i) - \hat{\psi}
+D_i = \frac{A_i}{g(W_i)}\big(Y_i - Q_1^*(W_i)\big) - \frac{1-A_i}{1-g(W_i)}\big(Y_i - Q_0^*(W_i)\big) + Q_1^*(W_i) - Q_0^*(W_i) - \hat{\psi}
 $$
 
 where $\hat{\psi}$ is the TMLE ATE estimate. The variance of the ATE is estimated by the sample variance of the EIF divided by $n$: $\hat{\sigma}^2 = \frac{1}{n}\sum_i D_i^2$.
@@ -467,12 +466,6 @@ In large samples on data with well-behaved propensity scores, yes; they share th
 
 ---
 
-## What comes next
-
-This chapter presented the theory and mechanics of AIPW and TMLE. Both estimators rely on nuisance models, and the quality of those models directly affects performance. The next chapter introduces Super Learner, the ensemble machine learning tool that makes nuisance estimation flexible and data-adaptive.
-
----
-
 ## Software Implementation (R)
 
 This example demonstrates the **double robustness** property using the `tmle` package [@gruber2012tmlepackage]. We deliberately misspecify one nuisance model at a time to show that the TMLE estimate remains consistent as long as at least one model is correct. For accessible introductions to the `tmle` package in applied settings, see @hoffman2020tmle and @talbot2025tmle.
@@ -522,3 +515,11 @@ if (requireNamespace("tmle", quietly = TRUE)) {
 2. `Q.SL.library`: the Super Learner library for the outcome model $E[Y \mid A, W]$; `SL.earth` adds MARS splines to capture nonlinearity in the outcome
 3. `g.SL.library = "SL.mean"`: deliberately misspecified propensity score using only an intercept-only model (predicts the marginal mean treatment probability for everyone); this tests whether TMLE remains consistent when Q is correct but g is wrong
 4. `Q.SL.library = "SL.mean"`: deliberately misspecified outcome model; tests whether TMLE remains consistent when g is correct but Q is wrong; both Scenarios A and B should give estimates close to the true ATE = 0.5
+
+<!-- editor note: per the editorial spec, the "Software Implementation (R)" section was moved to immediately before "What comes next" so the chapter ends on the forward pointer. The code is unchanged. -->
+
+---
+
+## What comes next
+
+This chapter presented the theory and mechanics of AIPW and TMLE. Both estimators rely on nuisance models, and the quality of those models directly affects performance. The next chapter introduces Super Learner, the ensemble machine learning tool that makes nuisance estimation flexible and data-adaptive.

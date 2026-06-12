@@ -12,7 +12,7 @@ Outcome modeling and standardization, often referred to as **g-computation**, is
 
 ---
 
-G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions [@hernan2025whatif]. No reliance on a single regression coefficient required. It directly implements the identification formula from @sec-roadmap ($E[Y(a)] = E_W[E[Y \mid A=a, W]]$), making it the most concrete entry point for learning causal estimation, and mapping the causal estimand to a statistical estimand.
+G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions [@hernan2025whatif]. No reliance on a single regression coefficient required. It directly implements the identification formula from @sec-roadmap ($E[Y(a)] = E_W[E[Y \mid A=a, W]]$, where the potential outcome $Y(a)$ is written $Y(1)$ and $Y(0)$ for the two treatment levels), making it the most concrete entry point for learning causal estimation, and mapping the causal estimand to a statistical estimand.
 
 G-computation reconstructs what would have happened if *everyone* received treatment ($A=1$) and, separately, if *everyone* received control ($A=0$). The recipe is three steps: (1) fit an outcome model $E[Y \mid A, W]$, (2) predict outcomes for each individual under both treatments, and (3) average those predictions (standardization).
 
@@ -25,8 +25,7 @@ We use the shared HIV antiretroviral therapy cohort introduced in the case study
 #| code-fold: true
 library(tidyverse)
 
-download.file("https://raw.githubusercontent.com/amertens/causal-learning-handbook/main/_data/load-haart-cohort.R", "load-haart-cohort.R")
-source("load-haart-cohort.R")
+source("_data/load-haart-cohort.R")
 dat <- as_tibble(haart_baseline)
 ```
 
@@ -110,19 +109,24 @@ One of the strengths of g-computation is that once you have the counterfactual p
 # Relative risk (risk ratio)
 rr <- risk1 / risk0
 
-# Population attributable fraction (causal):
-# What fraction of cases would be eliminated if all were untreated?
-# PAF = (P(Y=1) - P(Y(0)=1)) / P(Y=1)
+# Causal prevented (excess) fraction, relative to a "no one treated" world:
+# (P(Y=1) - P(Y(0)=1)) / P(Y=1)
+# For a PROTECTIVE exposure (risk0 > overall_risk) this comes out NEGATIVE,
+# meaning the current treatment distribution PREVENTS that fraction of deaths
+# relative to no one being treated.
 overall_risk <- mean(dat$died)
-par_frac <- (overall_risk - risk0) / overall_risk
+prevented_frac <- (overall_risk - risk0) / overall_risk
 
 knitr::kable(data.frame(
-  Measure = c("Risk difference (ATE)", "Relative risk", "Population attributable fraction"),
-  Estimate = round(c(ate, rr, par_frac), 4)
+  Measure = c("Risk difference (ATE)", "Relative risk", "Prevented fraction (vs no one treated)"),
+  Estimate = round(c(ate, rr, prevented_frac), 4)
 ))
 ```
 
-The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **population attributable fraction (causal)** tells you what proportion of observed cases would be eliminated if the entire population had received control instead of treatment. Under the identification assumptions (exchangeability, positivity, consistency), this formula has a causal interpretation: it estimates the fraction of cases that would be eliminated if the entire population had been untreated. This differs from the traditional epidemiologic PAF formula, which uses observed prevalence and does not require causal assumptions but also does not have a causal interpretation.
+The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **prevented fraction** compares the observed (current) mortality risk to the risk in a counterfactual world where *no one* initiated HAART: $(P(Y=1) - P(Y(0)=1)) / P(Y=1)$. The familiar "population attributable fraction" reading, the fraction of cases that would be *eliminated* by removing exposure, applies to a *harmful* exposure. HAART is protective, so the sign flips: $\text{risk0} > \text{overall risk}$, the quantity comes out **negative**, and a negative value means the current treatment distribution *prevents* that fraction of deaths relative to a world where no one is treated. Read literally, moving everyone to no-HAART would *add* deaths, not eliminate them. Under the identification assumptions (exchangeability, positivity, consistency), this contrast has a causal interpretation, unlike the traditional epidemiologic PAF formula, which uses observed prevalence and does not require causal assumptions but also does not have a causal interpretation.
+
+<!-- editor note: implemented Option A from the editorial spec. The original code/prose labeled (overall_risk - risk0)/overall_risk as a "population attributable fraction" eliminated by removing exposure, which is sign-inverted for a protective treatment. Kept the formula, renamed to "prevented fraction", and stated the sign direction explicitly. -->
+
 
 Neither of these measures is directly available from a single logistic regression coefficient; you would need to exponentiate and back-transform, making strong assumptions about the scale. With g-computation, you compute them directly from the predicted counterfactual risks.
 
@@ -219,6 +223,11 @@ G-computation handles near-positivity violations differently from IPTW. Where IP
 ---
 
 **Practical note.** The biggest limitation of g-computation with logistic regression is that you must get the functional form right. A powerful alternative is to replace the parametric model with a data-adaptive learner (random forests, gradient boosting, GAMs, or a SuperLearner ensemble) [@vanderLaan2007superlearner], reducing reliance on parametric assumptions. In later chapters we systematically integrate SuperLearner with **TMLE** [@vanderLaan2006tmle].
+
+::: {.callout-note}
+## Super Learner in one sentence (for now)
+Super Learner is an ensemble that uses cross-validation to combine many candidate models into a single prediction, formally introduced in @sec-superlearner. Until then you can read the `SuperLearner(...)` call below as a flexible stand-in for the single GLM: same role (predict the outcome given treatment and covariates), but it lets the data choose the functional form instead of you guessing it.
+:::
 
 ```{r}
 #| interactive: true

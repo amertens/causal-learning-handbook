@@ -3,9 +3,7 @@ format: html
 ---
 
 # Short Course: Causal Inference with Targeted Learning {#sec-short-course}
-*From roadmap to TMLE to longitudinal methods in one chapter*
-
-*Estimated reading time: 60 minutes*
+*A hands-on, four-hour workshop on the running HAART cohort*
 
 ```{r}
 #| include: false
@@ -18,11 +16,87 @@ knitr::opts_chunk$set(
 )
 ```
 
-This chapter is a self-contained short course that walks through the core ideas of the handbook in a single sitting. It covers the Causal Roadmap, point-treatment TMLE (by hand and with software), longitudinal causal inference, and the `lmtp` package for realistic interventions. Each section is concise; the full handbook chapters provide deeper treatment.
+:::{.callout-note}
+## Workshop at a glance
+**Total duration:** about 4 hours (four 50- to 60-minute modules, plus short breaks and exercise time).
 
-## The Causal Roadmap
+**Intended audience:** participants who have seen regression but are new to causal inference and targeted learning.
 
-It is tempting to load the data and start fitting models. The roadmap resists that, because the model you reach for silently decides which question you end up answering. Working through a fixed sequence keeps the scientific question, rather than the software, in charge. Every causal analysis in this handbook follows the same seven steps:
+**What you will be able to do by the end:** state a causal question as a target trial and walk the seven-step Causal Roadmap; estimate a point-treatment effect three ways (g-computation, IPTW, and TMLE by hand and with software) on a real cohort and read the result in clinical terms; explain why time-varying confounding breaks standard regression and what longitudinal g-methods do about it; set up a realistic "shift the adherence distribution" intervention with `lmtp`; and run the basic positivity diagnostic that every analysis needs.
+:::
+
+This chapter is a self-contained workshop. It is a condensed tour of the full handbook, run on the single running case study, the HIV antiretroviral therapy (`haartdat`) cohort, so every method estimates the same effect on the same patients. Each module has a short "why this method exists" lead-in, runnable code, an interpretation of the number in mortality terms, and an exercise with a collapsible worked solution. The full handbook chapters develop each topic in more depth; cross-references point you there.
+
+## Prerequisites and setup
+
+This workshop assumes **R 4.2 or later**. The code uses the following packages: `tidyverse` (data handling and plotting), `ipw` (the cohort), `SuperLearner` and `tmle` (targeted learning), `lmtp` (modified treatment policies), `ggdag` and `dagitty` (DAGs), and `broom` (tidy model output). The setup chunk below loads them, installing any that are missing, and then loads the shared cohort.
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+needed <- c("tidyverse", "ipw", "SuperLearner", "tmle", "lmtp",
+            "ggdag", "dagitty", "broom")
+to_install <- needed[!vapply(needed, requireNamespace, logical(1), quietly = TRUE)]
+if (length(to_install)) install.packages(to_install)
+
+library(tidyverse)
+library(ggdag)
+library(dagitty)
+
+# Shared running cohort: creates `haartdat` (longitudinal) and
+# `haart_baseline` (one row per patient). Used by every Part II chapter.
+source("_data/load-haart-cohort.R")
+n <- nrow(haart_baseline)
+cat("Patients in baseline snapshot:", n,
+    "| % ever HAART:", round(100 * mean(haart_baseline$ever_haart), 1),
+    "| % died:", round(100 * mean(haart_baseline$died), 1), "\n")
+```
+
+The cohort follows 1,200 simulated people living with HIV from seroconversion, recording time-varying CD4, HAART initiation, mortality, and dropout. Most of this workshop uses `haart_baseline`, a one-row-per-patient snapshot, for the point-treatment modules; Module 3 returns to the longitudinal structure. See the [Running Case Study](00-case-study.qmd) for the full data description.
+
+:::{.callout-important}
+## A teaching simplification you should know about
+The point-treatment modules define treatment as "ever initiated HAART during follow-up" and analyze it as a baseline exposure. As the [case study caveat](00-case-study.qmd#cohort-summary-of-baseline-characteristics) explains, that collapse induces **immortal time bias** by construction, because "ever initiators" are guaranteed to have survived until initiation. We accept it here only to teach estimator mechanics on one familiar dataset. The unbiased analysis needs the longitudinal g-methods of Module 3 and Part III.
+:::
+
+:::{.callout-note}
+## Notation and glossary
+The workshop and the rest of the handbook share these symbols.
+
+| Symbol / term | Meaning |
+|---|---|
+| $A$ | Treatment (here `ever_haart`, or time-varying `haartind`) |
+| $W$ | Baseline covariates (age, sex, baseline CD4) |
+| $L$ | Time-varying covariate (here CD4 over time) |
+| $Y$ | Outcome (here `died`) |
+| $Y(a)$ | Potential outcome under treatment level $a$; written $Y(1)$ and $Y(0)$ for the two levels of a binary treatment |
+| $g(W) = P(A=1 \mid W)$ | Propensity score (some texts write it $e(W)$) |
+| $Q(A, W) = E[Y \mid A, W]$ | Outcome regression |
+| Propensity score | Probability of treatment given covariates |
+| Clever covariate | The propensity-derived term TMLE uses to update the outcome model |
+| Influence function | The per-patient contribution to an estimate; its spread sets the standard error |
+| ATE | Average treatment effect, $E[Y(1) - Y(0)]$ |
+| Risk difference | ATE on the probability scale, $E[Y(1)] - E[Y(0)]$ |
+:::
+
+:::{.callout-tip}
+## Agenda
+| Module | Time | Topic | Objectives |
+|---|---|---|---|
+| 1 | ~50 min | Causal Roadmap and identification | State a causal question as a target trial; name the seven steps; explain consistency, exchangeability, positivity in HAART terms; read the g-computation formula |
+| 2 | ~60 min | Point-treatment estimation | Estimate the HAART effect with g-computation, IPTW, and TMLE (by hand and with software); read the standard error; swap in Super Learner |
+| 3 | ~60 min | Longitudinal causal inference | Explain treatment-confounder feedback with a DAG; run backwards g-computation; understand sequential double robustness |
+| 4 | ~50 min | Realistic interventions and diagnostics | Set up an `lmtp` modified treatment policy; run the positivity diagnostic; know what sensitivity analysis adds |
+:::
+
+The exercises are inline, each with a collapsible solution right beside it, so you can attempt one and check it before moving on rather than flipping to an answer key at the end.
+
+---
+
+# Module 1 (~50 min): The Causal Roadmap and identification
+
+It is tempting to load the data and start fitting models. The roadmap resists that, because the model you reach for silently decides which question you end up answering. Working through a fixed sequence keeps the scientific question, rather than the software, in charge. Every causal analysis in this handbook follows the same **seven steps**:
 
 1. **Define the causal question** using a target trial protocol
 2. **Specify the causal model** (draw a DAG)
@@ -32,235 +106,403 @@ It is tempting to load the data and start fitting models. The roadmap resists th
 6. **Sensitivity analysis** for violations of the causal assumptions
 7. **Interpret** in the context of the original question
 
-The key insight: the causal question and estimand are defined *before* any model is fit. The estimand determines which statistical quantity to target. The estimation method is chosen to match that target.
+The key insight: the causal question and estimand are defined *before* any model is fit. The estimand determines which statistical quantity to target, and the estimation method is chosen to match that target. The full development is in @sec-roadmap.
 
-### Identification: three assumptions
+For the HAART question, the target trial (Step 1) compares two strategies, "initiate HAART" versus "do not initiate," among people living with HIV, with all-cause mortality as the outcome and the risk difference as the contrast. The causal model (Step 2) is the point-treatment DAG: baseline age, sex, and CD4 confound the HAART-to-death relationship.
 
-Throughout, $A$ denotes the treatment, $W$ the measured baseline covariates, and $Y$ the outcome; $Y(a)$ is the potential outcome under treatment level $a$. Under three assumptions, the causal estimand equals a function of the observed data:
+```{r}
+#| label: fig-sc-dag
+#| fig-cap: "Point-treatment DAG for the HAART workshop. Baseline confounders (age, sex, CD4) affect both HAART initiation and death."
+#| fig-width: 6
+#| fig-height: 4
+#| code-fold: true
+simple_dag <- dagify(
+  A ~ W_age + W_sex + W_cd4,
+  Y ~ A + W_age + W_sex + W_cd4,
+  exposure = "A",
+  outcome = "Y",
+  coords = list(
+    x = c(W_age = 0, W_sex = 0, W_cd4 = 0, A = 1, Y = 2),
+    y = c(W_age = 1.5, W_sex = 1, W_cd4 = 0.5, A = 0, Y = 0)
+  ),
+  labels = c(
+    W_age = "Age", W_sex = "Sex", W_cd4 = "Baseline\nCD4",
+    A = "HAART\ninitiation", Y = "Death"
+  )
+)
+ggdag(simple_dag, text = FALSE, use_labels = "label") +
+  theme_dag() +
+  labs(title = "Point-treatment DAG")
+```
 
-- **Consistency**: the observed outcome $Y$ equals the potential outcome under the treatment $A$ actually received. Treatment must be well-defined.
-- **Exchangeability**: conditional on measured covariates $W$, treatment $A$ is independent of potential outcomes. No unmeasured confounders.
-- **Positivity**: every covariate stratum has a nonzero probability of receiving each treatment. $0 < P(A = a \mid W) < 1$.
+## Identification: three assumptions
 
-Under these assumptions, the average treatment effect is identified by:
+Identification (Step 4) is the argument that, under stated assumptions, the unobservable causal effect equals a quantity we can compute from data. Three assumptions do the work. They are untestable from the data alone, so each must be argued from subject-matter knowledge.
+
+- **Consistency.** The observed outcome $Y$ equals the potential outcome $Y(a)$ under the treatment $A = a$ actually received. This requires treatment to be **well-defined**: "initiate HAART at this visit" is reasonably well-defined; a vague exposure like "good adherence" is not, because there would be many versions of it with different effects.
+- **Exchangeability.** Conditional on the measured covariates $W$, treatment $A$ is independent of the potential outcomes: there are no unmeasured confounders. In HAART terms, this is the claim that *after adjusting for age, sex, and baseline CD4, who started HAART is as good as random*. It is the hardest assumption to defend, because physicians initiate therapy in response to clinical signals, and any such signal not in $W$ (frailty, viral load, physician judgment) breaks it.
+- **Positivity.** Every covariate stratum has a nonzero probability of each treatment: $0 < P(A = a \mid W) < 1$. If the sickest patients (very low CD4) are essentially always treated, there are no comparable untreated patients for them, and the effect is not supported by data in that stratum.
+
+When all three hold, the average treatment effect is identified by the **g-computation formula**:
 
 $$
 E[Y(1)] - E[Y(0)] = E_W\!\left[E[Y \mid A=1, W] - E[Y \mid A=0, W]\right]
 $$
 
-This is the g-computation formula, and its two expectations are the two steps of the analysis. The inner expectation $E[Y \mid A=a, W]$ is the **modeling step**: fit a model for the outcome within levels of treatment and covariates. The outer expectation $E_W$ is the **averaging step**: average the model's predictions over the covariate distribution — what epidemiologists know as **standardization**. In practice, this means using the outcome model to predict each person's outcome twice, once as if everyone were treated ($A = 1$) and once as if no one were treated ($A = 0$), and then taking the difference of the averages of the two sets of predictions. If the identification assumptions are met, that difference equals the average treatment effect. The three-step G-computation example below implements exactly this recipe.
+Read this as a two-step recipe. The inner expectation $E[Y \mid A=a, W] = Q(a, W)$ is the **modeling step**: fit a model for the outcome within levels of treatment and covariates. The outer expectation $E_W$ is the **averaging (standardization) step**: use that model to predict each person's outcome twice, once as if everyone were treated ($A=1$) and once as if no one were ($A=0$), then take the difference of the two averages. If the assumptions hold, that difference is the ATE. Module 2 implements exactly this recipe.
 
-
-## Point-treatment TMLE
-
-### Setup: simulated clinical trial data
+:::{.callout-note}
+## Exercise 1.1: map the variables and stress-test an assumption
+Using the baseline snapshot below and the [variable dictionary](00-case-study.qmd#variable-dictionary), decide which columns play the role of $W$, which is $A$, and which is $Y$. Then name the identification assumption you think is **most at risk** in this cohort, and say why.
 
 ```{r}
-library(tidyverse)
-
-set.seed(2026)
-n <- 1000
-
-# Baseline covariates
-age <- rnorm(n, 65, 10)
-cvd <- rbinom(n, 1, plogis(-2 + 0.03 * age))
-
-# Treatment (confounded by age and CVD history)
-A <- rbinom(n, 1, plogis(-0.5 + 0.02 * age + 0.5 * cvd))
-
-# Outcome (binary: adverse event)
-Y <- rbinom(n, 1, plogis(-2.5 + 0.03 * age + 0.5 * cvd - 0.4 * A))
-
-dat <- tibble(age, cvd, A, Y)
-cat("n =", n, ", treatment rate:", round(mean(A), 2),
-    ", outcome rate:", round(mean(Y), 2), "\n")
+#| label: ex11-data
+glimpse(haart_baseline)
 ```
 
-### G-computation in three steps
+<details>
+<summary><strong>Show solution</strong></summary>
 
-G-computation is the simplest causal estimator. It implements the identification formula directly.
+- **$A$ (treatment):** `ever_haart`.
+- **$Y$ (outcome):** `died`.
+- **$W$ (baseline confounders):** `age`, `sex`, and baseline CD4 (`cd4_baseline` or its square-root `cd4_sqrt_baseline`). (`total_fup_days` and `dropout` are administrative/censoring variables, not confounders to condition on as covariates here.)
+- **Most at-risk assumption:** **exchangeability**. HAART is initiated in response to declining clinical status, and the snapshot measures only age, sex, and *baseline* CD4. Any driver of both initiation and death that is not captured by those three, such as viral load, comorbidity, frailty, or the evolving CD4 trajectory after baseline, leaves residual confounding. Positivity is a secondary worry (very low-CD4 patients are nearly always treated), but unmeasured confounding is the central threat. This is exactly why the longitudinal methods in Module 3 exist.
+
+</details>
+:::
+
+---
+
+# Module 2 (~60 min): Point-treatment estimation on the HAART cohort
+
+This module estimates the same effect, the risk difference in mortality between universal and no HAART initiation, four ways, all on `haart_baseline`. Watching the estimates land close together is the point: it builds trust that the number is a property of the data and the estimand, not of one modeling choice.
+
+## G-computation in three steps
+
+**Why it exists.** G-computation is the most direct implementation of the identification formula: model the outcome, predict both counterfactual worlds, average. It is the natural first estimator because each step maps onto a line of the formula.
 
 ```{r}
-# Step 1: Fit outcome model
-Qmod <- glm(Y ~ A + age + cvd, family = binomial, data = dat)
+#| label: m2-gcomp
+# Step 1: fit the outcome model Q(A, W)
+Qmod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
+            family = binomial, data = haart_baseline)
 
-# Step 2: Predict under each treatment for everyone
-Q1 <- predict(Qmod, newdata = mutate(dat, A = 1), type = "response")
-Q0 <- predict(Qmod, newdata = mutate(dat, A = 0), type = "response")
+# Step 2: predict each person's outcome under both treatments
+Q1 <- predict(Qmod, mutate(haart_baseline, ever_haart = 1), type = "response")
+Q0 <- predict(Qmod, mutate(haart_baseline, ever_haart = 0), type = "response")
 
-# Step 3: Average (standardize)
+# Step 3: average (standardize)
 gcomp_ate <- mean(Q1) - mean(Q0)
-cat("G-computation ATE:", round(gcomp_ate, 4), "\n")
+cat("G-computation ATE (risk difference):", round(gcomp_ate, 4), "\n")
 ```
 
-G-computation depends entirely on the outcome model. If that model is wrong, the estimate is biased and nothing downstream repairs it. Two ideas in the rest of this section address that: a flexible way to fit the models (Super Learner), and an estimator that stays consistent if either the outcome model or the treatment model is right (TMLE).
+**Reading the number.** The estimate is a marginal risk difference. A value of about `r round(gcomp_ate, 3)` means that, with the measured confounders held at their observed distribution, the mortality risk under universal HAART initiation is about `r round(abs(gcomp_ate) * 100, 1)` percentage points **lower** than under no initiation. It is negative because HAART is protective. G-computation depends entirely on the outcome model: if $Q$ is wrong, nothing downstream repairs it. The rest of the module addresses that vulnerability.
 
-### TMLE by hand
+## IPTW: the treatment-model counterpart
 
-TMLE adds a targeting step that corrects the outcome model using the **propensity score**, the probability of receiving treatment given covariates, $P(A = 1 \mid W)$ (developed in depth in @sec-iptw). This makes it doubly robust: consistent if either the outcome model or the treatment model is correctly specified. The correction nudges the initial predictions hardest for patients whose treatment was least expected given their covariates, which is where the outcome model is most likely to be wrong; the propensity score enters only through that nudge, the *clever covariate* `H` below.
+**Why it exists.** Instead of modeling the outcome, IPTW models *who got treated* and reweights the sample so that, in the weighted pseudo-population, treatment looks as if it were randomized given $W$. It depends on the propensity score $g(W)$ rather than the outcome model, so it fails and succeeds under different conditions, which is what motivates combining the two.
 
 ```{r}
+#| label: m2-iptw
+gmod <- glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
+            family = binomial, data = haart_baseline)
+ps <- predict(gmod, type = "response")
+```
+
+```{r}
+#| label: fig-sc-overlap
+#| fig-cap: "Propensity score overlap. Good overlap means both treated and untreated patients appear across the same range of scores, so every covariate pattern has comparable patients in each arm."
+#| fig-width: 7
+#| fig-height: 3.5
+#| code-fold: true
+tibble(ps = ps, haart = factor(haart_baseline$ever_haart,
+                               labels = c("No HAART", "HAART"))) |>
+  ggplot(aes(ps, fill = haart)) +
+  geom_density(alpha = 0.4) +
+  labs(x = "Estimated propensity score  g(W) = P(HAART | W)",
+       y = "Density", fill = NULL, title = "Propensity score overlap") +
+  theme_minimal()
+```
+
+**What good overlap looks like:** the two densities cover the same range, even if their peaks differ. That is the visual signature of positivity holding. Two curves that barely touch would warn of extreme weights and an unstable estimate. We keep IPTW brief here; the full treatment is in @sec-iptw. Its role in this workshop is to motivate the doubly robust methods next.
+
+## TMLE by hand
+
+**Why it exists.** G-computation trusts the outcome model; IPTW trusts the treatment model. TMLE uses *both* and is **doubly robust**: it stays consistent if either one is correct. It starts from the g-computation outcome model and adds one targeting step.
+
+Before the code, the intuition for that step. TMLE builds a **clever covariate** from the propensity score and uses it to nudge the initial outcome predictions. The nudge is largest exactly where treatment was least expected given the covariates, a treated patient with a tiny $g(W)$, or an untreated patient with a tiny $1 - g(W)$. Those are the patients the outcome model is most likely to have wrong, because few similar patients received the same treatment, so the update leans hardest on them. The propensity score enters *only* through this nudge.
+
+```{r}
+#| label: m2-tmle-byhand
 logit <- function(p) log(p / (1 - p))
 
-# Step 1: Initial outcome predictions (already done above)
+# Step 1: initial outcome predictions at observed treatment (from Qmod above)
 Qinit <- predict(Qmod, type = "response")
 
-# Step 2: Estimate propensity score
-gmod <- glm(A ~ age + cvd, family = binomial, data = dat)
-ps <- predict(gmod, type = "response")
-ps <- pmax(0.01, pmin(0.99, ps))  # bound away from 0/1
+# Step 2: propensity score, bounded away from 0 and 1 for stability
+ps_b <- pmin(pmax(ps, 0.01), 0.99)
 
-# Step 3: Clever covariate
-H <- dat$A / ps - (1 - dat$A) / (1 - ps)
+# Step 3: clever covariate at observed treatment
+A <- haart_baseline$ever_haart
+H <- A / ps_b - (1 - A) / (1 - ps_b)
 
-# Step 4: Fluctuation (the targeting step)
-epsilon <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H,
+# Step 4: fluctuation (the targeting step) -- fit epsilon with Qinit as offset
+epsilon <- glm(haart_baseline$died ~ -1 + offset(logit(Qinit)) + H,
                family = binomial)$coef
 
-# Update counterfactual predictions
-H1 <- 1 / ps
-H0 <- -1 / (1 - ps)
+# Update the counterfactual predictions with arm-specific clever covariates
+H1 <- 1 / ps_b
+H0 <- -1 / (1 - ps_b)
 Q1_star <- plogis(logit(Q1) + epsilon * H1)
 Q0_star <- plogis(logit(Q0) + epsilon * H0)
 
-# TMLE estimate
 tmle_ate <- mean(Q1_star) - mean(Q0_star)
-cat("TMLE ATE:", round(tmle_ate, 4), "\n")
+cat("TMLE ATE (by hand):", round(tmle_ate, 4), "\n")
 ```
 
-The fluctuation parameter $\hat{\epsilon}$ captures how much the treatment model corrects the outcome model. If the outcome model is already well-calibrated for the ATE, $\hat{\epsilon}$ is near zero.
+The fluctuation parameter $\hat{\epsilon}$ (here `r round(epsilon, 3)`) measures how much the treatment model had to correct the outcome model. A value near zero means the initial outcome model was already well-calibrated for the ATE.
 
 ### Inference from the efficient influence curve
 
-Each patient contributes one number to the estimate, the patient's value of the *efficient influence curve*. The estimate behaves like the average of those numbers, so its standard error is their standard deviation divided by the square root of `n`, and a few patients with extreme values are what widen the interval.
+**Why it exists.** A point estimate without a standard error cannot support a decision. TMLE's standard error comes from the **efficient influence curve**: each patient contributes one number, and the estimate behaves like the average of those numbers. So its standard error is the spread of the per-patient contributions divided by $\sqrt{n}$, and a few patients with extreme contributions (typically those with extreme propensity scores) are what widen the interval.
 
 ```{r}
-# Efficient influence curve
-Qstar_obs <- ifelse(dat$A == 1, Q1_star, Q0_star)
-H_obs <- ifelse(dat$A == 1, H1, H0)
-EIC <- H_obs * (dat$Y - Qstar_obs) + Q1_star - Q0_star - tmle_ate
+#| label: m2-tmle-inference
+Qstar_obs <- ifelse(A == 1, Q1_star, Q0_star)
+H_obs <- ifelse(A == 1, H1, H0)
+EIC <- H_obs * (haart_baseline$died - Qstar_obs) + Q1_star - Q0_star - tmle_ate
 
-# Standard error and 95% CI
 se <- sqrt(var(EIC) / n)
 ci <- tmle_ate + c(-1.96, 1.96) * se
-
-cat("ATE:", round(tmle_ate, 4), "\n")
-cat("SE: ", round(se, 4), "\n")
-cat("95% CI: [", round(ci[1], 4), ",", round(ci[2], 4), "]\n")
+cat("ATE:", round(tmle_ate, 4),
+    "| SE:", round(se, 4),
+    "| 95% CI: [", round(ci[1], 4), ",", round(ci[2], 4), "]\n")
 ```
 
-### Super Learner: flexible models for the nuisances
+**Reading the standard error:** think of it as the standard deviation of one number per patient, divided by $\sqrt{n}$. Most patients contribute a value near zero and barely move the estimate; a handful with extreme propensity scores contribute large values and set the width of the interval. If the confidence interval excludes zero, there is evidence at the 95% level that HAART changes mortality risk.
 
-The code above fit the outcome and treatment models with `glm`, which assumes the relationships are linear on the logit scale. When they are not, both nuisance estimates are biased, and so is the causal estimate. Super Learner replaces a single guessed model with a library of candidate algorithms, for example a logistic regression, a spline model, and a random forest, and uses cross-validation to weight them by how well each predicts data it did not see. The ensemble is, in large samples, about as accurate as the best candidate in the library, without the analyst having to know in advance which that is. In a targeted-learning analysis Super Learner estimates the nuisance models and TMLE does the targeting on top; the software call below sets this up through its `Q.SL.library` and `g.SL.library` arguments.
+## Software TMLE and a by-hand check
 
-### Software implementation
-
-The `tmle` package automates all of this, including Super Learner for flexible nuisance estimation:
+The `tmle` package automates all four steps. Running it on the same data lets us confirm the by-hand mechanics.
 
 ```{r}
-#| warning: false
+#| label: m2-tmle-pkg
 #| message: false
+#| warning: false
 library(tmle)
+W <- as.data.frame(haart_baseline[, c("age", "sex", "cd4_sqrt_baseline")])
 
-result <- tmle(
-  Y = dat$Y, A = dat$A,
-  W = as.data.frame(dat[, c("age", "cvd")]),
+fit <- tmle(
+  Y = haart_baseline$died,
+  A = haart_baseline$ever_haart,
+  W = W,
   Q.SL.library = c("SL.glm", "SL.mean"),
-  g.SL.library = c("SL.glm", "SL.mean")
+  g.SL.library = c("SL.glm", "SL.mean"),
+  family = "binomial"
 )
-result
+cat("By-hand TMLE ATE: ", round(tmle_ate, 4), "\n")
+cat("Package TMLE ATE: ", round(fit$estimates$ATE$psi, 4),
+    " (95% CI:", round(fit$estimates$ATE$CI[1], 4), ",",
+    round(fit$estimates$ATE$CI[2], 4), ")\n")
 ```
 
+The two estimates match closely. Small differences come from the Super Learner library the package uses for the nuisance fits versus the single GLM we used by hand.
 
-## Longitudinal causal inference
+## Super Learner: flexible nuisances in one orientation paragraph
 
-### The problem: treatment-confounder feedback
+The code above fit the outcome and treatment models with `glm`, which assumes the relationships are linear on the logit scale. When they are not, both nuisance estimates are biased and so is the causal estimate. **Super Learner** replaces a single guessed model with a library of candidate algorithms (for example a logistic regression, a spline model, and a random forest) and uses cross-validation to weight them by how well each predicts data it did not see. In large samples the ensemble is about as accurate as the best candidate in the library, without you knowing in advance which that is. In a targeted-learning analysis, Super Learner estimates the nuisance models and TMLE does the targeting on top, swapped in through exactly the `Q.SL.library` and `g.SL.library` arguments above. The full treatment is in @sec-superlearner.
 
-In longitudinal settings, a time-varying confounder (like CD4 count) can be both a confounder of future treatment and a consequence of past treatment. Standard regression cannot handle both roles simultaneously: adjusting for CD4 blocks the treatment's indirect effect through CD4, while not adjusting leaves confounding.
+:::{.callout-note}
+## Exercise 2.1: give TMLE a richer learner library
+Re-run the packaged TMLE with `SL.glmnet` (penalized regression) added to both libraries, and compare the estimate and confidence interval to the GLM-only version above.
 
-This is treatment-confounder feedback, and it requires g-methods.
-
-### Simulated longitudinal data
+<details>
+<summary><strong>Show solution</strong></summary>
 
 ```{r}
+#| label: ex21-soln
+#| message: false
+#| warning: false
+fit_sl <- tmle(
+  Y = haart_baseline$died,
+  A = haart_baseline$ever_haart,
+  W = W,
+  Q.SL.library = c("SL.glm", "SL.glmnet", "SL.mean"),
+  g.SL.library = c("SL.glm", "SL.glmnet", "SL.mean"),
+  family = "binomial"
+)
+cat("GLM-only TMLE ATE: ", round(fit$estimates$ATE$psi, 4), "\n")
+cat("With SL.glmnet:    ", round(fit_sl$estimates$ATE$psi, 4),
+    " (95% CI:", round(fit_sl$estimates$ATE$CI[1], 4), ",",
+    round(fit_sl$estimates$ATE$CI[2], 4), ")\n")
+```
+
+**What to notice:** on this cohort the relationships are close to linear, so adding `SL.glmnet` barely moves the point estimate or the interval. That is the reassuring case. The value of the richer library shows up when the truth is nonlinear: there, the ensemble protects you from the misspecification a single GLM would silently suffer. Either way, the cross-validated ensemble is the safer default.
+
+</details>
+:::
+
+---
+
+# Module 3 (~60 min): Longitudinal causal inference and treatment-confounder feedback
+
+## Why standard regression breaks
+
+In the real cohort, CD4 is measured at every visit and drives the decision to start HAART, but HAART *also raises CD4*. So CD4 at a later visit is at once a **confounder** of future treatment and a **consequence** of past treatment. This is **treatment-confounder feedback**, and it is the defining feature of the dataset.
+
+```{r}
+#| label: fig-sc-long-dag
+#| fig-cap: "Two time slices of the HAART process. CD4 at time t (L1) is affected by prior HAART and affects future HAART (A2): the treatment-confounder feedback loop. Dropout (C) may depend on CD4 and prior treatment."
+#| fig-width: 8
+#| fig-height: 5
+#| code-fold: true
+long_dag <- dagify(
+  L1 ~ W,
+  A1 ~ L1 + W,
+  L2 ~ A1 + L1 + W,
+  A2 ~ L2 + A1 + W,
+  Y ~ A2 + A1 + L2 + L1 + W,
+  C ~ L2 + A1 + W,
+  exposure = "A1",
+  outcome = "Y",
+  coords = list(
+    x = c(W = 0, L1 = 1, A1 = 2, L2 = 3, A2 = 4, Y = 5.5, C = 4.5),
+    y = c(W = 1, L1 = 1, A1 = 0, L2 = 1, A2 = 0, Y = 0, C = 1.5)
+  ),
+  labels = c(
+    W = "Baseline\n(age, sex)", L1 = "CD4(t)", A1 = "HAART(t)",
+    L2 = "CD4(t+1)", A2 = "HAART(t+1)", Y = "Death", C = "Dropout"
+  )
+)
+ggdag(long_dag, text = FALSE, use_labels = "label") +
+  theme_dag() +
+  labs(title = "Longitudinal DAG with treatment-confounder feedback")
+```
+
+Here is the conceptual crux. To estimate the effect of treatment at the **second** visit, we *must* condition on CD4 measured before it: CD4 there is a confounder of the second treatment decision, and conditioning on it deconfounds that decision. But CD4 at that visit is itself a **consequence** of treatment at the **first** visit. So if we also condition on it when estimating the effect of the *first* treatment, we block the very pathway (HAART raises CD4, higher CD4 lowers death) through which the first treatment helps, and we throw away part of the effect we are trying to measure. A single pooled regression has to make one choice for CD4 and applies it everywhere, so it cannot both deconfound the later decision and preserve the earlier mediated effect. Adjust for time-varying CD4 and you block the mediated benefit; do not adjust and you leave confounding. Neither is right. That is why feedback requires g-methods rather than one regression.
+
+## Longitudinal g-computation by hand
+
+We resolve the feedback with a **backwards sequential regression**: at the later time, condition on CD4 to deconfound; at the earlier time, do *not* condition on CD4, so its role as a mediator is preserved.
+
+The cleanest way to see this work is a small simulation with a **known truth**, so we can check the answer. The structure mirrors `haartdat`: `A1`, `A2` are HAART at two visits, `L1` is the time-varying CD4-like confounder that HAART moves and that in turn drives the next treatment, and `Y` is death. This is a teaching simulation, not the real cohort; its only purpose is that we can compute the true counterfactual risk and compare.
+
+```{r}
+#| label: m3-sim
 set.seed(2026)
-n <- 2000
+n_long <- 2000
 
-# Baseline
-W_age <- rnorm(n, 40, 10)
-W_male <- rbinom(n, 1, 0.6)
-W_cd4_bl <- pmax(50, rnorm(n, 350, 120))
-W_vl_bl <- rnorm(n, 4.2, 0.7)
-W <- 0.01 * (W_age - 40) - 0.001 * (W_cd4_bl - 350) + 0.2 * W_vl_bl - 0.1 * W_male
+# Baseline summary covariate W (think: a function of age, sex, baseline CD4/VL)
+W_age <- rnorm(n_long, 40, 10)
+W_male <- rbinom(n_long, 1, 0.6)
+W_cd4_bl <- pmax(50, rnorm(n_long, 350, 120))
+W_vl_bl <- rnorm(n_long, 4.2, 0.7)
+Wc <- 0.01 * (W_age - 40) - 0.001 * (W_cd4_bl - 350) + 0.2 * W_vl_bl - 0.1 * W_male
 
-# Visit 1
-A1 <- rbinom(n, 1, plogis(0.3 + 0.5 * W))
-L1 <- rnorm(n, mean = 0.3 * W + 1.2 * A1, sd = 1)  # treatment affects confounder
+# Visit 1: HAART, then CD4-like confounder that treatment raises
+A1 <- rbinom(n_long, 1, plogis(0.3 + 0.5 * Wc))
+L1 <- rnorm(n_long, mean = 0.3 * Wc + 1.2 * A1, sd = 1)   # A1 affects L1
 
-# Visit 2 (confounder affects future treatment)
-A2 <- rbinom(n, 1, plogis(-0.5 + 0.8 * L1 + 0.3 * A1))
+# Visit 2: confounder drives next treatment
+A2 <- rbinom(n_long, 1, plogis(-0.5 + 0.8 * L1 + 0.3 * A1))
 
-# Outcome
-Y <- rbinom(n, 1, plogis(-0.8 - 0.4 * A1 - 0.5 * A2 - 0.6 * L1 + 0.2 * W))
-dat_long <- tibble(W, A1, L1, A2, Y)
+# Outcome (death)
+Y <- rbinom(n_long, 1, plogis(-0.8 - 0.4 * A1 - 0.5 * A2 - 0.6 * L1 + 0.2 * Wc))
+dat_long <- tibble(W = Wc, A1, L1, A2, Y)
 ```
 
-### Longitudinal G-computation by hand
-
-The backwards sequential regression resolves the feedback. At time 2, condition on $L_1$ to deconfound $A_2$. At time 1, do NOT condition on $L_1$ to preserve the mediated effect.
-
 ```{r}
-# Oracle truth
+#| label: m3-gcomp
+# Oracle truth for the "always treat" regime E[Y(1,1)], by Monte Carlo
 set.seed(9999)
-n_mc <- 100000; W_mc <- rep(W, length.out = n_mc)
-L1_cf <- rnorm(n_mc, mean = 0.3 * W_mc + 1.2, sd = 1)
+n_mc <- 100000
+W_mc <- rep(Wc, length.out = n_mc)
+L1_cf <- rnorm(n_mc, mean = 0.3 * W_mc + 1.2, sd = 1)        # under A1 = 1
 true_EY_11 <- mean(plogis(-0.8 - 0.4 - 0.5 - 0.6 * L1_cf + 0.2 * W_mc))
 
-# Step 1: Model outcome at time 2, conditioning on L1
+# Step 1: model the outcome at time 2, conditioning on L1 (deconfounds A2)
 Q2_mod <- glm(Y ~ A2 + L1 + A1 + W, family = binomial, data = dat_long)
-Q2_A2is1 <- predict(Q2_mod, newdata = mutate(dat_long, A2 = 1), type = "response")
+Q2_A2is1 <- predict(Q2_mod, mutate(dat_long, A2 = 1), type = "response")
 
-# Step 2: Backwards regression: model Q2 predictions WITHOUT L1
+# Step 2: backwards regression of those predictions WITHOUT L1 (keeps the mediated effect)
 Q1_mod <- glm(Q2_A2is1 ~ A1 + W, family = quasibinomial, data = dat_long)
-Q1_A1is1 <- predict(Q1_mod, newdata = mutate(dat_long, A1 = 1), type = "response")
-
+Q1_A1is1 <- predict(Q1_mod, mutate(dat_long, A1 = 1), type = "response")
 gcomp_long <- mean(Q1_A1is1)
 
-# Compare to naive regression (which conditions on L1 throughout)
+# Naive pooled regression that conditions on L1 throughout
 naive_mod <- glm(Y ~ A1 + A2 + L1 + W, family = binomial, data = dat_long)
 naive_pred <- mean(predict(naive_mod,
-  newdata = mutate(dat_long, A1 = 1, A2 = 1), type = "response"))
+  mutate(dat_long, A1 = 1, A2 = 1), type = "response"))
 
-cat("True E[Y(1,1)]:     ", round(true_EY_11, 4), "\n")
-cat("Naive (biased):      ", round(naive_pred, 4), "\n")
-cat("G-computation (long):", round(gcomp_long, 4), "\n")
+cat("True E[Y(1,1)]:       ", round(true_EY_11, 4), "\n")
+cat("Naive (biased):       ", round(naive_pred, 4), "\n")
+cat("Backwards g-computation:", round(gcomp_long, 4), "\n")
 ```
 
-The naive estimate is biased because it conditions on $L_1$ (blocking part of the treatment effect). The backwards G-computation avoids this.
+**Reading the result.** The backwards g-computation lands close to the known truth, while the naive pooled regression is biased: it conditions on `L1` everywhere, blocking part of the treatment's benefit through CD4. Mapping back to `haartdat`, `L1` is CD4 over time and `A1`, `A2` are HAART at successive visits, so this is the same feedback that the real cohort's CD4-driven initiation creates.
 
-Longitudinal **TMLE** adds a targeting step to each of these backwards regressions, the same fluctuation idea as in the point-treatment case, applied at every time point. This buys *sequential* double robustness: the estimate is consistent if, at each step, either the outcome regression or the treatment model is correct. The mechanics are developed in @sec-illustrated-ltmle; here we turn to the kind of intervention that longitudinal data make possible.
+**Longitudinal TMLE** adds a targeting step to each backwards regression, the same fluctuation idea as in Module 2, applied at every time point. This buys *sequential* double robustness: the estimate is consistent if, at each step, either the outcome regression or the treatment model is correct. The full mechanics are in @sec-illustrated-ltmle.
 
-### LMTP for realistic interventions
+:::{.callout-note}
+## Exercise 3.1: why one regression cannot win
+In your own words, explain why a single pooled regression that adjusts for time-varying CD4 cannot recover the total effect of HAART, even with unlimited data and the correct functional form.
 
-Static regimes ("always treat") often violate positivity. The `lmtp` package estimates modified treatment policies that shift treatment by a feasible amount.
+<details>
+<summary><strong>Show solution</strong></summary>
+
+Time-varying CD4 plays two incompatible roles. For the *later* treatment decision it is a **confounder**: patients with lower CD4 are more likely to be treated and more likely to die, so leaving CD4 out leaves that decision confounded. But CD4 at that visit is also a **mediator** of the *earlier* treatment, because HAART raises CD4 and higher CD4 lowers mortality. A single regression must either condition on CD4 or not, and it applies that one choice to every treatment coefficient at once. Condition on it and you deconfound the later decision but block the earlier treatment's benefit that flows through CD4, biasing the total effect toward null. Leave it out and you preserve the mediated effect but reintroduce confounding of the later decision. No functional form and no sample size resolves this, because it is a structural conflict, not an estimation error. G-methods sidestep it by handling each time point with the right conditioning set: condition on CD4 to deconfound the decision that follows it, but not when carrying the earlier treatment's mediated effect forward.
+
+</details>
+:::
+
+---
+
+# Module 4 (~50 min): Realistic interventions with `lmtp`, plus diagnostics
+
+## Why modified treatment policies exist
+
+Static regimes like "treat everyone" or "treat no one" often violate positivity: there may be no data on what happens when a patient who would essentially never be treated is treated anyway, so the estimate has to extrapolate. A **modified treatment policy** changes treatment by a feasible amount relative to what each patient would naturally have received, for example "shift each patient's adherence up by 10 percentage points." Because every shifted value stays within the observed support (no one is pushed to an impossible level), the intervention respects positivity where "treat everyone" does not. The `lmtp` package estimates such policies for longitudinal data.
+
+The example below is built on a small, fully specified longitudinal **teaching simulation** in the shape `lmtp` expects, with a known data-generating process so the numbers are reproducible. The roles mirror the running cohort: adherence (`PDC`) is the time-varying treatment, standing in for HAART, and a CD4-like indicator (`L`) is the time-varying confounder. It defines the data object, *both* regime functions (the shift and the natural course), fits *both* regimes, and only then contrasts them. The regime is deliberately small (two visits, `folds = 2`, a tiny learner library) so the whole chunk runs in a few seconds.
 
 ```{r}
-#| eval: false
+#| label: m4-lmtp
+#| message: false
+#| warning: false
 library(lmtp)
 
-# Shift function: increase adherence by 10 percentage points
-shift_up <- function(data, trt) pmin(data[[trt]] + 0.10, 1.0)
+set.seed(2026)   # teaching simulation with a known truth
+n_lmtp <- 500
+# Baseline
+W0 <- rbinom(n_lmtp, 1, 0.5)
+A0 <- rbinom(n_lmtp, 1, 0.4)
+# Visit 1: adherence (continuous in [0,1]), CD4-like covariate, survival indicator
+PDC_1 <- plogis(rnorm(n_lmtp, 0.3 + 0.4 * W0))
+L_1   <- rbinom(n_lmtp, 1, plogis(-0.3 + PDC_1))
+Y_1   <- rbinom(n_lmtp, 1, plogis(-2.5 + 0.5 * PDC_1 + 0.3 * L_1))   # death by visit 1
+# Visit 2: only those alive continue; define values for all, lmtp handles survival
+PDC_2 <- plogis(rnorm(n_lmtp, 0.2 + 0.5 * L_1))
+L_2   <- rbinom(n_lmtp, 1, plogis(-0.3 + PDC_2))
+Y_2   <- pmax(Y_1, rbinom(n_lmtp, 1, plogis(-2.5 + 0.5 * PDC_2 + 0.3 * L_2)))
 
-# Natural course (no intervention)
+my_data <- data.frame(W0, A0, PDC_1, L_1, Y_1, PDC_2, L_2, Y_2)
+
+# Shift function: increase adherence by 10 percentage points, capped at 1
+shift_up <- function(data, trt) pmin(data[[trt]] + 0.10, 1.0)
+# Natural-course function: no shift (reference regime)
 shift_none <- function(data, trt) data[[trt]]
 
-# Estimate under each regime
+trt_nodes  <- c("PDC_1", "PDC_2")
+tv_nodes   <- list("L_1", "L_2")
+outcomes   <- c("Y_1", "Y_2")
+
+# Fit the SHIFTED regime
 fit_shifted <- lmtp_tmle(
   data = my_data,
-  trt = paste0("PDC_", 1:4),
-  outcome = paste0("Y_", 1:4),
+  trt = trt_nodes,
+  outcome = outcomes,
   baseline = c("W0", "A0"),
-  time_vary = lapply(1:4, function(t) paste0("L_", t)),
+  time_vary = tv_nodes,
   shift = shift_up,
   mtp = TRUE,
   outcome_type = "survival",
@@ -269,38 +511,84 @@ fit_shifted <- lmtp_tmle(
   folds = 2
 )
 
-# Contrast vs natural course
+# Fit the NATURAL-COURSE (reference) regime -- this is the fit the original
+# broken example never created
+fit_natural <- lmtp_tmle(
+  data = my_data,
+  trt = trt_nodes,
+  outcome = outcomes,
+  baseline = c("W0", "A0"),
+  time_vary = tv_nodes,
+  shift = shift_none,
+  mtp = TRUE,
+  outcome_type = "survival",
+  learners_outcome = c("SL.glm", "SL.mean"),
+  learners_trt = c("SL.glm", "SL.mean"),
+  folds = 2
+)
+
+# Contrast the shifted regime against the natural course
 contrast <- lmtp_contrast(fit_shifted, ref = fit_natural, type = "additive")
 contrast
 ```
 
-The shift function defines the intervention: increase each patient's adherence by 10 percentage points at each visit, capped at 1.0. This stays within the observed data support because no patient is assigned an impossible adherence level. The `mtp = TRUE` flag tells `lmtp` that the shifted value depends on the natural treatment value.
+The `shift_up` function defines the intervention: raise each patient's adherence by 10 points at each visit, capped at 1.0. The `mtp = TRUE` flag tells `lmtp` that the shifted value depends on the patient's natural treatment value, which is what makes it a *modified* treatment policy rather than a static one. The contrast reports the additive difference in the survival-scale outcome between the shifted world and the natural course, with a confidence interval; in a real analysis you would read it as the change in survival from nudging adherence up by 10 points. Because this is a teaching simulation with arbitrary coefficients, the sign and magnitude here are not clinically meaningful, only the machinery is. The full applied workflow on the real cohort is in @sec-applied-lmtp.
 
+## Diagnostics: positivity, worked
 
-## Diagnostics and sensitivity
+**Why it exists.** Every estimator in this workshop assumes positivity. The fastest check is to look at the propensity scores: if they pile up near 0 or 1, some covariate strata have essentially no comparison patients, and the estimand is poorly supported there. Here is the check on the real HAART propensity scores from Module 2.
 
-No causal analysis is complete without checking its assumptions and stability.
+```{r}
+#| label: fig-sc-positivity
+#| fig-cap: "Positivity check on the HAART propensity scores. Mass near 0 or 1 would warn of strata with no comparison patients; here the scores stay in the interior, so positivity is reasonable."
+#| fig-width: 7
+#| fig-height: 3.5
+#| code-fold: true
+tibble(ps = ps) |>
+  ggplot(aes(ps)) +
+  geom_histogram(bins = 40, fill = "steelblue", alpha = 0.85) +
+  geom_vline(xintercept = c(0.05, 0.95), linetype = "dashed", color = "grey40") +
+  labs(x = "Propensity score  g(W)", y = "Count",
+       title = "Positivity diagnostic on the HAART cohort") +
+  theme_minimal()
 
-**Positivity.** Plot propensity scores. If they pile up near 0 or 1, the estimand is poorly supported. Consider restricting the population or using a shift intervention.
+cat("Propensity score range: [", round(min(ps), 3), ",", round(max(ps), 3), "]\n")
+```
 
-**Model diagnostics.** Check Super Learner weights (which learners are driving predictions?), calibration of outcome and treatment models, and whether the TMLE fluctuation parameter $\hat{\epsilon}$ is unusually large.
+**How to read it:** the scores sit away from the 0 and 1 boundaries, with no spike against either edge, so there are both treated and untreated patients across the covariate range, and positivity is reasonable for this cohort. If you saw a pile-up against a dashed line, the fixes are weight truncation, restricting to the overlap region, or a support-respecting intervention like the shift policy above. Positivity has a dedicated chapter, @sec-positivity-overlap.
 
-**Sensitivity to unmeasured confounding.** E-values quantify how strong an unmeasured confounder would need to be to explain away the result. Negative control outcomes test whether the analysis pipeline produces null effects where expected.
+**Other diagnostics, briefly.** Check **model fit** (which learners Super Learner is weighting, calibration of the outcome and treatment models, whether the TMLE $\hat{\epsilon}$ is unusually large). Assess **sensitivity to unmeasured confounding** with E-values (how strong a hidden confounder would have to be to explain away the result) and negative-control outcomes (does the pipeline return null where it should). And vary your **analytic choices** (Super Learner library, truncation threshold, number of time points), reporting a range if the estimate moves. These tools are developed in @sec-advanced-diagnostics.
 
-**Sensitivity to analytic choices.** Vary the Super Learner library, propensity score truncation threshold, and (for longitudinal analyses) the number of time points. If the estimate is unstable across these choices, report the range rather than a single number.
+:::{.callout-note}
+## Exercise 4.1: change the shift magnitude
+Suppose you change the adherence shift from 10 percentage points to 5, and separately to 20. Without running it, describe how you would expect the contrast (the survival difference versus natural course) and its uncertainty to change, and why.
 
-These tools are covered in detail in the [Positivity](03-02-positivity-overlap.qmd) and [Diagnostics and Sensitivity Analysis](03-05-advanced-diagnostics.qmd) chapters.
+<details>
+<summary><strong>Show solution</strong></summary>
 
+A **larger** shift (20 points) intervenes more aggressively, so the expected effect on survival is **larger in magnitude**, but it also pushes more patients further from their natural adherence, toward the edge of the observed support. That strains positivity: the data carry less information about those shifted values, so the estimate's **uncertainty grows** (wider confidence interval) and it leans more on extrapolation. A **smaller** shift (5 points) does the opposite: a smaller expected effect, but it stays well inside the support, so the contrast is more precisely and more credibly estimated. The general lesson is a bias-variance-support tradeoff: bigger interventions promise bigger effects but are harder to support from data, which is exactly why feasible, support-respecting shifts are the appeal of modified treatment policies in the first place.
+
+</details>
+:::
+
+---
+
+# Wrap-up
+
+You have now estimated one effect on one cohort with g-computation, IPTW, and TMLE; seen why time-varying confounding needs g-methods; set up a realistic modified-treatment-policy intervention; and run the positivity diagnostic. The threads connect because they all run on the same HAART data.
+
+:::{.callout-note}
+## A note on the solutions
+Every exercise has its worked solution in a collapsible block right next to it, not collected at the end. Attempt the exercise first, then expand the solution to check your reasoning while the context is fresh.
+:::
 
 ## Where to go next
 
-This short course covered the essentials. The full handbook develops each topic with more examples, diagnostics, and worked code:
+Each module above is a doorway into a part of the full handbook. The most direct continuations:
 
-- **Part I, Foundations:** Why regression coefficients are not causal effects; the full 7-step Causal Roadmap
-- **Part II, Core Estimators:** G-computation, IPTW, TMLE, and Super Learner in detail
-- **Part III, Longitudinal Causal Inference:** Time-varying confounding and treatment-confounder feedback, longitudinal TMLE (L-TMLE), and Longitudinal Modified Treatment Policies (LMTP)
-- **Part IV, Diagnostics and Sensitivity Analysis:** Positivity and overlap, model diagnostics, and sensitivity analysis for unmeasured confounding
-- **Part V, Putting It All Together:** An end-to-end applied workflow built around the `lmtp` package
-- **Part VI, Special Topics:** Effect heterogeneity, mediation, hybrid RCT/RWD designs, and time-to-event estimands
+- **Module 1 → Part I.** Why regression coefficients are not causal effects (@sec-regression-vs-causal) and the full seven-step roadmap (@sec-roadmap).
+- **Module 2 → Part II.** G-computation (@sec-gcomputation), IPTW (@sec-iptw), AIPW and TMLE (@sec-doubly-robust-tmle), and Super Learner (@sec-superlearner), each with diagnostics and worked code.
+- **Module 3 → Part III.** Time-varying confounding and longitudinal TMLE (@sec-longitudinal-confounding, @sec-illustrated-ltmle).
+- **Module 4 → Parts IV and V.** Positivity and overlap (@sec-positivity-overlap), diagnostics and sensitivity analysis (@sec-advanced-diagnostics), and the end-to-end applied `lmtp` workflow (@sec-applied-lmtp).
 
-Each part builds on the running HAART case study, so you can see how the methods connect rather than treating them in isolation.
+Every part builds on the running HAART case study, so you can keep watching what changes when the *question* changes rather than the dataset.
