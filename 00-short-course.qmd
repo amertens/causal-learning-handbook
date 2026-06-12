@@ -20,7 +20,7 @@ knitr::opts_chunk$set(
 
 This chapter is a self-contained short course that walks through the core ideas of the handbook in a single sitting. It covers the Causal Roadmap, point-treatment TMLE (by hand and with software), longitudinal causal inference, and the `lmtp` package for realistic interventions. Each section is concise; the full handbook chapters provide deeper treatment.
 
-# The Causal Roadmap
+## The Causal Roadmap
 
 It is tempting to load the data and start fitting models. The roadmap resists that, because the model you reach for silently decides which question you end up answering. Working through a fixed sequence keeps the scientific question, rather than the software, in charge. Every causal analysis in this handbook follows the same seven steps:
 
@@ -34,12 +34,12 @@ It is tempting to load the data and start fitting models. The roadmap resists th
 
 The key insight: the causal question and estimand are defined *before* any model is fit. The estimand determines which statistical quantity to target. The estimation method is chosen to match that target.
 
-## Identification: three assumptions
+### Identification: three assumptions
 
-Under three assumptions, the causal estimand equals a function of the observed data:
+Throughout, $A$ denotes the treatment, $W$ the measured baseline covariates, and $Y$ the outcome; $Y(a)$ is the potential outcome under treatment level $a$. Under three assumptions, the causal estimand equals a function of the observed data:
 
-- **Consistency**: the observed outcome equals the potential outcome under the treatment actually received. Treatment must be well-defined.
-- **Exchangeability**: conditional on measured covariates $W$, treatment is independent of potential outcomes. No unmeasured confounders.
+- **Consistency**: the observed outcome $Y$ equals the potential outcome under the treatment $A$ actually received. Treatment must be well-defined.
+- **Exchangeability**: conditional on measured covariates $W$, treatment $A$ is independent of potential outcomes. No unmeasured confounders.
 - **Positivity**: every covariate stratum has a nonzero probability of receiving each treatment. $0 < P(A = a \mid W) < 1$.
 
 Under these assumptions, the average treatment effect is identified by:
@@ -48,12 +48,12 @@ $$
 E[Y(1)] - E[Y(0)] = E_W\!\left[E[Y \mid A=1, W] - E[Y \mid A=0, W]\right]
 $$
 
-This is the g-computation formula. It says: model the outcome within levels of treatment and covariates, then average over the covariate distribution.
+This is the g-computation formula, and its two expectations are the two steps of the analysis. The inner expectation $E[Y \mid A=a, W]$ is the **modeling step**: fit a model for the outcome within levels of treatment and covariates. The outer expectation $E_W$ is the **averaging step**: average the model's predictions over the covariate distribution — what epidemiologists know as **standardization**. In practice, this means using the outcome model to predict each person's outcome twice, once as if everyone were treated ($A = 1$) and once as if no one were treated ($A = 0$), and then taking the difference of the averages of the two sets of predictions. If the identification assumptions are met, that difference equals the average treatment effect. The three-step G-computation example below implements exactly this recipe.
 
 
-# Point-treatment TMLE
+## Point-treatment TMLE
 
-## Setup: simulated clinical trial data
+### Setup: simulated clinical trial data
 
 ```{r}
 library(tidyverse)
@@ -76,7 +76,7 @@ cat("n =", n, ", treatment rate:", round(mean(A), 2),
     ", outcome rate:", round(mean(Y), 2), "\n")
 ```
 
-## G-computation in three steps
+### G-computation in three steps
 
 G-computation is the simplest causal estimator. It implements the identification formula directly.
 
@@ -95,9 +95,9 @@ cat("G-computation ATE:", round(gcomp_ate, 4), "\n")
 
 G-computation depends entirely on the outcome model. If that model is wrong, the estimate is biased and nothing downstream repairs it. Two ideas in the rest of this section address that: a flexible way to fit the models (Super Learner), and an estimator that stays consistent if either the outcome model or the treatment model is right (TMLE).
 
-## TMLE by hand
+### TMLE by hand
 
-TMLE adds a targeting step that corrects the outcome model using the propensity score. This makes it doubly robust: consistent if either the outcome model or the treatment model is correctly specified. The correction nudges the initial predictions hardest for patients whose treatment was least expected given their covariates, which is where the outcome model is most likely to be wrong; the propensity score enters only through that nudge, the *clever covariate* `H` below.
+TMLE adds a targeting step that corrects the outcome model using the **propensity score**, the probability of receiving treatment given covariates, $P(A = 1 \mid W)$ (developed in depth in @sec-iptw). This makes it doubly robust: consistent if either the outcome model or the treatment model is correctly specified. The correction nudges the initial predictions hardest for patients whose treatment was least expected given their covariates, which is where the outcome model is most likely to be wrong; the propensity score enters only through that nudge, the *clever covariate* `H` below.
 
 ```{r}
 logit <- function(p) log(p / (1 - p))
@@ -130,7 +130,7 @@ cat("TMLE ATE:", round(tmle_ate, 4), "\n")
 
 The fluctuation parameter $\hat{\epsilon}$ captures how much the treatment model corrects the outcome model. If the outcome model is already well-calibrated for the ATE, $\hat{\epsilon}$ is near zero.
 
-## Inference from the efficient influence curve
+### Inference from the efficient influence curve
 
 Each patient contributes one number to the estimate, the patient's value of the *efficient influence curve*. The estimate behaves like the average of those numbers, so its standard error is their standard deviation divided by the square root of `n`, and a few patients with extreme values are what widen the interval.
 
@@ -149,11 +149,11 @@ cat("SE: ", round(se, 4), "\n")
 cat("95% CI: [", round(ci[1], 4), ",", round(ci[2], 4), "]\n")
 ```
 
-## Super Learner: flexible models for the nuisances
+### Super Learner: flexible models for the nuisances
 
 The code above fit the outcome and treatment models with `glm`, which assumes the relationships are linear on the logit scale. When they are not, both nuisance estimates are biased, and so is the causal estimate. Super Learner replaces a single guessed model with a library of candidate algorithms, for example a logistic regression, a spline model, and a random forest, and uses cross-validation to weight them by how well each predicts data it did not see. The ensemble is, in large samples, about as accurate as the best candidate in the library, without the analyst having to know in advance which that is. In a targeted-learning analysis Super Learner estimates the nuisance models and TMLE does the targeting on top; the software call below sets this up through its `Q.SL.library` and `g.SL.library` arguments.
 
-## Software implementation
+### Software implementation
 
 The `tmle` package automates all of this, including Super Learner for flexible nuisance estimation:
 
@@ -172,15 +172,15 @@ result
 ```
 
 
-# Longitudinal causal inference
+## Longitudinal causal inference
 
-## The problem: treatment-confounder feedback
+### The problem: treatment-confounder feedback
 
 In longitudinal settings, a time-varying confounder (like CD4 count) can be both a confounder of future treatment and a consequence of past treatment. Standard regression cannot handle both roles simultaneously: adjusting for CD4 blocks the treatment's indirect effect through CD4, while not adjusting leaves confounding.
 
 This is treatment-confounder feedback, and it requires g-methods.
 
-## Simulated longitudinal data
+### Simulated longitudinal data
 
 ```{r}
 set.seed(2026)
@@ -205,7 +205,7 @@ Y <- rbinom(n, 1, plogis(-0.8 - 0.4 * A1 - 0.5 * A2 - 0.6 * L1 + 0.2 * W))
 dat_long <- tibble(W, A1, L1, A2, Y)
 ```
 
-## Longitudinal G-computation by hand
+### Longitudinal G-computation by hand
 
 The backwards sequential regression resolves the feedback. At time 2, condition on $L_1$ to deconfound $A_2$. At time 1, do NOT condition on $L_1$ to preserve the mediated effect.
 
@@ -240,7 +240,7 @@ The naive estimate is biased because it conditions on $L_1$ (blocking part of th
 
 Longitudinal **TMLE** adds a targeting step to each of these backwards regressions, the same fluctuation idea as in the point-treatment case, applied at every time point. This buys *sequential* double robustness: the estimate is consistent if, at each step, either the outcome regression or the treatment model is correct. The mechanics are developed in @sec-illustrated-ltmle; here we turn to the kind of intervention that longitudinal data make possible.
 
-## LMTP for realistic interventions
+### LMTP for realistic interventions
 
 Static regimes ("always treat") often violate positivity. The `lmtp` package estimates modified treatment policies that shift treatment by a feasible amount.
 
@@ -277,7 +277,7 @@ contrast
 The shift function defines the intervention: increase each patient's adherence by 10 percentage points at each visit, capped at 1.0. This stays within the observed data support because no patient is assigned an impossible adherence level. The `mtp = TRUE` flag tells `lmtp` that the shifted value depends on the natural treatment value.
 
 
-# Diagnostics and sensitivity
+## Diagnostics and sensitivity
 
 No causal analysis is complete without checking its assumptions and stability.
 
@@ -292,7 +292,7 @@ No causal analysis is complete without checking its assumptions and stability.
 These tools are covered in detail in the [Positivity](03-02-positivity-overlap.qmd) and [Diagnostics and Sensitivity Analysis](03-05-advanced-diagnostics.qmd) chapters.
 
 
-# Where to go next
+## Where to go next
 
 This short course covered the essentials. The full handbook develops each topic with more examples, diagnostics, and worked code:
 

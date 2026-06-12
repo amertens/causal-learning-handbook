@@ -22,13 +22,13 @@ Throughout this handbook, we use a single recurring causal question to illustrat
 
 ## Clinical and epidemiologic motivation
 
-In the early years of combination antiretroviral therapy (HAART), a central clinical question was: does initiating HAART reduce mortality among HIV-positive patients, and if so, by how much? Although this sounds like a question about HAART "use," it is really a question about *strategies for when to start* HAART, because therapy is initiated (and then sustained) in response to evolving clinical status. The longitudinal, time-dependent nature of the initiation decision is what creates the confounding structure we have to address.
+In the early years of combination antiretroviral therapy (HAART), a central clinical question was: does initiating HAART reduce mortality among people living with HIV, and if so, by how much? Although this sounds like a question about HAART "use," it is really a question about *strategies for when to start* HAART, because therapy is initiated (and then sustained) in response to evolving clinical status. The longitudinal, time-dependent nature of the initiation decision is what creates the confounding structure we have to address.
 
 Answering this from observational data is harder than it looks. Physicians do not assign HAART randomly. They initiate therapy when CD4 cell counts decline and clinical status worsens. The very biomarkers that predict death also determine who gets treated and when. This is confounding by indication. The sickest patients get the strongest drugs, so a naive comparison can make the best medicines look like poison.
 
 The problem runs deeper than baseline confounding. HAART, once initiated, improves CD4 counts. A patient's CD4 level at any given visit therefore reflects both their underlying disease trajectory and the effects of prior treatment. CD4 count is simultaneously a confounder of future treatment decisions and a mediator of past treatment effects. This treatment-confounder feedback is the defining feature of the dataset and the reason it motivates the longitudinal g-methods developed in later chapters.
 
-The dataset we use is a simulated cohort of 1,200 HIV-positive patients designed to reflect the structure of real HIV cohort studies. Because the data-generating process is known, we can compare estimation methods and understand exactly where simpler approaches fail.
+The dataset we use is a simulated cohort of 1,200 people living with HIV designed to reflect the structure of real HIV cohort studies. Because the data-generating process is known, we can compare estimation methods and understand exactly where simpler approaches fail.
 
 
 ## Why this example is useful
@@ -38,7 +38,7 @@ Four features make this cohort a good teaching vehicle. The confounding by indic
 
 ## The observed data
 
-The dataset is distributed as `haartdat` in the `ipw` R package [@vanderwal2011ipw]. It is a *simulated* cohort (not a prospective study) built to reproduce the structure of real HIV cohorts used in the marginal structural model literature. It contains 1,200 HIV-positive patients observed from HIV seroconversion in person-period (long) format, with one row per patient per fixed 100-day interval. The regular interval grid is a feature of the simulation; in real-world data, visit times would be irregular and would themselves need to be modeled.
+The dataset is distributed as `haartdat` in the `ipw` R package [@vanderwal2011ipw]. It is a *simulated* cohort (not a prospective study) built to reproduce the structure of real HIV cohorts used in the marginal structural model literature. It contains 1,200 people living with HIV observed from HIV seroconversion in person-period (long) format, with one row per patient per fixed 100-day interval. The regular interval grid is a feature of the simulation; in real-world data, visit times would be irregular and would themselves need to be modeled.
 
 ```{r}
 #| code-fold: true
@@ -62,7 +62,7 @@ data(haartdat)
 | `endtime` | Patient's final observed time (days) | Administrative variable |
 | `dropout` | Censoring indicator: 1 if patient dropped out at interval end | Censoring (C) |
 
-Each patient contributes between 1 and 38 rows (median approximately 15), corresponding to 100-day intervals from seroconversion through up to day 3,700. The treatment variable `haartind` is absorbing: once a patient initiates HAART, it stays 1 for all subsequent intervals. Among the 1,200 patients, 376 (31%) initiate HAART during follow-up. The key time-varying confounder is `cd4.sqrt`, measured at the start of each interval before the treatment and censoring decisions that occur at the interval's end. This temporal ordering, CD4 measured first, then treatment and outcome, is what makes causal identification possible under the sequential exchangeability assumption.
+Each patient contributes between 1 and 38 rows (median approximately 15), corresponding to 100-day intervals from seroconversion through up to day 3,700. The treatment variable `haartind` is absorbing: once a patient initiates HAART, it stays 1 for all subsequent intervals. Among the 1,200 patients, 376 (31%) initiate HAART during follow-up. The key time-varying confounder is `cd4.sqrt`, measured at the end of each interval but *before* the treatment and censoring decisions that occur at that same interval's end. This temporal ordering, CD4 measured first, then treatment and outcome, is what makes causal identification possible under the **sequential exchangeability** assumption. Sequential exchangeability is the longitudinal version of the point-treatment exchangeability assumption from @sec-short-course: at each time point, conditional on the measured past (baseline covariates and the time-varying confounder history up to that point), the treatment decision is independent of future potential outcomes. Informally, once we account for everything measured up to the moment of each treatment decision, the patients who do and do not initiate at that visit are comparable, so there is no unmeasured confounder driving both the decision and the outcome.
 
 
 ### Example patient trajectories
@@ -148,7 +148,7 @@ haart_baseline |>
 
 The primary causal question is:
 
-> **Among HIV-positive individuals under longitudinal follow-up from seroconversion, what would the risk of death have been under a strategy of initiating HAART when clinically indicated, compared with a strategy of never initiating HAART during follow-up?**
+> **Among people living with HIV under longitudinal follow-up from seroconversion, what would the risk of death have been under a strategy of initiating HAART when clinically indicated, compared with a strategy of never initiating HAART during follow-up?**
 
 "Clinically indicated" here means a CD4-driven initiation rule consistent with the guidance in force during the cohort era; for concreteness, *initiate HAART at the first interval at which CD4 falls below a fixed threshold (e.g., 350 cells/µL)* and continue thereafter.
 
@@ -165,7 +165,7 @@ To make the causal question precise, we specify the randomized trial we would id
 
 | Component | Specification |
 |-----------|---------------|
-| **Eligibility** | HIV-positive adults at seroconversion, antiretroviral-naive |
+| **Eligibility** | Adults living with HIV at seroconversion, antiretroviral-naive |
 | **Time zero** | Date of HIV seroconversion |
 | **Treatment strategies** | (1) Initiate HAART at the first interval at which CD4 falls below the contemporaneous clinical threshold (e.g., 350 cells/µL) and continue thereafter, vs. (2) never initiate HAART during follow-up |
 | **Assignment** | Random assignment to strategy at time zero |
@@ -259,7 +259,7 @@ This feedback structure is why later chapters need longitudinal g-methods. No si
 
 ### Mapping the DAG to the observed data
 
-The person-period structure of `haartdat` maps directly onto this longitudinal DAG. Each row corresponds to one time slice. Within each interval, the temporal ordering is: CD4 is measured (beginning of interval), then the treatment decision and outcome/censoring occur (end of interval). The variables map as follows: `cd4.sqrt` is $L_t$, `haartind` is $A_t$, `event` is $Y$, `dropout` is $C$, and `age` and `sex` are the baseline covariates $W$.
+The person-period structure of `haartdat` maps directly onto this longitudinal DAG. Each row corresponds to one time slice. Within each interval, the temporal ordering is: CD4 is measured first, then the treatment decision and outcome/censoring occur (all at the end of the interval, with CD4 recorded before the treatment and censoring decisions). The variables map as follows: `cd4.sqrt` is $L_t$, `haartind` is $A_t$, `event` is $Y$, `dropout` is $C$, and `age` and `sex` are the baseline covariates $W$.
 
 
 ## Why standard approaches can mislead
@@ -272,7 +272,7 @@ The treatment-confounder feedback structure in this cohort means that naive regr
 The mortality estimand above is the spine of the book, but the same cohort runs through the special-topics chapters, each posing a different question of the same data:
 
 - **Realistic interventions, not all-or-nothing treatment.** Rather than "treat everyone" versus "no one," we can shift the *adherence distribution* and ask how much regimen forgiveness matters (@sec-adherence-shift), and run the full modified-treatment-policy and dynamic-rule workflow from question to estimate (@sec-applied-lmtp).
-- **The best rule, and for whom.** At what CD4 threshold, and for which patients, is initiation optimal (@sec-optimal-regimes)?
+- **The best rule, and for whom.** At what CD4 threshold, and for which patients, is initiation optimal?
 - **Effect modification.** Does the benefit of HAART differ by baseline CD4 or age (@sec-effect-modification)?
 - **Mechanism.** How much of the effect runs through CD4 recovery rather than other pathways (@sec-mediation)?
 - **Time-to-event and competing risks.** Treating mortality as a survival endpoint, with non-HIV death as a competing event (@sec-tte-competing).
