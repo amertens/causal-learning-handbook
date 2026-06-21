@@ -82,17 +82,25 @@ Adherence is measured after treatment starts and changes over time, and it sits 
 
 ```{mermaid}
 %%| label: fig-adherence-dag
-%%| fig-cap: "Two blocks of the adherence process. Health status L at each block confounds the adherence-to-failure relationship and is itself moved by prior adherence (the feedback arrow from PDC1 to L2). A regression that conditions on L removes the confounding but also blocks the pathway through which past adherence acts; a regression that omits L leaves the confounding in place."
+%%| fig-cap: "Three blocks of the adherence process (K = 3). Baseline severity W0 channels the drug choice A0 (confounding by indication, the arrow W0 to A0). Health status L at each block confounds the adherence-to-failure relationship and is itself moved by prior adherence (the feedback arrows PDC1 to L2 and PDC2 to L3); this is treatment-confounder feedback. The drug A0 modifies the adherence-to-failure relationship at every block (forgiveness). A regression that conditions on L removes the confounding but also blocks the pathway through which past adherence acts; a regression that omits L leaves the confounding in place."
 flowchart LR
-  W["W0, A0<br/>baseline, drug"] --> L1["L1<br/>health"]
-  L1 --> P1["PDC1<br/>adherence"]
-  P1 --> Y["Y<br/>failure"]
+  W0["W0<br/>baseline severity"] --> A0["A0<br/>drug"]
+  W0 --> L1["L1<br/>health"]
+  A0 --> Y["Y<br/>failure"]
+  A0 --> P1["PDC1<br/>adherence"]
+  L1 --> P1
+  P1 --> Y
   L1 --> Y
   P1 --> L2["L2<br/>health"]
-  W --> L2
+  W0 --> L2
   L2 --> P2["PDC2<br/>adherence"]
   P2 --> Y
   L2 --> Y
+  P2 --> L3["L3<br/>health"]
+  W0 --> L3
+  L3 --> P3["PDC3<br/>adherence"]
+  P3 --> Y
+  L3 --> Y
 ```
 
 This is the dilemma that defeats ordinary regression. Conditioning on observed adherence adjusts for the health-status confounding and, at the same time, blocks the adherence effect we want to measure, because that effect runs through health. Leaving health out of the model leaves the confounding in place. No single regression can do both. This is exactly the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it is why estimating a forgiveness curve needs the g-methods developed there.
@@ -100,299 +108,436 @@ This is the dilemma that defeats ordinary regression. Conditioning on observed a
 
 # The data-generating process
 
-We use a simulation that generates longitudinal data with 90-day blocks over one year (K = 4 blocks). The DGP produces treatment-confounder feedback: poor adherence worsens health (higher L), and worse health reduces future adherence. Drug A is more forgiving at low adherence levels, encoded through a drug-by-adherence interaction in the failure hazard.
+We use a simulation that generates longitudinal data in 90-day blocks (K = 3 blocks). The DGP produces treatment-confounder feedback: poor adherence worsens health (higher L), and worse health reduces future adherence. Drug assignment is confounded by baseline severity (confounding by indication: sicker patients are channeled toward Drug A), which is the study's primary scenario; setting `kappaW = 0` recovers a randomized trial. Drug A is more forgiving at low adherence levels, encoded through a drug-by-adherence interaction in the failure hazard.
+
+The code below reproduces the study's `functions/dgp.R` at its default parameters, simplified for teaching: the latent adherence residual is i.i.d. (the study's default `rho = 0`), and the optional censoring, AR(1) persistence, differential-tolerability, and extra-confounding levers are omitted. Confounding by indication is on.
 
 ```{r}
 #| label: sim-dgp
-# Simplified DGP for the adherence forgiveness simulation
-# Based on sim_v4_dgp.R from the adherence simulation project
-
-simulate_adherence_data <- function(n = 500, K = 4, seed = 2026) {
+# Longitudinal DGP for the adherence-forgiveness simulation (K = 3 blocks).
+# Causal structure each block t:  W0, A0 -> L_t -> PDC_t -> Y_t,
+# with feedback  PDC_{t-1} -> L_t -> PDC_t  (time-dependent confounding).
+# Parameters and equations follow functions/dgp.R at its defaults.
+simulate_adherence_data <- function(n = 2000, K = 3, seed = 123, kappaW = 1.0) {
   set.seed(seed)
 
-  # Parameters
-  alpha0 <- 1.30; alphaA <- -0.35; alphaW <- -0.20; alphaL <- -0.30
-  rho <- 0.45; sigma_u <- 0.50; sigma_e <- 0.65
-  beta0 <- 0.0; betaW <- 0.30; betaA <- 0.0; betaLag <- 0.35; betaP <- 0.80
+  # --- Parameters (study defaults) -------------------------------------------
+  # Adherence (PDC) on the logit scale
+  alpha0 <- 1.30    # intercept; plogis(1.30) is about 0.79
+  alphaA <- -0.35   # Drug A shifts adherence slightly lower
+  alphaW <- -0.20   # worse baseline severity -> lower adherence
+  alphaL <- -0.30   # worse interim health -> lower next-block adherence
+  sigma_u <- 0.30   # between-person adherence-trait SD
+  sigma_e <- 0.65   # within-person per-block noise SD (i.i.d.; study default rho = 0)
+
+  # Time-varying health confounder L_t
+  beta0   <- 0.00
+  betaW   <- 0.30   # baseline severity -> worse health
+  betaLag <- 0.35   # health persistence
+  betaP   <- 0.80   # prior non-adherence -> worse health (the feedback arrow)
   sigma_L <- 0.50
-  gamma0 <- -3.80; gammaL <- 0.50; gammaW <- 0.30
-  gammaP <- 2.50; gammaA <- 0.0; gammaAP <- -1.20
 
-  # Baseline
-  W0 <- rnorm(n)
-  A0 <- rbinom(n, 1, 0.5)  # 1 = Drug A, 0 = Drug B
-  u_i <- rnorm(n, 0, sigma_u)
-  mu_i <- alpha0 + alphaA * A0 + alphaW * W0 + u_i
+  # Virologic-failure hazard (logit)
+  gamma0  <- -3.80  # low baseline hazard
+  gammaL  <- 0.50   # sicker -> higher failure hazard
+  gammaW  <- 0.30   # baseline severity -> higher hazard
+  gammaP  <- 2.50   # poor adherence -> higher hazard
+  gammaA  <- 0.00   # no main drug effect (drugs equal at perfect adherence)
+  gammaAP <- -1.20  # Drug A x poor-adherence: protective => Drug A is MORE FORGIVING
 
-  # Storage
-  L_mat <- PDC_mat <- matrix(NA_real_, n, K)
-  Y_mat <- matrix(0L, n, K)
-  eta_prev <- rep(NA_real_, n)
-  failed <- rep(FALSE, n)
+  cut_low  <- 0.60; cut_high <- 0.80   # adherence-band cutpoints (low/mid/high)
+
+  # --- Baseline --------------------------------------------------------------
+  W0  <- rnorm(n)                              # baseline severity
+  # Confounding by indication: sicker patients channeled to Drug A.
+  # kappaW = 0 reproduces a randomized trial (A0 ~ Bernoulli(0.5)).
+  A0  <- rbinom(n, 1, plogis(kappaW * W0))     # 1 = Drug A, 0 = Drug B
+  u_i <- rnorm(n, 0, sigma_u)                  # persistent adherence trait (unmeasured)
+
+  # --- Storage (rows = patients, cols = blocks) ------------------------------
+  L   <- PDC <- matrix(NA_real_, n, K)
+  Y   <- matrix(0L, n, K)
+  failed <- rep(FALSE, n)                      # absorbing failure flag
 
   for (t in 1:K) {
-    # Time-varying health confounder L_t
-    noise_L <- rnorm(n, 0, sigma_L)
+    # Time-varying health L_t
     if (t == 1) {
-      L_mat[, t] <- beta0 + betaW * W0 + betaA * A0 + noise_L
+      L[, t] <- beta0 + betaW * W0 + rnorm(n, 0, sigma_L)
     } else {
-      L_mat[, t] <- beta0 + betaW * W0 + betaA * A0 +
-        betaLag * L_mat[, t-1] + betaP * (1 - PDC_mat[, t-1]) + noise_L
+      L[, t] <- beta0 + betaW * W0 +
+                betaLag * L[, t - 1] +
+                betaP   * (1 - PDC[, t - 1]) +     # prior non-adherence worsens health
+                rnorm(n, 0, sigma_L)
     }
 
-    # Adherence (PDC) on logit scale with AR(1) persistence
-    noise_e <- rnorm(n, 0, sigma_e)
-    if (t == 1) {
-      eta_t <- mu_i + noise_e
-    } else {
-      eta_t <- (1 - rho) * mu_i + rho * eta_prev + alphaL * L_mat[, t-1] + noise_e
-    }
-    PDC_mat[, t] <- plogis(eta_t)
-    eta_prev <- eta_t
+    # Adherence PDC_t in (0, 1)
+    eta <- alpha0 + alphaA * A0 + alphaW * W0 + u_i + rnorm(n, 0, sigma_e)
+    if (t > 1) eta <- eta + alphaL * L[, t - 1]    # interim health feeds back into adherence
+    PDC[, t] <- plogis(eta)
 
-    # Virologic failure (absorbing)
+    # Virologic failure (absorbing): poor adherence raises hazard, less so on Drug A
     at_risk <- !failed
-    if (any(at_risk)) {
-      lp <- gamma0 + gammaL * L_mat[at_risk, t] + gammaW * W0[at_risk] +
-        gammaP * (1 - PDC_mat[at_risk, t]) + gammaA * A0[at_risk] +
-        gammaAP * A0[at_risk] * (1 - PDC_mat[at_risk, t])
-      new_fail <- rbinom(sum(at_risk), 1, plogis(lp)) == 1L
-      idx <- which(at_risk)
-      Y_mat[idx[new_fail], t] <- 1L
-      failed[idx[new_fail]] <- TRUE
-    }
-    if (t > 1) Y_mat[Y_mat[, t-1] == 1L, t] <- 1L
+    lp <- gamma0 +
+          gammaL  * L[at_risk, t] +
+          gammaW  * W0[at_risk] +
+          gammaP  * (1 - PDC[at_risk, t]) +
+          gammaA  * A0[at_risk] +
+          gammaAP * A0[at_risk] * (1 - PDC[at_risk, t])
+    new_fail <- rbinom(sum(at_risk), 1, plogis(lp)) == 1L
+    idx <- which(at_risk)
+    Y[idx[new_fail], t] <- 1L
+    failed[idx[new_fail]] <- TRUE
+    if (t > 1) Y[Y[, t - 1] == 1L, t] <- 1L        # carry failure forward (absorbing)
   }
 
-  # Assemble wide data
-  df <- data.frame(id = 1:n, W0 = W0, A0 = A0)
+  # --- Assemble wide data frame ---------------------------------------------
+  dat <- data.frame(id = 1:n, W0 = W0, A0 = A0)
   for (t in 1:K) {
-    df[[paste0("L_", t)]]   <- L_mat[, t]
-    df[[paste0("PDC_", t)]] <- PDC_mat[, t]
-    df[[paste0("Y_", t)]]   <- Y_mat[, t]
+    dat[[paste0("L_",   t)]] <- L[, t]
+    dat[[paste0("PDC_", t)]] <- PDC[, t]
+    dat[[paste0("Y_",   t)]] <- Y[, t]
+    dat[[paste0("PDC_cat_", t)]] <- cut(PDC[, t],
+                                        breaks = c(-Inf, cut_low, cut_high, Inf),
+                                        labels = c("low", "mid", "high"))
   }
-  df$Y_final <- as.integer(rowSums(Y_mat) > 0)
-  attr(df, "K") <- K
-  df
+  dat$Y_final <- as.integer(rowSums(Y) > 0)        # failed by end of follow-up
+  attr(dat, "K") <- K
+  dat
 }
 
-dat <- simulate_adherence_data(n = 500, K = 4, seed = 2026)
+dat <- simulate_adherence_data(n = 2000, K = 3, seed = 123, kappaW = 1.0)
 ```
 
 The key structural features of this DGP:
+
+**Confounding by indication.** Drug assignment depends on baseline severity through `A0 ~ Bernoulli(plogis(kappaW * W0))`: sicker patients (higher `W0`) are more likely to start Drug A. Setting `kappaW = 0` reproduces a randomized trial in which `A0` is a coin flip independent of severity.
 
 **Treatment-confounder feedback.** Poor adherence (low PDC) at block $t-1$ worsens health ($L_t$), which then reduces adherence at block $t$ (through `alphaL`) and independently increases failure risk (through `gammaL`). This is the same feedback structure discussed in @sec-longitudinal-confounding.
 
 **Drug-by-adherence interaction (the forgiveness mechanism).** The parameter `gammaAP = -1.20` means that Drug A's penalty for poor adherence is smaller than Drug B's. At high adherence, the two drugs perform similarly. At low adherence, Drug A is more forgiving. This interaction is what makes the forgiveness curve differ between drugs.
 
-```{r}
-#| label: fig-adherence-dist
-#| fig-cap: "PDC distributions at block 1 by drug. Drug A patients have slightly lower mean adherence (the drug assignment shifts the adherence intercept), but Drug A is more forgiving of that lower adherence."
-#| code-fold: true
-dat |>
-  mutate(Drug = ifelse(A0 == 1, "Drug A", "Drug B")) |>
-  ggplot(aes(x = PDC_1, fill = Drug)) +
-  geom_density(alpha = 0.4) +
-  labs(x = "PDC (block 1)", y = "Density") +
-  scale_fill_manual(values = c("Drug A" = "#228833", "Drug B" = "#EE6677")) +
-  theme_minimal()
-```
+For `lmtp`'s survival mode the data need one further preparation step: once a patient fails, the post-failure treatment and confounder nodes are set to `NA` and the failure indicator is carried forward as 1 (the absorbing state). In the study this is handled by the `make_lmtp_data()` helper in `functions/prepare_lmtp.R`; we reference it here rather than re-deriving it inline.
+
+Before turning to methods, here is the cohort the simulation produced, summarized by drug.
 
 ```{r}
-# Cohort summary
+#| label: cohort-summary
 dat |>
-  mutate(Drug = ifelse(A0 == 1, "Drug A", "Drug B")) |>
-  group_by(Drug) |>
-  summarise(
-    n = n(),
-    mean_PDC_1 = round(mean(PDC_1), 3),
-    failure_pct = round(100 * mean(Y_final), 1),
+  dplyr::mutate(Drug = ifelse(A0 == 1, "Drug A", "Drug B")) |>
+  dplyr::group_by(Drug) |>
+  dplyr::summarise(
+    n = dplyr::n(),
+    mean_PDC_1   = round(mean(PDC_1), 3),
+    failure_pct  = round(100 * mean(Y_final), 1),
     .groups = "drop"
   ) |>
   as.data.frame()
 ```
 
+Read this table as a description of the observed cohort, not as a forgiveness estimate. Taken at face value, Drug B looks like the better regimen here: its patients have higher mean adherence and a lower crude failure percentage than Drug A's. That crude ranking is misleading, and in fact it inverts the underlying pharmacology, because Drug A is the more forgiving drug by construction (the `gammaAP = -1.20` interaction). The reason is confounding by indication: sicker patients (higher `W0`) are channeled toward Drug A, so the Drug A column is enriched for patients who were always at higher risk and who adhere less well, for reasons that have nothing to do with the drug itself. The two drug groups are not exchangeable, so any crude difference in adherence or failure between the columns mixes the drugs' pharmacology with the difference in who received each drug. The crude cross-drug comparison is therefore confounded and is not the forgiveness estimand; recovering forgiveness, and seeing Drug A's advantage emerge, requires the causal machinery developed below.
 
 # Why naive adherence analysis is biased
 
-A naive analysis would stratify patients by observed adherence level and compare outcomes within strata. This is systematically biased because of treatment-confounder feedback: patients with low adherence tend to be sicker (higher $L_t$), and sicker patients have higher failure risk regardless of adherence. The naive analysis overestimates the effect of adherence because the low-adherence stratum is enriched for patients who were going to fail anyway.
+Forgiveness is an **intervention-based estimand**, not a within-stratum association. The question is what the failure risk *would be* if adherence were set to a given level, with health allowed to respond, not what the failure rate happens to be among patients who adhered at that level.
 
-To see the bias rather than just assert it, compare the crude curve against the truth. Because the data come from a known simulation, we can compute the **oracle forgiveness curve**: the actual counterfactual failure risk if every patient sustained a given adherence level, obtained by re-running the data-generating process with adherence held fixed and health allowed to respond. Overlaying it on the crude adherence-stratified curve shows the gap.
+That distinction is what defeats ordinary regression here, because of treatment-confounder feedback. Conditioning on observed adherence does remove the health confounding, but it also blocks the *mediated* part of the adherence effect, the part that runs through interim health $L_t$, so the within-stratum comparison answers a different question than the one we asked. Omitting interim health from the model leaves the confounding in place instead. No single regression escapes the bind: adjust for $L_t$ and you block the pathway; drop it and you reintroduce the confounding.
+
+The longitudinal g-formula, realized here as a modified treatment policy (MTP), is built precisely for this setting. It intervenes on the adherence sequence and propagates the consequences forward through the health process, so the mediated effect is preserved and the confounding is still controlled. The practical lesson is to name the estimand before choosing the adjustment.
+
+We can make the bias visible because the data come from a known simulation. The causal (oracle) forgiveness curve is obtained by re-running the failure process with adherence held fixed at each level and health allowed to respond; the crude curve is the observed failure rate among patients binned by their actual average adherence. Overlaying the two shows the gap.
 
 ```{r}
-#| label: fig-oracle-vs-naive
-#| fig-cap: "Causal forgiveness curves (lines) versus crude adherence-stratified failure rates (open points). The crude points tend to sit above the causal curve at low adherence and below it at high adherence, because low-adherence patients are sicker for reasons the crude comparison wrongly attributes to adherence. The crude curve is therefore too steep."
+#| label: fig-oracle-vs-crude
+#| fig-cap: "Causal (oracle) forgiveness curves, as solid lines, versus crude adherence-stratified failure rates, as open points. The crude points sit above the causal curve at low adherence and below it at high adherence, because low-adherence patients are sicker for reasons the crude comparison wrongly attributes to adherence. The crude curve is therefore too steep."
 #| code-fold: true
-# Oracle: counterfactual 12-month failure risk if PDC is held at `a` every block,
-# for a given drug, with health L allowed to respond to the fixed adherence.
-oracle_forgiveness <- function(a, drug, n = 20000, K = 4, seed = 99) {
+library(ggplot2)
+
+# Oracle forgiveness curve: re-run the DGP failure process with PDC held fixed
+# at a sustained level, health L allowed to respond, separately by drug.
+# Parameter values must match simulate_adherence_data() exactly.
+oracle_forgiveness_curve <- function(a_grid, drug, n = 50000, K = 3, seed = 2027) {
   set.seed(seed)
-  betaW <- 0.30; betaLag <- 0.35; betaP <- 0.80; sigma_L <- 0.50
-  gamma0 <- -3.80; gammaL <- 0.50; gammaW <- 0.30; gammaP <- 2.50; gammaAP <- -1.20
-  W0 <- rnorm(n); A0 <- rep(drug, n)
-  L_prev <- NULL; failed <- rep(FALSE, n)
-  for (t in 1:K) {
-    if (t == 1) L_t <- betaW * W0 + rnorm(n, 0, sigma_L)
-    else        L_t <- betaW * W0 + betaLag * L_prev + betaP * (1 - a) + rnorm(n, 0, sigma_L)
-    lp <- gamma0 + gammaL * L_t + gammaW * W0 + gammaP * (1 - a) + gammaAP * A0 * (1 - a)
-    failed <- failed | (runif(n) < plogis(lp))
-    L_prev <- L_t
+  beta0  <- 0.00; betaW <- 0.30; betaLag <- 0.35; betaP <- 0.80; sigma_L <- 0.50
+  gamma0 <- -3.80; gammaL <- 0.50; gammaW <- 0.30
+  gammaP <- 2.50; gammaA <- 0.00; gammaAP <- -1.20
+  risk <- numeric(length(a_grid))
+  for (j in seq_along(a_grid)) {
+    a  <- a_grid[j]
+    W0 <- rnorm(n)
+    A0 <- rep(drug, n)
+    L  <- matrix(NA_real_, n, K)
+    failed <- rep(FALSE, n)
+    for (t in 1:K) {
+      if (t == 1) {
+        L[, t] <- beta0 + betaW * W0 + rnorm(n, 0, sigma_L)
+      } else {
+        L[, t] <- beta0 + betaW * W0 + betaLag * L[, t - 1] +
+                  betaP * (1 - a) + rnorm(n, 0, sigma_L)   # PDC fixed at a
+      }
+      at_risk <- !failed
+      lp <- gamma0 + gammaL * L[at_risk, t] + gammaW * W0[at_risk] +
+            gammaP * (1 - a) + gammaA * A0[at_risk] +
+            gammaAP * A0[at_risk] * (1 - a)
+      new_fail <- rbinom(sum(at_risk), 1, plogis(lp)) == 1L
+      failed[which(at_risk)[new_fail]] <- TRUE
+    }
+    risk[j] <- mean(failed)
   }
-  mean(failed)
+  data.frame(adherence = a_grid, risk = risk,
+             Drug = ifelse(drug == 1, "Drug A", "Drug B"))
 }
 
-pdc_grid <- seq(0.40, 0.95, by = 0.05)
-oracle_df <- do.call(rbind, lapply(c(0, 1), function(d)
-  data.frame(PDC = pdc_grid, Drug = ifelse(d == 1, "Drug A", "Drug B"),
-             risk = vapply(pdc_grid, oracle_forgiveness, numeric(1), drug = d))))
+a_grid <- seq(0.40, 0.95, by = 0.01)
+oracle <- rbind(
+  oracle_forgiveness_curve(a_grid, drug = 1),
+  oracle_forgiveness_curve(a_grid, drug = 0)
+)
 
-naive_df <- dat |>
-  mutate(Drug = ifelse(A0 == 1, "Drug A", "Drug B"),
-         mean_PDC = rowMeans(dplyr::across(dplyr::starts_with("PDC_"))),
-         bin = cut(mean_PDC, breaks = seq(0, 1, 0.1))) |>
-  group_by(Drug, bin) |>
-  summarise(PDC = mean(mean_PDC), risk = mean(Y_final), n = n(), .groups = "drop") |>
-  filter(n >= 10)
+# Crude points: bin patients by observed average PDC, per drug.
+crude <- dat |>
+  dplyr::mutate(
+    avg_pdc = rowMeans(cbind(PDC_1, PDC_2, PDC_3)),
+    Drug    = ifelse(A0 == 1, "Drug A", "Drug B"),
+    bin     = cut(avg_pdc, breaks = seq(0.30, 1.00, by = 0.10))
+  ) |>
+  dplyr::group_by(Drug, bin) |>
+  dplyr::summarise(adherence = mean(avg_pdc),
+                   risk = mean(Y_final),
+                   n_bin = dplyr::n(), .groups = "drop") |>
+  dplyr::filter(n_bin >= 10)
 
-ggplot(oracle_df, aes(PDC, risk, color = Drug)) +
-  geom_line(linewidth = 1.2) +
-  geom_point(data = naive_df, aes(PDC, risk, color = Drug), shape = 1, size = 2.2) +
+ggplot(oracle, aes(adherence, risk, color = Drug)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(data = crude, shape = 21, fill = "white", size = 2.4,
+             stroke = 1.0, aes(color = Drug)) +
   scale_x_continuous(labels = scales::percent) +
   scale_y_continuous(labels = scales::percent) +
   scale_color_manual(values = c("Drug A" = "#228833", "Drug B" = "#EE6677")) +
-  labs(x = "Sustained adherence (PDC)", y = "12-month failure risk", color = NULL,
+  labs(x = "Sustained adherence (PDC)", y = "12-month failure risk",
+       color = NULL,
        title = "Oracle forgiveness curves (lines) vs crude risk by adherence (points)") +
   theme_minimal() + theme(legend.position = "bottom")
 ```
 
-The solid lines are the causal forgiveness curves; the open points are the crude failure rates among patients whose average adherence fell in each bin. The crude points tend to sit above the causal curve where adherence is low and below it where adherence is high: low-adherence patients are sicker for reasons the crude comparison attributes to adherence, so it overstates the cost of poor adherence and understates the benefit of good adherence, exactly the bias the feedback loop predicts. Recovering the causal curve requires g-methods that account for that feedback. The L-TMLE chapter (@sec-illustrated-ltmle) estimates static adherence regimes that trace this curve at fixed levels; the rest of this chapter develops the feasible-shift approach with LMTP.
+The solid lines are the causal forgiveness curves: the failure risk that would obtain if adherence were set to each level, with health allowed to respond. The open points are the crude failure rates among patients whose observed average adherence fell in each bin. Within each drug, the crude points tend to lie above the causal curve at low adherence and below it at high adherence, because low-adherence patients are sicker for reasons the crude comparison attributes to adherence. The crude comparison therefore overstates the cost of poor adherence and understates the benefit of good adherence, exactly the bias the feedback loop predicts. Note that this within-drug gap is treatment-confounder feedback, a separate issue from the confounding by indication that distorts the cross-drug comparison; reading each drug's curve against its own crude points keeps the two from being conflated.
 
 
 # Two estimands, and the estimator each one needs
 
 The forgiveness question can be made precise in two ways, and they call for different estimators.
 
-The first is a **static adherence regime**: what would the failure risk be if every patient *sustained* a fixed adherence level, say low, medium, or high, for the whole year? This is the estimand that traces the forgiveness curve at fixed points, and the longitudinal TMLE of @sec-illustrated-ltmle estimates it. Its weakness is positivity: very few patients actually sustain low adherence, or perfect adherence, across all four blocks, so the data thin out at the ends of the curve.
+The first is a **static adherence regime**: what would the failure risk be if every patient *sustained* a fixed adherence level, say low, medium, or high, across all K = 3 blocks? This is the estimand that traces the forgiveness curve at fixed points, and the longitudinal TMLE of @sec-illustrated-ltmle estimates it. Its weakness is positivity, and the weakness sharpens with the horizon: requiring a patient to sit in an extreme adherence band at *every* block is a conjunction over blocks, so the support for "low every block" or "near-perfect every block" thins as K grows. The ends of the curve are exactly where the data are thinnest.
 
-The second is a **feasible shift**: what would happen if every patient's adherence were nudged up by a realistic amount, say 10 percentage points, from wherever it currently sits? This is a modified treatment policy [@haneuse2013mtp; @diaz2021lmtp], and LMTP estimates it. Because the shifted adherence stays close to what each patient already does, it respects the support of the data and answers a question an adherence-support program could actually act on.
+The second is a **feasible shift**: what would happen if every patient's adherence were nudged up by a realistic amount, say 5 percentage points, from wherever it currently sits? This is a modified treatment policy [@haneuse2013mtp; @diaz2021lmtp], and LMTP estimates it. Because the shifted adherence stays close to what each patient already does, it respects the support of the data and answers a question an adherence-support program could actually act on.
 
-The two are complementary summaries of the same counterfactual risk surface. The static curve shows the whole shape but needs support at every level; the shift gives a stable, policy-relevant slice near the observed distribution. The positivity problem with static extremes is easy to see directly in the data.
+The two are complementary summaries of the same counterfactual risk surface. The static curve shows the whole shape but needs support at every level, and that support is fragile at the extremes; the feasible shift gives a stable, policy-relevant slice near the observed distribution. Reading them together is the point: the static curve for shape, the shift for a number you can act on.
+
+The positivity strain on the static regime is something you can diagnose directly. The table below tabulates per-block adherence-band membership; tracking how the count in an extreme band shifts across blocks shows where the support for a sustained-extreme regime lives.
+
+```{r}
+#| label: positivity-band-diagnostic
+#| eval: true
+# Tabulate per-block adherence-band membership. Tracking how the count in an
+# extreme band (e.g. "low") shifts from block 1 to block K shows the support
+# for a sustained-extreme static regime thinning as the horizon grows.
+table(dat$PDC_cat_1)
+table(dat$PDC_cat_2)
+table(dat$PDC_cat_3)
+```
+
+The per-block counts only hint at the problem; what a sustained static regime actually requires is the same patient sitting in the extreme band at *every* block. Counting those patients makes the positivity strain concrete.
 
 ```{r}
 #| label: positivity-sustained
-#| code-fold: show
-# How many patients actually sustain low or high adherence across all four blocks?
-pdc <- as.matrix(dat[, paste0("PDC_", 1:4)])
+pdc <- as.matrix(dat[, paste0("PDC_", 1:3)])
 data.frame(
-  regime     = c("sustained low (<0.50 every block)", "sustained high (>0.90 every block)"),
-  n_patients = c(sum(rowMeans(pdc < 0.50) == 1), sum(rowMeans(pdc > 0.90) == 1)),
-  pct        = round(100 * c(mean(rowMeans(pdc < 0.50) == 1),
-                             mean(rowMeans(pdc > 0.90) == 1)), 1)
+  regime = c("sustained low (< 0.50 every block)",
+             "sustained high (> 0.90 every block)"),
+  n_patients = c(sum(rowMeans(pdc < 0.50) == 1),
+                 sum(rowMeans(pdc > 0.90) == 1)),
+  pct = round(100 * c(mean(rowMeans(pdc < 0.50) == 1),
+                      mean(rowMeans(pdc > 0.90) == 1)), 1)
 )
 ```
 
-When only a handful of patients sustain an extreme regime, the static forgiveness-curve estimate at that end rests on almost no data, and its confidence interval understates the true fragility. The longitudinal positivity diagnostic in @sec-positivity-overlap is the general version of this check. A feasible shift sidesteps the problem, which is the motivation for the LMTP approach below.
+Only a handful of patients sustain an extreme adherence band across all three blocks, so the static forgiveness-curve estimate rests on almost no data at the ends and is fragile there; this is exactly why the feasible shift, which stays near the observed distribution, is preferred. The longitudinal positivity diagnostic in @sec-positivity-overlap is the general version of this check. A feasible shift sidesteps the problem, which is the motivation for the LMTP approach below.
 
 
-# LMTP estimation: feasible adherence shifts
+# LMTP estimation
 
-Rather than targeting extreme static interventions ("force everyone to perfect adherence"), which violate positivity for patients who cannot realistically achieve high adherence, we use LMTP to define feasible adherence shifts [@diaz2021lmtp; @williams2025lmtp].
+We now code the estimators themselves. One estimand, the feasible shift, is fit live below so the reader sees a concrete estimate; the heavier study-grade fits (the static regime, the cross-regimen risk difference, and the quantile shift) are shown as `#| eval: false` reference code. Throughout, `lmtp`'s survival mode returns $P(\text{survival})$, so the failure risk is $1 - \text{estimate}$, and a contrast on that scale is a difference in survival probability.
 
-The shift function increases each patient's PDC by a fixed amount (e.g., 10 percentage points), capped at 1.0. This stays within the support of the observed data because no patient is assigned an adherence level that is impossible given their covariate history.
+## Shared setup
+
+A single small chunk fixes the node names and the learner library shared by every fit. The study fits with the cross-fitted `lmtp_tmle` (or the sequentially doubly robust `lmtp_sdr`), both with the same learner-agnostic library; `SL.earth` (MARS) is what lets the fit discover the drug-by-adherence interaction without being told it is there.
 
 ```{r}
-#| label: lmtp-estimation
+#| label: lmtp-setup
+#| message: false
+#| warning: false
+#| eval: true
+library(lmtp)
+K        <- 3
+trt      <- paste0("PDC_", 1:K)            # continuous adherence nodes
+outcome  <- paste0("Y_", 1:K)              # absorbing failure nodes
+baseline <- c("W0", "A0")
+tv       <- lapply(1:K, function(t) paste0("L_", t))   # time-varying confounder per block
+# Learner-agnostic library used by the study (earth = MARS, finds the drug x adherence
+# interaction without being told it is there). The study fits with lmtp_tmle or the
+# sequentially doubly robust lmtp_sdr; both use this library with cross-fitting (folds = 5).
+learners <- c("SL.mean", "SL.glm", "SL.earth")
+learners_fast <- c("SL.mean", "SL.glm")   # lighter library for the rendered fit below
+```
+
+## Static regime: a point on the forgiveness curve
+
+A static intervention sets PDC to a fixed level at every block. Fitting it on one drug's patients gives one point on that drug's forgiveness curve.
+
+```{r}
+#| label: lmtp-static
+#| eval: false
+# Static intervention: set adherence to a fixed value at every block.
+make_static_pdc_shift <- function(pdc_value) {
+  force(pdc_value)
+  function(data, trt) rep(pdc_value, nrow(data))   # ignore observed value; set to target
+}
+
+# Forgiveness-curve point for one drug at sustained adherence = 0.70:
+fit_static_A <- lmtp_tmle(
+  data = subset(dat, A0 == 1), trt = trt, outcome = outcome,
+  baseline = "W0", time_vary = tv,
+  shift = make_static_pdc_shift(0.70),
+  mtp = TRUE, outcome_type = "survival",        # mtp=TRUE: lmtp treats a fixed set as a degenerate MTP
+  learners_trt = learners, learners_outcome = learners, folds = 5)
+# risk = 1 - tidy(fit_static_A)$estimate[1]
+```
+
+Sweeping the fixed value over a grid traces the whole forgiveness curve, which is the static regime's strength. Its weakness is positivity, and it bites hardest at sustained extreme adherence: the support for "low every block" (or "near-perfect every block") thins as the horizon K grows, so the ends of the curve rest on little data. This is what motivates the feasible shift.
+
+## Feasible capped additive shift
+
+The study's canonical bounded MTP raises each patient's PDC by a small `delta`, but only when the result stays under a `cap`, so no probability mass piles up at PDC = 1.
+
+The rendered fit below uses the lighter learner library (`learners_fast`) and only two cross-fitting folds so the chapter knits quickly; the study uses the richer library with `SL.earth` and `folds = 5` exactly as shown in the reference chunks above and below.
+
+```{r}
+#| label: lmtp-feasible
+#| eval: true
 #| cache: true
 #| message: false
 #| warning: false
-library(lmtp)
+set.seed(2027)   # reproducible cross-fitting splits for the rendered fit
 
-# Prepare variable names
-K <- 4
-trt_vars     <- paste0("PDC_", 1:K)
-outcome_vars <- paste0("Y_", 1:K)
-baseline     <- c("W0", "A0")
-time_vary    <- lapply(1:K, function(t) paste0("L_", t))
-
-# Additive shift: increase PDC by 10 percentage points
-shift_up <- function(data, trt) {
-  pmin(data[[trt]] + 0.10, 1.0)
+# Capped additive rule: raise PDC by delta, but only for patients not already near the cap,
+# so no probability mass piles up at PDC = 1 (which would break positivity / the IF variance).
+feasible_add_rule <- function(a, delta, cap) {
+  sh <- a + delta
+  ifelse(!is.na(a) & sh <= cap, sh, a)            # shift if it stays <= cap, else leave as-is
 }
+make_feasible_add_shift <- function(delta, cap) {
+  force(delta); force(cap)
+  function(data, trt) {
+    a   <- data[[trt]]
+    out <- feasible_add_rule(a, delta, cap)
+    out[is.na(a)] <- NA_real_
+    out
+  }
+}
+natural_shift <- function(data, trt) data[[trt]]   # no intervention (observed adherence)
 
-# Natural course (no intervention)
-shift_natural <- function(data, trt) data[[trt]]
-
-# Estimate outcomes under each regime
-fit_shifted <- lmtp_tmle(
-  data = dat, trt = trt_vars, outcome = outcome_vars,
-  baseline = baseline, time_vary = time_vary,
-  shift = shift_up, mtp = TRUE, outcome_type = "survival",
-  learners_outcome = c("SL.glm", "SL.mean"),
-  learners_trt = c("SL.glm", "SL.mean"),
-  folds = 2
-)
-
-fit_natural <- lmtp_tmle(
-  data = dat, trt = trt_vars, outcome = outcome_vars,
-  baseline = baseline, time_vary = time_vary,
-  shift = shift_natural, mtp = TRUE, outcome_type = "survival",
-  learners_outcome = c("SL.glm", "SL.mean"),
-  learners_trt = c("SL.glm", "SL.mean"),
-  folds = 2
-)
-
-# Contrast: effect of shifting adherence up by 10pp
-contrast <- lmtp_contrast(fit_shifted, ref = fit_natural, type = "additive")
-contrast
+fit_shift   <- lmtp_tmle(dat, trt, outcome, baseline = baseline, time_vary = tv,
+                         shift = make_feasible_add_shift(0.05, 0.95),
+                         mtp = TRUE, outcome_type = "survival",
+                         learners_trt = learners_fast, learners_outcome = learners_fast, folds = 2)
+fit_natural <- lmtp_tmle(dat, trt, outcome, baseline = baseline, time_vary = tv,
+                         shift = natural_shift,
+                         mtp = TRUE, outcome_type = "survival",
+                         learners_trt = learners_fast, learners_outcome = learners_fast, folds = 2)
 ```
 
-The contrast estimates how much the failure rate would change if every patient's adherence increased by 10 percentage points at each visit. Because `lmtp` uses `outcome_type = "survival"`, it returns $P(\text{survive})$, so the risk is $1 - \theta$. A negative risk difference means the shift reduces failure.
+The cap is what keeps the estimator well-behaved. A naive "+delta capped at 1.0" shift would push every already-high patient to exactly 1.0, piling mass on the boundary and sending the density ratio (and with it the influence-function variance) toward infinity. The capped rule shifts only patients who stay strictly below the cap and leaves the rest at their observed value, so the density ratio stays bounded by construction.
 
-
-# Alternative shift approaches
-
-The additive shift is one way to operationalize "what if adherence were better?" Other approaches answer subtly different questions.
-
-## Quantile matching: what if Drug B adhered like Drug A?
-
-This maps each Drug B patient's adherence to the corresponding quantile of Drug A's distribution. A patient at the 30th percentile of Drug B adherence gets mapped to the 30th percentile of Drug A adherence. This answers: what would happen to Drug B's outcomes if its patients had Drug A's adherence profile?
+With both fits in hand, the contrast compares the capped +5pp regime against the natural course.
 
 ```{r}
-#| label: quantile-shift
-#| eval: false
-# Build quantile-matching shift function
-ecdf_B <- list()
-sorted_A <- list()
-for (t in 1:K) {
-  col <- paste0("PDC_", t)
-  ecdf_B[[t]] <- ecdf(dat[[col]][dat$A0 == 0])
-  sorted_A[[t]] <- sort(dat[[col]][dat$A0 == 1])
-}
+#| label: lmtp-feasible-contrast
+lmtp::lmtp_contrast(fit_shift, ref = fit_natural, type = "additive")
+```
 
-shift_match_A <- function(data, trt) {
-  t_idx <- as.integer(gsub("PDC_", "", trt))
-  a_obs <- data[[trt]]
-  a_shifted <- a_obs
-  is_b <- data$A0 == 0
-  if (any(is_b)) {
-    p_rank <- ecdf_B[[t_idx]](a_obs[is_b])
-    p_rank <- pmax(0.01, pmin(0.99, p_rank))
-    a_shifted[is_b] <- sorted_A[[t_idx]][
-      pmin(length(sorted_A[[t_idx]]),
-           ceiling(p_rank * length(sorted_A[[t_idx]])))
-    ]
+Because `lmtp`'s survival mode returns the survival probability, this additive contrast reports the difference in survival probability between the capped +5pp regime and the natural course. A positive value means the shift raised survival, equivalently it lowered failure risk, so the risk difference is the negative of the reported contrast. Concretely, the magnitude is the change in 12-month virologic-failure risk an adherence-support program would buy if it nudged every patient's PDC up by 5 percentage points (capped at 0.95) at each block, holding everything else as observed.
+
+You can also confirm that the cap kept the density ratios bounded rather than assume it.
+
+```{r}
+#| label: density-ratio-diagnostic
+#| eval: true
+# The capped rule should keep the per-block density ratios bounded; inspecting
+# their summary is the check behind the cap (a heavy right tail would flag the
+# boundary pile-up the cap is designed to prevent).
+summary(fit_shift$density_ratios)
+```
+
+## Cross-regimen risk difference: the forgiveness estimand
+
+The manuscript's headline quantity is a cross-regimen risk difference: a *joint* intervention that sets the drug and applies the adherence regime at once. The pattern prepends `A0` as the first treatment node, uses the single absorbing binomial outcome `Y_final` (so the estimate is the failure risk directly), and fits both drug arms on the *same* patients so their influence functions align before contrasting.
+
+```{r}
+#| label: lmtp-rd
+#| eval: false
+# One arm: set A0 = target_drug for everyone AND apply the adherence regime.
+fit_joint_arm <- function(data, target_drug, delta = 0.05, cap = 0.95, K = 3) {
+  pdc_nodes <- paste0("PDC_", 1:K)
+  shift_fn <- function(d, trt) {
+    if (trt == "A0") return(rep(as.integer(target_drug), nrow(d)))  # set the drug
+    a <- d[[trt]]; o <- feasible_add_rule(a, delta, cap); o[is.na(a)] <- NA_real_; o
   }
-  a_shifted
+  lmtp_tmle(
+    data = data, trt = c("A0", pdc_nodes), outcome = "Y_final",
+    baseline = NULL,
+    time_vary = c(list("W0"), lapply(1:K, function(t) paste0("L_", t))),
+    shift = shift_fn, mtp = TRUE, outcome_type = "binomial",
+    learners_trt = learners, learners_outcome = learners, folds = 5)
+}
+fit_A <- fit_joint_arm(dat, target_drug = 1)   # Drug A under the regime
+fit_B <- fit_joint_arm(dat, target_drug = 0)   # Drug B under the regime
+
+# Cross-regimen forgiveness RD (Drug A - Drug B under the same adherence regime).
+# type = "additive" gives the RD; type = "rr" gives the risk ratio.
+lmtp_contrast(fit_A, ref = fit_B, type = "additive")
+```
+
+This cross-regimen RD is the forgiveness estimand: it asks how much the failure risk differs between drugs when both are held to the same adherence regime. It is a different question from a shift-versus-natural contrast within a single arm, `lmtp_contrast(fit_shift, ref = fit_natural, type = "additive")`, which answers the policy question "what would a universal +5pp adherence program achieve?". For a static-regime RD, swap the arm's adherence rule for `make_static_pdc_shift(value)` on the PDC nodes (keeping `mtp = TRUE`).
+
+## Quantile shift: what if Drug B adhered like Drug A?
+
+The quantile shift maps each from-drug patient's PDC to the matching quantile of the to-drug's PDC, block by block, so a patient at the 30th percentile of one drug's adherence is moved to the 30th percentile of the other's.
+
+```{r}
+#| label: lmtp-quantile
+#| eval: false
+# Map each from_drug patient's PDC to the matching quantile of to_drug's PDC, per block.
+make_quantile_match_shift <- function(df, from_drug, to_drug, K = 3) {
+  ecdf_from <- vector("list", K); vals_to <- vector("list", K)
+  for (t in 1:K) {
+    col <- paste0("PDC_", t)
+    ecdf_from[[t]] <- ecdf(df[[col]][df$A0 == from_drug])
+    vals_to[[t]]   <- sort(df[[col]][df$A0 == to_drug])
+  }
+  trt_nodes <- paste0("PDC_", 1:K)
+  function(data, trt) {
+    t_idx <- match(trt, trt_nodes); if (is.na(t_idx)) return(data[[trt]])
+    a <- data[[trt]]
+    out <- vapply(seq_along(a), function(i) {
+      if (is.na(a[i])) return(NA_real_)
+      q <- ecdf_from[[t_idx]](a[i])                  # patient's rank in from_drug
+      quantile(vals_to[[t_idx]], probs = q, type = 1)  # same rank in to_drug
+    }, numeric(1))
+    out
+  }
 }
 ```
 
-## Mean-calibrated additive shift
-
-Add a constant to every Drug B patient's adherence so that Drug B's mean matches Drug A's mean. This is the simplest cross-drug comparison: it shifts the location of the distribution but preserves the shape.
-
-## Fixed additive shift (policy evaluation)
-
-The +10pp shift applied to everyone, regardless of drug. This answers a purely policy question: what would a universal adherence support program achieve? It does not reference the other drug at all and has the strongest positivity properties because the shift is small and uniform.
+Framed informally, the quantile shift separates a real-world-effectiveness comparison (drugs as actually adhered to) from an adherence-controlled forgiveness comparison (drugs held to a common adherence profile). This is an ICH-E9-style distinction between effectiveness and a more mechanism-focused estimand, not a formal mediation decomposition.
 
 
 # The forgiveness curve
@@ -407,12 +552,12 @@ A flat curve means the drug is forgiving (patients can miss doses without large 
 
 Static-regime L-TMLE traces this curve by estimating the failure risk at a grid of fixed PDC thresholds. The LMTP shift approach provides a complementary view: it estimates the marginal benefit of a small adherence improvement, integrated over the observed adherence distribution. The two approaches are different summaries of the same counterfactual risk surface.
 
-The curve is well-estimated only where there is adequate positivity. Below approximately PDC 0.70, few patients sustain such low adherence for four consecutive blocks, so the estimates become unstable. LMTP shift interventions avoid this problem because they stay close to the observed distribution.
+The curve is well-estimated only where there is adequate positivity, and positivity is weakest at the extremes. Sustaining a low adherence level across all K = 3 blocks is a conjunction over blocks, so the supporting data thin as the horizon grows, and the ends of the curve become unstable. LMTP shift interventions avoid this problem because they stay close to the observed distribution.
 
 
 # Interpretation
 
-**Feasible, not hypothetical.** The +10pp shift corresponds to something a real adherence support program might achieve. The estimate answers a concrete policy question.
+**Feasible, not hypothetical.** The capped +5pp shift corresponds to something a real adherence support program might achieve. The estimate answers a concrete policy question.
 
 **Causal, not descriptive.** The LMTP framework accounts for the treatment-confounder feedback between adherence and health. When adherence changes, health status changes too, and those changes are propagated through the sequential regression structure.
 
