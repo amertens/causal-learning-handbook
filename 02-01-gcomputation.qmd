@@ -8,17 +8,17 @@ format: html
 
 *G-computation as a foundation for causal estimation*
 
-Outcome modeling and standardization, often referred to as **g-computation**, is one of the oldest and most intuitive approaches to causal inference [@robins1994estimation; @petersen2014causal].
+Outcome modeling and standardization, usually called **g-computation**, is one of the oldest and most intuitive approaches to causal inference [@robins1994estimation; @petersen2014causal].
 
 ---
 
-G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions [@hernan2025whatif]. No reliance on a single regression coefficient required. It directly implements the identification formula from @sec-roadmap ($E[Y(a)] = E_W[E[Y \mid A=a, W]]$, where the potential outcome $Y(a)$ is written $Y(1)$ and $Y(0)$ for the two treatment levels), making it the most concrete entry point for learning causal estimation, and mapping the causal estimand to a statistical estimand.
+G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions [@hernan2025whatif]. Nothing hinges on reading off a single regression coefficient. It implements the identification formula from @sec-roadmap directly ($E[Y(a)] = E_W[E[Y \mid A=a, W]]$, where the potential outcome $Y(a)$ is written $Y(1)$ and $Y(0)$ for the two treatment levels), which makes it the most concrete entry point for learning causal estimation and shows how a causal estimand maps to a statistical one.
 
-G-computation reconstructs what would have happened if *everyone* received treatment ($A=1$) and, separately, if *everyone* received control ($A=0$). The recipe is three steps: (1) fit an outcome model $E[Y \mid A, W]$, (2) predict outcomes for each individual under both treatments, and (3) average those predictions (standardization).
+The method reconstructs what would have happened if *everyone* received treatment ($A=1$) and, separately, if *everyone* received control ($A=0$). The recipe has three steps: fit an outcome model $E[Y \mid A, W]$, predict outcomes for each individual under both treatments, then average those predictions (standardization).
 
 # Implementation Example: HIV Antiretroviral Therapy Cohort
 
-We use the shared HIV antiretroviral therapy cohort introduced in the case study [@vanderwal2011ipw]. This dataset follows HIV-positive patients from seroconversion, tracking HAART initiation and mortality. Here we collapse the longitudinal data to a point-treatment snapshot: A = `ever_haart` (1 = initiated HAART at any point, 0 = never initiated), Y = `died` (1 = died, 0 = alive at end of follow-up), with confounders age, sex, and baseline CD4 count (square-root transformed).
+We use the shared HIV antiretroviral therapy cohort introduced in the case study [@vanderwal2011ipw]. It follows HIV-positive patients from seroconversion and records HAART initiation and mortality. Here we collapse the longitudinal data to a point-treatment snapshot: A = `ever_haart` (1 = initiated HAART at any point, 0 = never initiated), Y = `died` (1 = died, 0 = alive at end of follow-up), with confounders age, sex, and baseline CD4 count (square-root transformed).
 
 ```{r}
 #| interactive: true
@@ -29,7 +29,7 @@ source("_data/load-haart-cohort.R")
 dat <- as_tibble(haart_baseline)
 ```
 
-Treatment is strongly confounded by baseline CD4 count and age, making this a good scenario for demonstrating g-computation.
+Treatment is strongly confounded by baseline CD4 count and age, which makes this a good setting for demonstrating g-computation.
 
 ---
 
@@ -47,7 +47,7 @@ mod <- glm(died ~ ever_haart + age + sex + cd4_sqrt_baseline,
 broom::tidy(mod, conf.int = TRUE) |> knitr::kable(digits = 3, caption = "Outcome model coefficients")
 ```
 
-**Pitfall.** The coefficient on `ever_haart` from this logistic regression is a *conditional log-odds ratio*. It tells you the association between HAART initiation and mortality *holding confounders fixed*. That is not a causal effect on its own. We need the next two steps (prediction + averaging) to turn this model into a causal estimate.
+**Pitfall.** The coefficient on `ever_haart` from this logistic regression is a *conditional log-odds ratio*. It tells you the association between HAART initiation and mortality *holding confounders fixed*, which is not a causal effect on its own. The next two steps, prediction and averaging, are what turn this model into a causal estimate.
 
 ### Step 2: Predict Counterfactual Outcomes (The "What If" Step)
 
@@ -64,11 +64,11 @@ p1 <- predict(mod, newdata = dat1, type = "response")
 p0 <- predict(mod, newdata = dat0, type = "response")
 ```
 
-Here `p1[i]` and `p0[i]` are the predicted outcomes for person *i* under treatment and control, respectively. Notice we are *not* comparing treated vs. untreated groups. We are comparing two hypothetical worlds for the *same* people. This is the counterfactual reasoning that separates causal inference from plain regression.
+Here `p1[i]` and `p0[i]` are the predicted outcomes for person *i* under treatment and control, respectively. Notice that we are *not* comparing treated against untreated groups. We are comparing two hypothetical worlds for the *same* people. That counterfactual move is what separates causal inference from plain regression.
 
 ### Step 3: Standardize (Averaging Over the Population)
 
-Averaging the counterfactual predictions over the *entire population* converts model-based predictions into a causal estimate: a standardized (marginal) risk difference, the same quantity a well-randomized trial would yield.
+Averaging the counterfactual predictions over the *entire population* turns model-based predictions into a causal estimate: a standardized (marginal) risk difference, the same quantity a well-randomized trial would yield.
 
 ```{r}
 #| interactive: true
@@ -97,11 +97,11 @@ tibble::tibble(
   theme_minimal()
 ```
 
-**How to interpret these results:** `ate` is the standardized (marginal) risk difference, and it is the causal number, not either regression coefficient. Read it as: if the entire population had initiated HAART rather than not, the estimated mortality risk would change by `ate` (about `r round(ate * 100, 1)` percentage points), with the measured confounders' distribution held fixed. `risk1` and `risk0` are the standardized risks under universal treatment and under no treatment; the contrast between them is what a well-randomized trial would have estimated.
+**How to interpret these results:** `ate` is the standardized (marginal) risk difference, and it is the causal number, not either regression coefficient. Read it as follows. If the entire population had initiated HAART rather than not, the estimated mortality risk would change by `ate` (about `r round(ate * 100, 1)` percentage points), with the measured confounders' distribution held fixed. `risk1` and `risk0` are the standardized risks under universal treatment and under no treatment, and the contrast between them is what a well-randomized trial would have estimated.
 
 ### Beyond the Risk Difference: Relative Risk and Population Attributable Fraction
 
-One of the strengths of g-computation is that once you have the counterfactual predictions `p1` and `p0`, you can compute *any* contrast, not just the risk difference. This flexibility is difficult to achieve with a single regression coefficient.
+One strength of g-computation is that once you have the counterfactual predictions `p1` and `p0`, you can compute *any* contrast, not just the risk difference. A single regression coefficient does not give you that.
 
 ```{r}
 #| interactive: true
@@ -123,12 +123,12 @@ knitr::kable(data.frame(
 ))
 ```
 
-The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **prevented fraction** compares the observed (current) mortality risk to the risk in a counterfactual world where *no one* initiated HAART: $(P(Y=1) - P(Y(0)=1)) / P(Y=1)$. The familiar "population attributable fraction" reading, the fraction of cases that would be *eliminated* by removing exposure, applies to a *harmful* exposure. HAART is protective, so the sign flips: $\text{risk0} > \text{overall risk}$, the quantity comes out **negative**, and a negative value means the current treatment distribution *prevents* that fraction of deaths relative to a world where no one is treated. Read literally, moving everyone to no-HAART would *add* deaths, not eliminate them. Under the identification assumptions (exchangeability, positivity, consistency), this contrast has a causal interpretation, unlike the traditional epidemiologic PAF formula, which uses observed prevalence and does not require causal assumptions but also does not have a causal interpretation.
+The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **prevented fraction** compares the observed (current) mortality risk to the risk in a counterfactual world where *no one* initiated HAART: $(P(Y=1) - P(Y(0)=1)) / P(Y=1)$. The familiar "population attributable fraction" reading, the fraction of cases that would be *eliminated* by removing exposure, applies to a *harmful* exposure. HAART is protective, so the sign flips. Here $\text{risk0} > \text{overall risk}$, the quantity comes out **negative**, and a negative value means the current treatment distribution *prevents* that fraction of deaths relative to a world where no one is treated. Read literally, moving everyone to no-HAART would *add* deaths, not eliminate them. Under the identification assumptions (exchangeability, positivity, consistency), this contrast carries a causal interpretation. The traditional epidemiologic PAF formula does not: it uses observed prevalence, needs no causal assumptions, and returns a number you cannot read causally.
 
 <!-- editor note: implemented Option A from the editorial spec. The original code/prose labeled (overall_risk - risk0)/overall_risk as a "population attributable fraction" eliminated by removing exposure, which is sign-inverted for a protective treatment. Kept the formula, renamed to "prevented fraction", and stated the sign direction explicitly. -->
 
 
-Neither of these measures is directly available from a single logistic regression coefficient; you would need to exponentiate and back-transform, making strong assumptions about the scale. With g-computation, you compute them directly from the predicted counterfactual risks.
+Neither measure is directly available from a single logistic regression coefficient. You would need to exponentiate and back-transform under strong assumptions about the scale. With g-computation you compute them directly from the predicted counterfactual risks.
 
 
 # Why G-Computation Works
@@ -139,7 +139,7 @@ $$
 E_W[ E[Y | A=a, W] ].
 $$
 
-In plain terms, this averages the predicted outcomes under treatment (or control) across the full study population, weighting each prediction by the population's covariate distribution. The goal remains the same: estimate $E[Y(1)] - E[Y(0)]$, the population-level risk difference.
+In plain terms, this averages the predicted outcomes under treatment (or control) across the full study population, weighting each prediction by the population's covariate distribution. The goal is unchanged: estimate $E[Y(1)] - E[Y(0)]$, the population-level risk difference.
 
 
 
@@ -152,7 +152,7 @@ This is one of the most commonly confused points in epidemiology:
 
 - **Marginal risk difference** (what g-computation gives you): "If we could treat *everyone* versus *no one*, how much would the overall population risk change?" This is a *causal* contrast on the risk scale, the kind of number a clinician or policy maker can act on.
 
-G-computation bridges the gap: it uses the conditional model internally but standardizes over the population to produce the marginal (causal) effect.
+G-computation bridges the gap. It uses the conditional model internally but standardizes over the population to produce the marginal (causal) effect.
 :::
 
 ---
@@ -167,7 +167,7 @@ G-computation rests entirely on the outcome model $E[Y \mid A, W]$. If that mode
 
 ## Watch it fail: a misspecified model biases the estimate
 
-The warning above is easy to state and easy to ignore, so here it is as a number. We simulate a world where the truth is nonlinear [@sofrygin2017simcausal], then estimate the effect two ways: with a main-terms logistic regression that misses the nonlinearity, and with a model that includes it. The risk difference is known by construction, so we can see exactly how far the misspecified model lands from the truth.
+The warning above is easy to state and easy to ignore, so here it is as a number. We simulate a world where the truth is nonlinear [@sofrygin2017simcausal], then estimate the effect two ways: with a main-terms logistic regression that misses the nonlinearity, and with a model that includes it. The risk difference is known by construction, so we can measure exactly how far the misspecified model lands from the truth.
 
 ```{r}
 #| code-fold: show
@@ -197,7 +197,7 @@ ate_flex <- mean(predict(m_flex, transform(d, A = 1), type = "response") -
 round(c(truth = true_ate, main_terms = ate_wrong, flexible = ate_flex), 3)
 ```
 
-The main-terms estimate misses the true risk difference because it cannot represent the curvature and the above-65 interaction; the flexible model, which happens to include exactly those terms, recovers the truth. The catch in real data is that no one tells you which terms to add. That is the problem Super Learner (@sec-superlearner) solves: rather than guessing the functional form, it lets a library of algorithms and cross-validation choose it [@vanderLaan2007superlearner], which is why the next chapters build g-computation and TMLE on top of machine learning rather than a single hand-specified regression.
+The main-terms estimate misses the true risk difference because it cannot represent the curvature or the above-65 interaction. The flexible model, which happens to include exactly those terms, recovers the truth. The catch in real data is that no one tells you which terms to add. That is the problem Super Learner (@sec-superlearner) solves: instead of guessing the functional form, it lets a library of algorithms and cross-validation choose it [@vanderLaan2007superlearner]. That is why the next chapters build g-computation and TMLE on top of machine learning rather than a single hand-specified regression.
 
 ---
 
@@ -213,20 +213,20 @@ ps <- predict(glm(ever_haart ~ age + sex + cd4_sqrt_baseline,
 summary(ps)
 ```
 
-G-computation handles near-positivity violations differently from IPTW. Where IPTW produces extreme weights for observations with propensity scores near 0 or 1, g-computation instead extrapolates from the fitted outcome model. This may be more or less reliable depending on how well the model captures the true outcome surface in sparse regions of the covariate space. The extrapolation is implicit and may not produce visible warnings. Positivity and overlap receive a dedicated treatment, with diagnostics and remedies, in @sec-positivity-overlap.
+G-computation handles near-positivity violations differently from IPTW. Where IPTW produces extreme weights for observations with propensity scores near 0 or 1, g-computation extrapolates from the fitted outcome model. How reliable that is depends on how well the model captures the true outcome surface in sparse regions of the covariate space. The extrapolation is implicit and may produce no visible warning. @sec-positivity-overlap covers positivity and overlap on their own, with diagnostics and remedies.
 :::
 
 ---
 
-**Pitfall.** No modeling strategy fixes missing confounders. If an important common cause of treatment and outcome is absent from your dataset, g-computation (like every other method in this handbook) will produce a biased estimate. However, g-computation makes its assumptions explicit (you can see exactly which variables $W$ enter the model), which aids transparent reporting and sensitivity analysis.
+**Pitfall.** No modeling strategy fixes missing confounders. If an important common cause of treatment and outcome is absent from your dataset, g-computation (like every other method in this handbook) will produce a biased estimate. What g-computation does offer is explicit assumptions: you can see exactly which variables $W$ enter the model, which helps transparent reporting and sensitivity analysis.
 
 ---
 
-**Practical note.** The biggest limitation of g-computation with logistic regression is that you must get the functional form right. A powerful alternative is to replace the parametric model with a data-adaptive learner (random forests, gradient boosting, GAMs, or a SuperLearner ensemble) [@vanderLaan2007superlearner], reducing reliance on parametric assumptions. In later chapters we systematically integrate SuperLearner with **TMLE** [@vanderLaan2006tmle].
+**Practical note.** The biggest limitation of g-computation with logistic regression is that you must get the functional form right. One alternative is to replace the parametric model with a data-adaptive learner (random forests, gradient boosting, GAMs, or a SuperLearner ensemble) [@vanderLaan2007superlearner], which loosens the parametric assumptions. Later chapters integrate SuperLearner with **TMLE** [@vanderLaan2006tmle].
 
 ::: {.callout-note}
 ## Super Learner in one sentence (for now)
-Super Learner is an ensemble that uses cross-validation to combine many candidate models into a single prediction, formally introduced in @sec-superlearner. Until then you can read the `SuperLearner(...)` call below as a flexible stand-in for the single GLM: same role (predict the outcome given treatment and covariates), but it lets the data choose the functional form instead of you guessing it.
+Super Learner is an ensemble that uses cross-validation to combine many candidate models into a single prediction, introduced in full in @sec-superlearner. Until then you can read the `SuperLearner(...)` call below as a flexible stand-in for the single GLM: same role (predict the outcome given treatment and covariates), but it lets the data choose the functional form instead of you guessing it.
 :::
 
 ```{r}
@@ -282,13 +282,13 @@ for (b in seq_len(n_boot)) {
 quantile(boot_ates, c(0.025, 0.975))
 ```
 
-This works but is computationally expensive and does not benefit from efficiency theory. The methods in the next two chapters (**IPTW** and especially TMLE) provide analytic standard errors and confidence intervals based on influence function theory, making them more practical for routine use [@vanderLaan2006tmle]. TMLE in particular combines the outcome-modeling strengths of g-computation with formal inference, which is one reason it is the recommended approach in later chapters.
+This works but is computationally expensive and does not benefit from efficiency theory. The methods in the next two chapters (**IPTW** and especially TMLE) give analytic standard errors and confidence intervals based on influence function theory, which makes them more practical for routine use [@vanderLaan2006tmle]. TMLE in particular pairs the outcome-modeling strengths of g-computation with formal inference, one reason it is the recommended approach in later chapters.
 :::
 
 :::{.callout-tip}
 ## Summary
 
-G-computation = fit a model, predict under both treatments for everyone, then average. That three-step standardization is what converts a conditional model into a marginal causal estimate. Its main vulnerability is outcome-model misspecification; flexible learners and doubly robust methods (IPTW, TMLE) address this in subsequent chapters.
+G-computation = fit a model, predict under both treatments for everyone, then average. That three-step standardization is what converts a conditional model into a marginal causal estimate. Its main vulnerability is outcome-model misspecification. Flexible learners and doubly robust methods (IPTW, TMLE) address that in later chapters.
 :::
 
 ---
@@ -298,21 +298,21 @@ G-computation = fit a model, predict under both treatments for everyone, then av
 <details>
 <summary><strong>Q1. You run g-computation using a logistic regression model. A colleague asks: "Isn't this just a regression coefficient?" How do you explain the difference?</strong></summary>
 
-No. A logistic regression coefficient is a *conditional log-odds ratio* that describes how the log-odds of the outcome change with treatment, holding covariates fixed at particular values. G-computation uses that same model but adds two critical steps: it predicts outcomes for every individual under both $A=1$ and $A=0$, then *averages* those predictions over the entire population. The result is a marginal risk difference (the ATE on the risk scale), which answers a different question: "How much would population-level risk change if we could treat everyone versus no one?" The regression coefficient is conditional and on the log-odds scale; the g-computation estimate is marginal and on the risk scale. These are different quantities even when the underlying model is the same.
+No. A logistic regression coefficient is a *conditional log-odds ratio* that describes how the log-odds of the outcome change with treatment, holding covariates fixed at particular values. G-computation uses that same model but adds two steps: it predicts outcomes for every individual under both $A=1$ and $A=0$, then *averages* those predictions over the entire population. The result is a marginal risk difference (the ATE on the risk scale), which answers a different question: "How much would population-level risk change if we could treat everyone versus no one?" The regression coefficient is conditional and on the log-odds scale, while the g-computation estimate is marginal and on the risk scale. They are different quantities even when the underlying model is the same.
 
 </details>
 
 <details>
 <summary><strong>Q2. What happens to the g-computation estimate if the outcome model is misspecified?</strong></summary>
 
-G-computation is only as good as its outcome model. If $E[Y \mid A, W]$ is misspecified (for example, it assumes a linear relationship when the truth involves interactions or non-linearities), the counterfactual predictions will be systematically wrong, and the ATE estimate will be biased. Unlike doubly robust methods (AIPW, TMLE), g-computation has no second chance: there is no treatment model to compensate for outcome-model errors. This is why diagnostics (residual checks, comparison across model specifications) and flexible modeling strategies (SuperLearner) are important when using g-computation.
+G-computation is only as good as its outcome model. If $E[Y \mid A, W]$ is misspecified (for example, it assumes a linear relationship when the truth involves interactions or non-linearities), the counterfactual predictions will be systematically wrong, and the ATE estimate will be biased. Unlike doubly robust methods (AIPW, TMLE), g-computation has no second chance: there is no treatment model to compensate for outcome-model errors. That is why diagnostics (residual checks, comparison across model specifications) and flexible modeling strategies (SuperLearner) matter when you use g-computation.
 
 </details>
 
 <details>
 <summary><strong>Q3. Why does g-computation produce a marginal (population-level) effect even though it uses a conditional model internally?</strong></summary>
 
-The key is the standardization (averaging) step. The outcome model $E[Y \mid A, W]$ is conditional: it gives a predicted outcome for a specific individual with covariates $W=w$ under treatment $A=a$. But g-computation does not report these individual-level predictions. Instead, it predicts for *every person* under $A=1$ and under $A=0$, then takes the population average of the difference. This averaging over the empirical covariate distribution $P(W)$ is exactly the operation $E_W[E[Y \mid A=a, W]]$ from the identification formula, and it produces a marginal effect. The conditional model is an intermediate tool; the final quantity is a population-level causal contrast.
+The answer is the standardization (averaging) step. The outcome model $E[Y \mid A, W]$ is conditional: it gives a predicted outcome for a specific individual with covariates $W=w$ under treatment $A=a$. But g-computation does not report these individual-level predictions. Instead, it predicts for *every person* under $A=1$ and under $A=0$, then takes the population average of the difference. This averaging over the empirical covariate distribution $P(W)$ is exactly the operation $E_W[E[Y \mid A=a, W]]$ from the identification formula, and it produces a marginal effect. The conditional model is an intermediate tool. The final quantity is a population-level causal contrast.
 
 </details>
 
@@ -320,6 +320,6 @@ The key is the standardization (averaging) step. The outcome model $E[Y \mid A, 
 
 ## What comes next
 
-G-computation depends entirely on the outcome model being correctly specified. What if we could instead model the treatment mechanism? The next chapter introduces IPTW, which takes exactly that approach: reweighting observations to create a pseudo-population where treatment appears randomized.
+G-computation depends entirely on the outcome model being correctly specified. What if we modeled the treatment mechanism instead? The next chapter introduces IPTW, which does exactly that: it reweights observations to create a pseudo-population where treatment appears randomized.
 
 ---

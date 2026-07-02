@@ -16,7 +16,7 @@ This chapter is under active development. Content may be incomplete, change subs
 
 ::: {.callout-tip}
 ## If you only read one thing
-Mediation splits a total effect into a part that runs through the mediator and a part that does not. In real data the defensible version uses interventional (and randomized-interventional) effects, with the recanting-twins decomposition when an intermediate confounder is itself affected by treatment, not the Baron-Kenny product of regression coefficients. The headline number is the indirect effect on the risk scale; the popular "proportion mediated" is fragile and should be read with caution.
+Mediation splits a total effect into a part that runs through the mediator and a part that does not. In real data the defensible version uses interventional (and randomized-interventional) effects, with the recanting-twins decomposition when an intermediate confounder is itself affected by treatment. It is not the Baron-Kenny product of regression coefficients. The headline number is the indirect effect on the risk scale. The popular "proportion mediated" is fragile and should be read with caution.
 :::
 
 ```{r}
@@ -38,9 +38,9 @@ library(ggplot2)
 
 Readers who have worked through the [LMTP adherence-shift methods chapter](03-03b-adherence-shift-methods.qmd) will recognize the idea of decomposing drug effects into adherence-mediated and pharmacological components. That decomposition was *informal*: it used distribution shifts to approximate a controlled direct effect. This chapter provides the formal mediation framework that places those intuitions on rigorous causal footing, with proper identification conditions and semiparametric efficient estimation [@vanderLaan2011targeted; @zheng2011naturaldirect].
 
-In pharmacoepidemiology, we often want to know not just **whether** a drug works, but **how** it works. Does HAART reduce mortality because it raises CD4 cell counts (indirect effect through the mediator), because of viral suppression at sites that act on mortality risk independently of CD4 (direct effect), or both?
+In pharmacoepidemiology, we often want to know not just whether a drug works, but how it works. Does HAART reduce mortality because it raises CD4 cell counts (indirect effect through the mediator), because of viral suppression at sites that act on mortality risk independently of CD4 (direct effect), or both?
 
-Mediation analysis decomposes a total causal effect into the part that operates through a specified intermediate variable (the indirect effect) and the part that does not (the direct effect). Getting this decomposition right requires careful attention to the estimand, the causal model, and the assumptions that connect the two. This chapter walks through the logic and implementation of TMLE-based mediation using the `crumble` R package.
+Mediation analysis splits a total causal effect into the part that operates through a specified intermediate variable (the indirect effect) and the part that does not (the direct effect). Getting the split right requires careful attention to the estimand, the causal model, and the assumptions that connect the two. This chapter walks through the logic and implementation of TMLE-based mediation using the `crumble` R package.
 
 **What you will learn:**
 
@@ -67,7 +67,7 @@ HAART has dramatically reduced mortality in HIV cohorts. A natural follow-up que
 
 > **How much of HAART's effect on mortality operates through CD4 recovery (the immunologic pathway), and how much operates through other mechanisms (direct viral suppression, prevention of specific opportunistic infections, reduced systemic inflammation)?**
 
-This matters for understanding immune reconstitution as a treatment target, for evaluating treatment monitoring strategies that emphasise CD4 trajectories, and for interpreting trial results when surrogate endpoints (CD4 change) are used in place of mortality.
+The answer bears on whether immune reconstitution is a good treatment target, on monitoring strategies that lean on CD4 trajectories, and on how to read trials that use a surrogate endpoint (CD4 change) in place of mortality.
 
 ::: {.callout-note}
 ## The Setup
@@ -82,7 +82,7 @@ This matters for understanding immune reconstitution as a treatment target, for 
 
 # Conceptual Primer: Mediator, Confounder, Moderator, Collider
 
-A mediator sits on the causal pathway from treatment to outcome. But several other variable roles are easy to confuse with mediation.
+A mediator sits on the causal pathway from treatment to outcome. Several other variable roles are easy to confuse with it.
 
 ```{r}
 #| label: fig-primer-dags
@@ -118,12 +118,12 @@ p1 + p2 + p3 + p4 + plot_layout(nrow = 1)
 - A **mediator** is on the causal pathway from treatment to outcome. It is caused by treatment and in turn causes the outcome.
 - A **collider** is caused by two variables. Conditioning on a collider opens a spurious path.
 
-**Temporality is essential.** A variable can only mediate the treatment effect if it occurs *after* treatment and *before* the outcome. Adjusting for a post-outcome variable or a cross-sectionally measured variable as if it were a mediator is a common error that can introduce bias rather than remove it.
+**Temporality is essential.** A variable can only mediate the treatment effect if it occurs *after* treatment and *before* the outcome. Treating a post-outcome variable, or one measured cross-sectionally, as a mediator is a common error, and it can introduce bias rather than remove it.
 
 ::: {.callout-warning}
 ## The intermediate confounder problem
 
-A variable $Z$ that is affected by treatment and confounds the mediator-outcome relationship creates the hardest problem in mediation analysis. If $Z$ exists and you ignore it, your decomposition is biased. We return to this below when choosing the estimand.
+A variable $Z$ that is affected by treatment and confounds the mediator-outcome relationship is the hardest problem in mediation analysis. If $Z$ exists and you ignore it, your decomposition is biased. We return to this below when choosing the estimand.
 
 ```{r}
 #| label: fig-intermediate-confounder
@@ -147,16 +147,16 @@ ggdag(dag_ic) + theme_dag()
 
 ## Step 1: Define the Estimand
 
-Mediation decomposes a total effect into pieces. But there are several competing definitions, and the choice matters because they require different assumptions.
+Mediation splits a total effect into pieces. There are several competing definitions, and the choice matters because they require different assumptions.
 
-**Natural direct and indirect effects (NDE/NIE).** The most common definitions. In plain language, the NDE captures the part of the treatment effect that bypasses the mediator entirely, while the NIE captures the part that works through the mediator. Together they add up to the total effect.
+**Natural direct and indirect effects (NDE/NIE).** These are the most common definitions. In plain language, the NDE captures the part of the treatment effect that bypasses the mediator entirely, while the NIE captures the part that works through the mediator. Together they add up to the total effect.
 
 $$\text{NDE} = E[Y(1, M(0))] - E[Y(0, M(0))]$$
 $$\text{NIE} = E[Y(1, M(1))] - E[Y(1, M(0))]$$
 
 The NDE asks: what is the effect of treatment if we could hold the mediator at the value it would have taken under control? The NIE asks: what is the effect of shifting the mediator as treatment would, while keeping treatment on? These decompose the total effect: $\text{TE} = \text{NDE} + \text{NIE}$.
 
-The trouble is that $Y(1, M(0))$ is a **cross-world** quantity that combines treatment from one "world" ($A=1$) with a mediator value from another ($A=0$). This requires a strong, untestable assumption (no treatment-induced mediator-outcome confounding) [@zheng2011naturaldirect; @hernan2025whatif].
+The trouble is that $Y(1, M(0))$ is a **cross-world** quantity that combines treatment from one "world" ($A=1$) with a mediator value from another ($A=0$). Pinning it down requires a strong, untestable assumption: no treatment-induced mediator-outcome confounding [@zheng2011naturaldirect; @hernan2025whatif].
 
 The natural indirect effect answers: how much of the total effect operates through the mediator? In the HAART example, the NIE quantifies how much of the mortality benefit is attributable to CD4 recovery specifically.
 
@@ -167,7 +167,7 @@ $$\text{IIE} = E[Y(1, G_1)] - E[Y(1, G_0)]$$
 
 where $G_a$ denotes a random draw from $P(M \mid A = a, W)$. These do not require cross-world quantities and are identified under weaker conditions.
 
-**Recanting twins (RT).** When there is an intermediate confounder $Z$ (affected by treatment, confounding the mediator-outcome path), even randomized interventional effects need further care. The recanting-twins approach (Robins & Richardson, 2010) handles this by decomposing the effect into path-specific components using two independent "copies" of the treatment.
+**Recanting twins (RT).** When there is an intermediate confounder $Z$ (affected by treatment, confounding the mediator-outcome path), even randomized interventional effects need further care. The recanting-twins approach (Robins & Richardson, 2010) splits the effect into path-specific components using two independent "copies" of the treatment.
 
 ::: {.callout-tip}
 ## Which estimand should you choose?
@@ -201,7 +201,7 @@ dag_simple <- dagify(
 ggdag(dag_simple) + theme_dag()
 ```
 
-The time ordering must be: $W$ (baseline) $\to$ $A$ (HAART initiation) $\to$ $M$ (6-month CD4 change) $\to$ $Y$ (1-year mortality). This ordering is not negotiable. If $M$ is measured after $Y$, or if $A$ and $M$ are measured simultaneously, the decomposition is not credible.
+The time ordering must be: $W$ (baseline) $\to$ $A$ (HAART initiation) $\to$ $M$ (6-month CD4 change) $\to$ $Y$ (1-year mortality). This ordering is not negotiable. If $M$ is measured after $Y$, or if $A$ and $M$ are measured at the same time, the decomposition is not credible.
 
 When we add an intermediate confounder $Z$ (e.g., 6-week weight change caused by treatment, affecting both CD4 trajectory and mortality) [@hernan2025whatif]:
 
@@ -265,20 +265,20 @@ None of these can be fully verified from data. Subject-matter knowledge is requi
 
 ## Step 4: Estimation Strategy
 
-TMLE-based mediation estimation (as implemented in `crumble`) works in several stages. Throughout, the target remains: decompose the total treatment effect into the portion that operates through the mediator (the indirect effect) and the portion that does not (the direct effect).
+TMLE-based mediation estimation (as implemented in `crumble`) works in several stages. Throughout, the target stays the same: split the total treatment effect into the portion that operates through the mediator (the indirect effect) and the portion that does not (the direct effect).
 
 1. **Nuisance estimation with cross-fitting.** Fit flexible models for the outcome ($E[Y \mid A, M, W]$), the mediator distribution ($P(M \mid A, W)$), and the treatment mechanism ($P(A \mid W)$) using an ensemble of learners. Cross-fitting (sample splitting) avoids overfitting bias.
 
-2. **Riesz representer estimation.** The targeting step in TMLE requires a "clever covariate" that depends on the estimand. For mediation, this involves density ratios of the mediator distribution under treatment vs. control. The `crumble` package estimates these using a neural network (the `nn_module` argument) rather than requiring explicit density estimation.
+2. **Riesz representer estimation.** The targeting step in TMLE requires a "clever covariate" that depends on the estimand. For mediation, this involves density ratios of the mediator distribution under treatment vs. control. The `crumble` package estimates these with a neural network (the `nn_module` argument) rather than requiring explicit density estimation.
 
-3. **Targeting (fluctuation).** Update the initial outcome model to solve the efficient influence function equation. This makes the estimator doubly robust: consistent if either the outcome model or the combination of treatment/mediator models is correctly specified, under appropriate regularity conditions.
+3. **Targeting (fluctuation).** Update the initial outcome model to solve the efficient influence function equation. This makes the estimator doubly robust: consistent if either the outcome model or the combination of treatment and mediator models is correctly specified, under appropriate regularity conditions.
 
 4. **Plug-in estimation and inference.** Compute the effect estimate from the targeted predictions and obtain standard errors from the influence function.
 
 ::: {.callout-note collapse="true"}
 ## Technical detail: the mediation g-computation formulas (expand)
 
-Under the identification assumptions, the NDE and NIE can be expressed as weighted averages over the outcome model and the mediator distribution. The NDE formula compares the expected outcome under treatment versus control, holding the mediator distribution at its control-arm values. The NIE formula holds treatment on and compares how the outcome changes when the mediator distribution shifts from its control-arm shape to its treatment-arm shape.
+Under the identification assumptions, the NDE and NIE can be written as weighted averages over the outcome model and the mediator distribution. The NDE formula compares the expected outcome under treatment versus control, holding the mediator distribution at its control-arm values. The NIE formula holds treatment on and asks how the outcome changes when the mediator distribution shifts from its control-arm shape to its treatment-arm shape.
 
 $$\text{NDE} = \sum_m \sum_w \big[E[Y \mid A=1, M=m, W=w] - E[Y \mid A=0, M=m, W=w]\big] \cdot P(M=m \mid A=0, W=w) \cdot P(W=w)$$
 
@@ -339,7 +339,7 @@ A <- rbinom(n, 1, plogis(lp_trt))
 
 **Intermediate confounder (Z): 6-week weight change (kg)**
 
-This is a variable affected by treatment that confounds the mediator-outcome relationship. HAART can produce early weight gain (or, less commonly, weight loss with certain regimens), and weight trajectory predicts both immune recovery and mortality. Including $Z$ lets us demonstrate recanting-twins estimation.
+This is a variable affected by treatment that confounds the mediator-outcome relationship. HAART can produce early weight gain (or, less commonly, weight loss with certain regimens), and weight trajectory predicts both immune recovery and mortality. Adding $Z$ lets us demonstrate recanting-twins estimation.
 
 ```{r}
 Z <- rnorm(n,
@@ -520,12 +520,12 @@ cat("Treatment on mediator:     ", round(coef(med_mod)["A"], 3), "(mean change)\
 
 4. **No valid inference.** Standard errors for the "indirect effect" (product of coefficients) rely on normality assumptions that are wrong for binary outcomes.
 
-These are not minor quibbles; they produce qualitatively misleading answers. A proper mediation analysis requires specifying the estimand, verifying identification, and using an estimator matched to both.
+These are not minor quibbles. They produce qualitatively misleading answers. A proper mediation analysis specifies the estimand, verifies identification, and uses an estimator matched to both.
 
 
 # Worked Example: Mediation with `crumble`
 
-The `crumble` package (Williams & Díaz, 2024) implements TMLE-based mediation analysis with cross-fitting, flexible machine-learning nuisance estimation, and neural-network-based Riesz representer estimation. It supports natural effects, randomized interventional effects, organic effects, and recanting twins.
+The `crumble` package (Williams & Díaz, 2024) implements TMLE-based mediation analysis with cross-fitting, flexible machine-learning nuisance estimation, and neural-network Riesz representer estimation. It supports natural effects, randomized interventional effects, organic effects, and recanting twins.
 
 ```{r}
 #| eval: false
@@ -742,7 +742,7 @@ The settings above (`crossfit_folds = 2L, epochs = 5L`) are deliberately fast fo
 
 In the HAART example:
 
-- The **direct effect** captures the mortality benefit of HAART that does *not* operate through CD4 recovery. This includes direct viral suppression effects on tissues other than CD4 lymphocytes, prevention of specific opportunistic infections through reduced viral burden, and lowered systemic inflammation independent of CD4 count. A large direct effect suggests that monitoring HAART by CD4 alone misses an important component of the drug's protective action.
+- The **direct effect** captures the mortality benefit of HAART that does *not* operate through CD4 recovery: viral suppression acting on tissues other than CD4 lymphocytes, prevention of opportunistic infections through reduced viral burden, and lower systemic inflammation independent of CD4 count. A large direct effect suggests that monitoring HAART by CD4 alone misses an important part of the drug's protective action.
 
 - The **indirect effect** (via M) captures how much of the mortality benefit is attributable to immune reconstitution as measured by CD4 change. If this is large, CD4 trajectory is a strong surrogate for the mortality benefit; if small, CD4 monitoring is not capturing the dominant mechanism.
 
@@ -752,7 +752,7 @@ The choice of effect definition matters for interpretation. Natural effects answ
 
 Randomized interventional effects answer a different question: "what if we randomly assigned the mediator value from its distribution under control?" This stochastic intervention is closer to policy-relevant questions. Recanting twins decompose the total effect into path-specific components that remain identifiable even with intermediate confounding.
 
-None of these claims establish "mechanism" in a biological sense without strong assumptions. The decomposition tells you how much of the effect flows through the measured mediator *given the causal model and identification assumptions*. Unmeasured mediator-outcome confounders, measurement error in $M$, or misspecification of the time ordering can all distort the decomposition.
+None of these claims establish "mechanism" in a biological sense without strong assumptions. The decomposition tells you how much of the effect flows through the measured mediator *given the causal model and identification assumptions*. Unmeasured mediator-outcome confounders, measurement error in $M$, or a misspecified time ordering can all distort it.
 
 
 ## Caution: proportion mediated
@@ -771,7 +771,7 @@ Report the direct and indirect effects on the absolute scale (risk difference) w
 
 ## Propensity Score Overlap
 
-Before interpreting the indirect effect, verify that the estimation is operating in a regime where the nuisance models are well-behaved. The indirect effect answers: how much of the total treatment effect operates through the mediator? That answer is only trustworthy if the following diagnostics look reasonable.
+Before interpreting the indirect effect, check that estimation is operating in a regime where the nuisance models are well-behaved. The indirect effect answers: how much of the total treatment effect operates through the mediator? That answer is only trustworthy if the diagnostics below look reasonable.
 
 ```{r}
 #| code-fold: true
@@ -899,7 +899,7 @@ sessionInfo()
 - Zheng Z, van der Laan MJ (2012). Targeted maximum likelihood estimation of natural direct effects. *Int J Biostat* 8(1):Article 3 [@zheng2011naturaldirect].
 - VanderWeele TJ (2015). *Explanation in Causal Inference: Methods for Mediation and Interaction*. Oxford University Press.
 - Díaz I, Hejazi NS (2020). Causal mediation analysis for stochastic interventions. *JRSS-B* 82(3):661-683 [@diaz2021lmtp].
-- Pearl J (2001). Direct and indirect effects. *Proceedings of the 17th Conference on Uncertainty in Artificial Intelligence*, 411--420.
+- Pearl J (2001). Direct and indirect effects. *Proceedings of the 17th Conference on Uncertainty in Artificial Intelligence*, 411 to 420.
 - Robins JM, Richardson TS (2010). Alternative graphical causal models and the identification of direct effects. In *Causality and Psychopathology*, Oxford University Press.
 - Williams NT, Díaz I (2024). `crumble`: An R package for TMLE-based mediation analysis. [GitHub](https://github.com/nt-williams/crumble).
 - van der Laan MJ, Rose S (2011). *Targeted Learning: Causal Inference for Observational and Experimental Data*. Springer [@vanderLaan2011targeted].
@@ -908,4 +908,4 @@ sessionInfo()
 
 ## What comes next
 
-Mediation analysis asks how a treatment works. The final chapter asks a complementary question for safety studies: what does your analysis actually estimate when patients switch treatments, discontinue, or experience competing events? We close with the ICH E9(R1) estimand framework for time-to-event data.
+Mediation analysis asks how a treatment works. The final chapter asks a complementary question for safety studies: what does your analysis actually estimate when patients switch treatments, discontinue, or hit competing events? We close with the ICH E9(R1) estimand framework for time-to-event data.

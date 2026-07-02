@@ -18,7 +18,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-By this point the moving parts of a longitudinal targeted-learning analysis are already in hand: the backwards sequential-regression logic of longitudinal TMLE (@sec-illustrated-ltmle), the shift-function and `lmtp_tmle` workflow for modified treatment policies (@sec-adherence-shift), and the positivity diagnostics that decide whether any of it can be trusted (@sec-positivity-overlap). This chapter does not re-teach that machinery. It spends its length on the one thing the method chapters do not: a single analysis carried from a clinical question to a defended estimate, with every decision in view.
+By this point the moving parts of a longitudinal targeted-learning analysis are already in hand. We have the backwards sequential-regression logic of longitudinal TMLE (@sec-illustrated-ltmle), the shift-function and `lmtp_tmle` workflow for modified treatment policies (@sec-adherence-shift), and the positivity diagnostics that decide whether any of it can be trusted (@sec-positivity-overlap). This chapter does not re-teach that machinery. It spends its length on the one thing the method chapters leave out: a single analysis carried from a clinical question to a defended estimate, with every decision in view.
 
 The thread is a dynamic treatment rule, initiate HAART when CD4 falls below a clinically meaningful threshold, estimated with the `lmtp` package [@diaz2021lmtp; @williams2025lmtp]. A dynamic rule is a sharper question than the adherence-distribution shift of @sec-adherence-shift or the static "treat everyone" contrast of the earlier chapters, and it is the kind of question clinical guidelines actually pose.
 
@@ -27,21 +27,21 @@ The thread is a dynamic treatment rule, initiate HAART when CD4 falls below a cl
 
 Clinical guidelines for HIV treatment have evolved over time, but a recurring question is: **what would mortality look like if HAART were initiated whenever a patient's CD4 count fell below 350 cells/µL, compared to the observed treatment pattern where initiation depends on clinical judgment?**
 
-This is a dynamic treatment rule. The intervention depends on the patient's evolving health status, not just baseline characteristics. It corresponds to a clinically interpretable policy: "start treatment when the immune system shows meaningful decline." The comparison is between this threshold-based rule and the natural course (whatever clinicians actually did).
+This is a dynamic treatment rule. The intervention depends on the patient's evolving health status, not just baseline characteristics, and it corresponds to a clinically interpretable policy: start treatment when the immune system shows meaningful decline. The comparison is between this threshold-based rule and the natural course (whatever clinicians actually did).
 
 The estimand is the risk difference in mortality under the two regimes, marginalized over the study population. In the language of modified treatment policies [@haneuse2013mtp; @diaz2021lmtp], we are shifting the treatment process so that HAART is initiated at any visit where CD4 falls below the threshold, for patients who were not already on treatment.
 
 
 ## Why a simpler analysis would be inadequate
 
-A static point-treatment comparison (ever-treated vs. never-treated) ignores the timing and clinical context of treatment initiation. Two patients who both "ever started HAART" may have initiated at very different times, for very different reasons, with very different prognoses at initiation. The static comparison conflates the effect of early initiation in healthier patients with late initiation in sicker patients.
+A static point-treatment comparison (ever-treated vs. never-treated) ignores the timing and clinical context of treatment initiation. Two patients who both "ever started HAART" may have initiated at quite different times and for quite different reasons, and their prognoses at initiation may have been nothing alike. The static comparison conflates the effect of early initiation in healthier patients with late initiation in sicker patients.
 
-A dynamic-rule analysis asks instead what would happen if initiation followed one clinical rule applied consistently to everyone, which is closer to what guideline developers need. Because CD4 both responds to past treatment and drives future treatment, this is the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it needs the longitudinal g-methods developed there and in @sec-illustrated-ltmle. The identification assumptions are their longitudinal versions: sequential exchangeability, positivity at each visit, and consistency of the dynamic rule. Informative censoring, sicker patients dropping out, is handled by the same machinery.
+A dynamic-rule analysis asks instead what would happen if initiation followed one clinical rule applied consistently to everyone, which is closer to what guideline developers need. Because CD4 both responds to past treatment and drives future treatment, this is the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it needs the longitudinal g-methods developed there and in @sec-illustrated-ltmle. The identification assumptions are their longitudinal versions: sequential exchangeability, positivity at each visit, and consistency of the dynamic rule. Informative censoring, when sicker patients drop out, is handled by the same machinery.
 
 
 ## Data setup
 
-The real `haartdat` cohort [@vanderwal2011ipw] (introduced in the [Running Case Study](00-case-study.qmd)) follows 1,200 patients over irregularly spaced visits, but it contains only 31 deaths spread across up to 38 visits. That extreme outcome sparsity makes a short-horizon longitudinal estimator unstable, so for a fully reproducible end-to-end run we use a **simulated extension of the cohort**: a balanced three-visit panel calibrated to the same clinical story (CD4 drives both treatment initiation and mortality, and HAART raises subsequent CD4). The simulation preserves the feature that matters pedagogically here, treatment-confounder feedback, while guaranteeing the estimator has enough events and enough low-CD4-untreated person-time to estimate the contrast.
+The real `haartdat` cohort [@vanderwal2011ipw] (introduced in the [Running Case Study](00-case-study.qmd)) follows 1,200 patients over irregularly spaced visits, but it contains only 31 deaths spread across up to 38 visits. That outcome sparsity makes a short-horizon longitudinal estimator unstable, so for a fully reproducible end-to-end run we use a **simulated extension of the cohort**: a balanced three-visit panel calibrated to the same clinical story, where CD4 drives both treatment initiation and mortality and HAART raises subsequent CD4. The simulation keeps the feature that matters pedagogically here, treatment-confounder feedback, while guaranteeing the estimator has enough events and enough low-CD4-untreated person-time to estimate the contrast.
 
 ```{r}
 #| label: lmtp-simulate
@@ -97,7 +97,7 @@ dat_wide |>
 
 The modified treatment policy we evaluate is: **initiate HAART at the first visit where CD4 count falls below 350 cells/µL, for patients not already on treatment.** Once initiated, HAART continues for all subsequent visits (the absorbing property).
 
-In `lmtp`, the shift function receives the full data frame and the name of the *current* treatment node. We parse the visit index from that name, look at all CD4 measurements up to and including that visit, and set the treatment to 1 if CD4 has ever fallen below the threshold (or the patient was already treated). This makes the rule absorbing by construction.
+In `lmtp`, the shift function receives the full data frame and the name of the *current* treatment node. We parse the visit index from that name, look at all CD4 measurements up to and including that visit, and set the treatment to 1 if CD4 has ever fallen below the threshold, or if the patient was already treated. This makes the rule absorbing by construction.
 
 ```{r}
 #| label: lmtp-shift
@@ -170,7 +170,7 @@ fit_rule
 fit_natural
 ```
 
-The call pattern is the one from @sec-adherence-shift: `lmtp_tmle()` fits a sequentially doubly robust estimator with cross-fitting [@vanderLaan2007superlearner], calling the shift function at each visit to set the counterfactual treatment, with `mtp = TRUE` because the shifted value depends on the natural one. What is new here is only the rule that shift function encodes.
+The call pattern is the one from @sec-adherence-shift. `lmtp_tmle()` fits a sequentially doubly robust estimator with cross-fitting [@vanderLaan2007superlearner], and it calls the shift function at each visit to set the counterfactual treatment, with `mtp = TRUE` because the shifted value depends on the natural one. What is new here is only the rule that shift function encodes.
 
 The contrast turns the two intervention-specific risks into the policy-relevant risk difference:
 
@@ -212,7 +212,7 @@ If the rule would shift very few observations (most patients with low CD4 are al
 
 ### Propensity score overlap
 
-The treatment mechanism at each visit should show adequate overlap. Estimated probabilities of treatment near 0 or 1 at any visit indicate positivity concerns that compound across time points. The block below fits the per-visit initiation model among patients still at risk of initiating (those not already on HAART) and reports the range of fitted probabilities at each visit.
+The treatment mechanism at each visit should show adequate overlap. Estimated probabilities of treatment near 0 or 1 at any visit signal positivity concerns that compound across time points. The block below fits the per-visit initiation model among patients still at risk of initiating (those not already on HAART) and reports the range of fitted probabilities at each visit.
 
 ```{r}
 #| label: lmtp-overlap
@@ -241,7 +241,7 @@ data.frame(
 
 ### Effective sample size
 
-In longitudinal settings, the effective sample size can shrink rapidly because the cumulative product of inverse-probability weights grows with the number of visits. Even with TMLE-based estimation (which avoids explicit weight products), near-positivity violations at individual time points can inflate the influence of a few observations. The visit-1 weights below illustrate the idea; the effective sample size is the squared sum of weights over the sum of squared weights, and it falls further once weights are multiplied across visits.
+In longitudinal settings, the effective sample size can shrink rapidly because the cumulative product of inverse-probability weights grows with the number of visits. Even with TMLE-based estimation, which avoids explicit weight products, near-positivity violations at individual time points can inflate the influence of a few observations. The visit-1 weights below illustrate the idea. The effective sample size is the squared sum of weights over the sum of squared weights, and it falls further once weights are multiplied across visits.
 
 ```{r}
 #| label: lmtp-ess
@@ -268,18 +268,18 @@ The contrast from `lmtp_contrast()` estimates the risk difference in mortality u
 
 Several points matter for interpretation:
 
-**The estimand is policy-relevant.** Unlike a static "always treat" intervention, which may be clinically impossible, this rule corresponds to something a clinician could actually follow. The estimate answers: how many deaths per 100 patients would be prevented if HAART were initiated at CD4 < 350 rather than at the discretion of individual clinicians?
+**The estimand is policy-relevant.** Unlike a static "always treat" intervention, which may be clinically impossible, this rule corresponds to something a clinician could actually follow. The estimate answers a concrete question: how many deaths per 100 patients would be prevented if HAART were initiated at CD4 < 350 rather than at the discretion of individual clinicians?
 
-**The estimate depends on identification assumptions.** Sequential exchangeability (no unmeasured time-varying confounders), positivity at each visit, and consistency of the dynamic rule must all hold. If unmeasured factors (substance use, housing instability, clinic-specific prescribing norms) affect both treatment timing and mortality, the estimate is biased regardless of the estimator.
+**The estimate depends on identification assumptions.** Sequential exchangeability (no unmeasured time-varying confounders), positivity at each visit, and consistency of the dynamic rule must all hold. If unmeasured factors such as substance use, housing instability, or clinic-specific prescribing norms affect both treatment timing and mortality, the estimate is biased regardless of the estimator.
 
-**Support limitations constrain the estimate.** If the rule is very different from observed practice (for example, if most patients with CD4 < 350 were already treated), the estimate relies on extrapolation. Sensitivity to the rule threshold (e.g., comparing CD4 < 250 vs CD4 < 350 vs CD4 < 500) can help assess whether the result is robust or driven by sparse data in a particular region.
+**Support limitations constrain the estimate.** If the rule is very different from observed practice, say most patients with CD4 < 350 were already treated, the estimate relies on extrapolation. Varying the rule threshold (comparing CD4 < 250, CD4 < 350, and CD4 < 500) can help assess whether the result is robust or driven by sparse data in a particular region.
 
 
 ## Sensitivity and robustness checks
 
 ### Alternative rule thresholds
 
-Running the analysis at multiple CD4 thresholds provides a dose-response perspective on early vs. late initiation. The helper below rebuilds the shift function for a given threshold and returns the contrast against the natural course.
+Running the analysis at multiple CD4 thresholds gives a dose-response view of early versus late initiation. The helper below rebuilds the shift function for a given threshold and returns the contrast against the natural course.
 
 ```{r}
 #| label: lmtp-threshold-sweep
@@ -328,24 +328,24 @@ ggplot(threshold_results, aes(factor(threshold), risk_diff)) +
   theme_minimal()
 ```
 
-If the estimated benefit increases smoothly with earlier initiation, this supports the clinical intuition. If the estimate becomes unstable or reverses at very early thresholds, this likely reflects positivity violations rather than a genuine clinical effect reversal.
+If the estimated benefit increases smoothly with earlier initiation, that supports the clinical intuition. If the estimate becomes unstable or reverses at very early thresholds, that likely reflects positivity violations rather than a genuine clinical effect reversal.
 
 ### Nuisance model sensitivity
 
-The `lmtp` estimator is sequentially doubly robust, but in finite samples, the choice of learner library matters. Running the analysis with different Super Learner libraries (e.g., GLM-only vs. a richer library including random forests and LASSO) assesses model sensitivity. Large changes in the estimate across libraries suggest that the nuisance functions are poorly estimated and the result should be interpreted cautiously.
+The `lmtp` estimator is sequentially doubly robust, but in finite samples the choice of learner library matters. Rerunning the analysis with different Super Learner libraries, say GLM-only versus a richer library that includes random forests and LASSO, assesses model sensitivity. Large changes in the estimate across libraries suggest that the nuisance functions are poorly estimated and the result should be read cautiously.
 
 
 ## Key lessons
 
-This analysis integrates every major concept from the handbook into a single applied example:
+This analysis pulls together the major threads of the handbook in a single applied example:
 
 1. **The causal question comes first.** The dynamic rule was defined before any model was fit. The estimand, a marginal risk difference under a threshold-based initiation policy, was chosen because it answers a question that clinicians and guideline developers care about.
 
-2. **Longitudinal methods are necessary.** The treatment-confounder feedback between HAART and CD4 means that no cross-sectional analysis can correctly estimate the effect of a dynamic rule. The `lmtp` framework handles this by modeling the treatment, covariate, and censoring processes sequentially at each visit.
+2. **Longitudinal methods are necessary.** The treatment-confounder feedback between HAART and CD4 means no cross-sectional analysis can correctly estimate the effect of a dynamic rule. The `lmtp` framework handles this by modeling the treatment, covariate, and censoring processes sequentially at each visit.
 
 3. **Diagnostics matter as much as estimation.** Whether the dynamic rule is well-supported by the data, whether positivity holds at each time point, and whether the influence of individual observations is bounded all determine whether the estimate is credible. A precisely estimated quantity from a poorly supported intervention is not useful.
 
-4. **Interpretation requires restraint.** The estimate is a causal claim only if the identification assumptions hold. In observational HIV cohort data, unmeasured confounding from clinical judgment, adherence patterns, and social determinants of health is a real concern. Sensitivity analysis and negative controls are not optional additions. They are part of the analysis.
+4. **Interpretation requires restraint.** The estimate is a causal claim only if the identification assumptions hold. In observational HIV cohort data, unmeasured confounding from clinical judgment, adherence patterns, and social determinants of health is a real concern. Sensitivity analysis and negative controls are part of the analysis, not optional additions to it.
 
 
 ## Sources and further reading

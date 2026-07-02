@@ -35,14 +35,14 @@ logit <- function(p) log(p / (1 - p))
 
 # Where this chapter fits
 
-The previous chapter explained why treatment-confounder feedback breaks standard regression. This chapter explains how L-TMLE [@vanderLaan2012ltmle; @petersen2014causal] solves the problem conceptually. The focus is on the logic of the algorithm, not a full code walkthrough. Readers who want the complete by-hand implementation can consult the [technical companion chapter](03-09b-ltmle-by-hand.qmd). For practical applied analysis of realistic longitudinal interventions, the LMTP chapters that follow are the recommended pathway.
+The previous chapter explained why treatment-confounder feedback breaks standard regression. This chapter explains how L-TMLE [@vanderLaan2012ltmle; @petersen2014causal] solves the problem conceptually. We focus on the logic of the algorithm rather than a full code walkthrough. Readers who want the complete by-hand implementation can consult the [technical companion chapter](03-09b-ltmle-by-hand.qmd). For applied analysis of realistic longitudinal interventions, the LMTP chapters that follow are the better starting point.
 
 
 # The causal question
 
 We use a two-time-point HIV cohort [@vanderwal2011ipw] to make the mechanics visible. The question: what is the probability of virologic failure if every patient maintained high ART adherence at each visit, compared to never maintaining high adherence?
 
-This is a comparison of two static regimes, $\bar{a} = (1,1)$ versus $\bar{a} = (0,0)$, with treatment-confounder feedback through CD4 count. We use two time points for clarity; the same logic extends to any number of visits.
+This compares two static regimes, $\bar{a} = (1,1)$ versus $\bar{a} = (0,0)$, with treatment-confounder feedback running through CD4 count. Two time points keep the picture clear, but the same logic extends to any number of visits.
 
 ```{r}
 #| label: fig-hiv-node-order
@@ -91,23 +91,23 @@ Y  <- rbinom(n, 1, plogis(-0.8 - 0.4 * A1 - 0.5 * A2 - 0.6 * L1 + 0.2 * W))  # s
 dat <- tibble(W, A1, L1, A2, Y)
 cat("Failure rate:", round(mean(Y), 3), "\n")
 ```
-1. A1 causes L1 (coefficient 1.2): prior adherence improves the intermediate biomarker. This is the *first half* of treatment-confounder feedback — L1 is a consequence of past treatment.
-2. L1 strongly predicts A2 (coefficient 0.8 on L1): a worse biomarker at visit 1 reduces the probability of adhering at visit 2. This closes the loop — L1 is simultaneously a *consequence* of A1 and a *confounder* of A2, making a single regression on all time points invalid.
+1. A1 causes L1 (coefficient 1.2): prior adherence improves the intermediate biomarker. This is the *first half* of treatment-confounder feedback, since L1 is a consequence of past treatment.
+2. L1 strongly predicts A2 (coefficient 0.8 on L1): a worse biomarker at visit 1 reduces the probability of adhering at visit 2. This closes the loop. L1 is simultaneously a *consequence* of A1 and a *confounder* of A2, which makes a single regression on all time points invalid.
 
 
 # The backwards regression idea
 
-We solve the maze from the exit. Start at the final outcome and work back toward the first treatment decision, so each step already knows where it needs to end up. Concretely, L-TMLE estimates the causal effect through three ideas working together.
+Think of it as solving a maze from the exit. We start at the final outcome and work back toward the first treatment decision, so each step already knows where it needs to end up. L-TMLE puts three ideas together.
 
-**Sequential regressions, working backwards.** Start at the final outcome and model $E[Y \mid A_2, L_1, A_1, W]$. This conditions on $L_1$ to deconfound $A_2$. Then move backwards: take the predicted outcomes under $A_2 = 1$ and regress them on $(A_1, W)$ only, without conditioning on $L_1$. This integrates $L_1$ out, preserving the mediated effect of $A_1$ through $L_1$.
+**Sequential regressions, working backwards.** Start at the final outcome and model $E[Y \mid A_2, L_1, A_1, W]$. This conditions on $L_1$ to deconfound $A_2$. Then move backwards: take the predicted outcomes under $A_2 = 1$ and regress them on $(A_1, W)$ only, leaving $L_1$ out. That integrates $L_1$ out and preserves the mediated effect of $A_1$ through $L_1$.
 
 **Treatment mechanism models.** Estimate the probability of receiving treatment at each visit conditional on history: $\hat{g}_1(W)$ and $\hat{g}_2(A_1, L_1, W)$.
 
 **Targeting steps.** Use the treatment mechanism to construct clever covariates that correct the sequential regressions for any remaining bias. At each time point, the final estimate is consistent if either the outcome regression or the treatment model is correctly specified (sequential double robustness).
 
-The key insight: conditioning on $L_1$ at time 2 deconfounds $A_2$, while NOT conditioning on $L_1$ at time 1 preserves the indirect effect $A_1 \to L_1 \to Y$. Standard regression cannot do both in a single model.
+Here is the key point. Conditioning on $L_1$ at time 2 deconfounds $A_2$, while not conditioning on $L_1$ at time 1 preserves the indirect effect $A_1 \to L_1 \to Y$. Standard regression cannot do both in a single model.
 
-@fig-backwards-regression shows the two-step logic. The same variable $L_1$ is handled differently at each step: it is included in the visit-2 regression, where it confounds $A_2$, and omitted from the visit-1 regression, where it carries part of the effect of $A_1$.
+@fig-backwards-regression shows the two-step logic. The same variable $L_1$ is handled differently at each step: included in the visit-2 regression, where it confounds $A_2$, and dropped from the visit-1 regression, where it carries part of the effect of $A_1$.
 
 ```{mermaid}
 %%| label: fig-backwards-regression
@@ -127,16 +127,16 @@ flowchart TD
 
 **Step 1.** At each visit, model how likely each patient was to actually adhere. Sicker patients are less likely to adhere; patients who already missed doses are less likely to catch up.
 
-**Step 2.** Starting at visit 2, predict each patient's failure risk as if they had high adherence. Adjust using the treatment model so that the prediction is calibrated for the causal estimand, not just for prediction accuracy. This is the targeting step.
+**Step 2.** Starting at visit 2, predict each patient's failure risk as if they had high adherence. Adjust with the treatment model so the prediction is calibrated for the causal estimand rather than for prediction accuracy alone. This is the targeting step.
 
-**Step 3.** Take the adjusted visit-2 predictions and use them as the "outcome" for visit 1. Predict under high adherence at visit 1, and target again. The visit-1 model does not condition on CD4, because CD4 is a consequence of visit-1 adherence.
+**Step 3.** Take the adjusted visit-2 predictions and use them as the "outcome" for visit 1. Predict under high adherence at visit 1, and target again. The visit-1 model does not condition on CD4, because CD4 is itself a consequence of visit-1 adherence.
 
 **Step 4.** Average the final targeted predictions across all patients. This is the L-TMLE estimate of $E[Y(1,1)]$.
 
 
 # Naive regression vs L-TMLE
 
-A quick demonstration of why the backwards structure matters:
+A quick demonstration of why the backwards structure matters.
 
 ```{r}
 # Oracle truth
@@ -153,21 +153,21 @@ cat("True E[Y(1,1)]:", round(true_EY_11, 4), "\n")
 cat("Naive (conditions on L1):", round(naive_pred, 4), "\n")
 ```
 
-The naive estimate is biased because conditioning on $L_1$ blocks part of the causal pathway. L-TMLE avoids this by conditioning on $L_1$ only where it confounds ($A_2$) and integrating it out where it mediates ($A_1$).
+The naive estimate is biased because conditioning on $L_1$ blocks part of the causal pathway. L-TMLE sidesteps this by conditioning on $L_1$ only where it confounds ($A_2$) and integrating it out where it mediates ($A_1$).
 
 ::: {.callout-note}
 ## Full by-hand implementation
-The complete L-TMLE algorithm, with code for treatment mechanism estimation, sequential outcome regression, clever covariates, fluctuation models, and estimator comparison, is in the [technical companion chapter](03-09b-ltmle-by-hand.qmd). That chapter walks through every line of the two-time-point implementation.
+The complete L-TMLE algorithm, with code for treatment mechanism estimation, sequential outcome regression, clever covariates, fluctuation models, and estimator comparison, is in the [technical companion chapter](03-09b-ltmle-by-hand.qmd). That chapter walks through the two-time-point implementation line by line.
 :::
 
 
 # When static regimes break down
 
-The "always adhere" regime is pedagogically useful, but it has a practical limitation: no real intervention achieves 100% adherence. When the static regime assigns treatment values that are rare in the observed data, positivity breaks down: propensity scores approach zero, clever covariates explode, and the estimate becomes unstable.
+The "always adhere" regime is pedagogically useful, but it carries a practical limitation: no real intervention achieves 100% adherence. When the static regime assigns treatment values that are rare in the observed data, positivity breaks down. Propensity scores approach zero, clever covariates explode, and the estimate becomes unstable.
 
-The instability is a property of the estimand, not of L-TMLE. Asking "what if everyone achieved perfect adherence?" requires extrapolating far outside the data for patients who are very unlikely to adhere, which produces high variance and potential bias.
+The instability is a property of the estimand, not of L-TMLE. Asking "what if everyone achieved perfect adherence?" forces us to extrapolate far outside the data for patients who are very unlikely to adhere, which produces high variance and potential bias.
 
-The solution is to define more realistic interventions that stay within the observed data support. The LMTP framework provides this [@diaz2021lmtp; @williams2025lmtp]: instead of forcing a specific treatment value, it shifts the treatment process by a feasible amount. The [LMTP adherence-shift chapter](03-03b-adherence-shift-methods.qmd) develop this approach.
+The fix is to define more realistic interventions that stay within the observed data support. The LMTP framework offers exactly that [@diaz2021lmtp; @williams2025lmtp]: instead of forcing a specific treatment value, it shifts the treatment process by a feasible amount. The [LMTP adherence-shift chapter](03-03b-adherence-shift-methods.qmd) develops this approach.
 
 
 # Package implementation
@@ -226,7 +226,7 @@ When the static regime (e.g., "always adhere") assigns treatment values that are
 
 ## Sources and further reading
 
-- [@petersen2014causal] — targeted TMLE for dynamic and static longitudinal marginal structural working models.
-- [@diaz2021lmtp; @williams2025lmtp] — lmtp R package for modified treatment policies and LMTP.
-- [@vanderLaan2007superlearner] — Super Learner ensemble for nuisance function estimation.
-- [@vanderwal2011ipw] — HAART observational cohort used as the running example.
+- [@petersen2014causal]: targeted TMLE for dynamic and static longitudinal marginal structural working models.
+- [@diaz2021lmtp; @williams2025lmtp]: lmtp R package for modified treatment policies and LMTP.
+- [@vanderLaan2007superlearner]: Super Learner ensemble for nuisance function estimation.
+- [@vanderwal2011ipw]: HAART observational cohort used as the running example.

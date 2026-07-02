@@ -9,11 +9,11 @@ format: html
 
 This chapter is about estimating nuisance functions, the outcome regression and propensity score, that every causal estimator from Part II depends on. The quality of these nuisance estimates directly affects the bias and variance of the downstream causal effect estimate.
 
-In the previous chapters you learned to estimate causal effects using g-computation, IPTW, AIPW, and TMLE. So far we have used simple logistic regressions for the nuisance functions. That is fine when the true relationships are approximately linear on the logit scale, but dangerous when they are not. In real data, relationships are often nonlinear, involve interactions, and depend on functional forms we cannot guess in advance. For example, clinicians may initiate treatment based on threshold rules (e.g., start HAART when CD4 drops below 350), creating sharp nonlinearities that a main-terms logistic regression cannot capture.
+In the previous chapters you learned to estimate causal effects using g-computation, IPTW, AIPW, and TMLE. So far we have used simple logistic regressions for the nuisance functions. That is fine when the true relationships are roughly linear on the logit scale, but dangerous when they are not. Real data is rarely so obliging. Relationships bend, covariates interact, and the functional form is something we cannot guess in advance. Clinicians, for instance, often start treatment by threshold rules (start HAART when CD4 drops below 350), and a main-terms logistic regression has no way to capture the sharp nonlinearity that follows.
 
-Rather than gambling on a single model, we can **stack** many candidate learners and let the data decide how to combine them. This is what **Super Learner** [@vanderLaan2007superlearner] does.
+Rather than gamble on a single model, we can **stack** many candidate learners and let the data decide how to combine them. That is what **Super Learner** [@vanderLaan2007superlearner] does.
 
-In causal inference we rarely care about prediction for its own sake. But the quality of our nuisance function estimates *directly determines* the quality of our causal effect estimates. A poorly estimated propensity score produces unstable IPTW weights. A misspecified outcome regression biases g-computation. Super Learner is the standard tool for making these nuisance estimates as good as possible, and it is the engine that powers TMLE in modern practice.
+In causal inference we rarely care about prediction for its own sake. What we care about is that the quality of the nuisance estimates *directly determines* the quality of the causal effect estimate. A poorly estimated propensity score produces unstable IPTW weights; a misspecified outcome regression biases g-computation. Super Learner is the standard tool for making these nuisance estimates as good as they can be, and it is the engine behind TMLE in modern practice.
 
 By the end of this chapter you will be able to:
 
@@ -28,7 +28,7 @@ By the end of this chapter you will be able to:
 
 ::: {.callout-tip}
 ## How to read this chapter (core vs optional on a first pass)
-This chapter goes deep, which is great for the reference reader but heavy for a first pass or a workshop. If you are reading for working understanding, the **core path** is: the intuition for ensembling (*Why Not Just Pick the Best Single Model?*), the algorithm box (*The Super Learner Algorithm*), the `SuperLearner` **package** section, and the **causal-pipeline** section that plugs Super Learner into TMLE. You can **skip on a first read** and return later to: the hand-coded-from-scratch implementation, the metalearner internals, and the loss-function deep dive. Nothing in the optional material is required to use Super Learner correctly downstream; it is there for the reader who wants to see every moving part.
+This chapter goes deep, which is great for the reference reader but heavy for a first pass or a workshop. If you are reading for working understanding, the core path is the intuition for ensembling (*Why Not Just Pick the Best Single Model?*), the algorithm box (*The Super Learner Algorithm*), the `SuperLearner` package section, and the causal-pipeline section that plugs Super Learner into TMLE. Skip on a first read, and return later to, the hand-coded implementation, the metalearner internals, and the loss-function deep dive. None of the optional material is required to use Super Learner correctly downstream. It is there for the reader who wants to see every moving part.
 :::
 
 ---
@@ -36,7 +36,7 @@ This chapter goes deep, which is great for the reference reader but heavy for a 
 ::: {.callout-note}
 ## Why cross-validation is the engine here
 
-Super Learner has to choose, and blend, models without being fooled by overfitting. A flexible learner can fit the data it was trained on almost perfectly and still predict badly on new patients, so judging a learner by its fit to its own training data would reward memorization. Cross-validation breaks that trap: split the data into folds, train each candidate on all folds but one, score it on the held-out fold, and rotate so that every observation is scored once by a model that did not see it. Those honest out-of-fold scores are what let Super Learner weight the candidates fairly, and a learner that overfits is penalized automatically because it predicts poorly out of fold. The same idea, fitting the nuisance models on one part of the data and using them on another, returns later as the cross-fitting that keeps TMLE's confidence intervals valid under aggressive machine learning (@sec-advanced-tmle).
+Super Learner has to choose and blend models without being fooled by overfitting. A flexible learner can fit its training data almost perfectly and still predict badly on new patients, so judging a learner by its fit to its own training data would reward memorization. Cross-validation breaks that trap. Split the data into folds, train each candidate on all folds but one, score it on the held-out fold, and rotate so that every observation is scored once by a model that did not see it. Those honest out-of-fold scores let Super Learner weight the candidates fairly, and a learner that overfits pays for it automatically by predicting poorly out of fold. The same idea, fitting the nuisance models on one part of the data and using them on another, returns later as the cross-fitting that keeps TMLE's confidence intervals valid under aggressive machine learning (@sec-advanced-tmle).
 :::
 
 # Why Not Just Pick the Best Single Model?
@@ -59,17 +59,17 @@ Which one should you choose? Each has strengths and weaknesses:
 | XGBoost | State-of-the-art prediction, handles missing data | Many tuning parameters, opaque |
 | MARS | Automatic interaction detection, interpretable basis | Limited flexibility compared to tree ensembles |
 
-In practice, **no single algorithm dominates across all datasets and all problems**. The best algorithm depends on the true data-generating process, which is unknown.
+In practice, **no single algorithm dominates across all datasets**. The best algorithm depends on the true data-generating process, which is unknown.
 
-Rather than betting the whole analysis on one model, you let a set of algorithms compete and back the weighted blend that has the best performance on data like yours.
+Rather than bet the whole analysis on one model, you let a set of algorithms compete and back the weighted blend that performs best on data like yours.
 
 :::{.callout-note}
 ## The Oracle Selector
 
-Imagine an oracle who knows the true data-generating process and can tell you which algorithm will perform best. You would always pick the oracle's choice. The **discrete Super Learner** mimics this: it selects whichever candidate algorithm has the lowest cross-validated risk. The **continuous Super Learner** goes further; it finds the *optimal weighted combination* of all candidates, which can perform at least as well as the oracle selector asymptotically.
+Imagine an oracle who knows the true data-generating process and can tell you which algorithm will perform best. You would always pick the oracle's choice. The **discrete Super Learner** mimics this: it selects whichever candidate algorithm has the lowest cross-validated risk. The **continuous Super Learner** goes further and finds the *optimal weighted combination* of all candidates, which can perform at least as well as the oracle selector asymptotically.
 :::
 
-In plain terms, the oracle inequality is a promise about not having to guess: as the sample grows, the Super Learner does about as well as it would have if an oracle had told you in advance which weighted blend of the candidates was best. You do not have to commit to one model and hope it is right; the ensemble searches the library for you. Formally [@vanderLaan2007superlearner], the Super Learner's excess risk relative to the best possible combination of candidates converges to zero as $n$ grows. The asymptotic rate depends on the number of candidates $K$ (specifically, the bound includes a $\log(K)$ factor), so the penalty for a larger library is logarithmic. In large samples, the penalty for including poorly performing learners is small, but in finite samples, very large libraries can reduce effective sample size for metalearner estimation.
+The oracle inequality is, in plain terms, a promise that you do not have to guess. As the sample grows, the Super Learner does about as well as it would have if an oracle had told you in advance which weighted blend of the candidates was best. You never have to commit to one model and hope it is right; the ensemble searches the library for you. Formally [@vanderLaan2007superlearner], the Super Learner's excess risk relative to the best possible combination of candidates converges to zero as $n$ grows. The asymptotic rate depends on the number of candidates $K$ (the bound includes a $\log(K)$ factor), so the penalty for a larger library is only logarithmic. In large samples the cost of including poorly performing learners is small. In finite samples, though, a very large library can eat into the effective sample size available for metalearner estimation.
 
 ---
 
@@ -93,13 +93,13 @@ Super Learner is an implementation of **stacked generalization** (stacking), ada
 6. **Combine.** The Super Learner prediction for a new observation is $\hat{Y}_{SL} = \sum_{k=1}^{K} \hat{\alpha}_k \hat{f}_k(X)$, where $\hat{f}_k$ is the $k$-th learner refit on the full data.
 :::
 
-The key insight is that **Step 3 uses honest, out-of-fold predictions**. This prevents any learner from getting credit for overfitting; a learner that memorizes the training data will make poor validation predictions and receive low weight in Step 4.
+The key insight is that **Step 3 uses honest, out-of-fold predictions**. No learner can get credit for overfitting: one that memorizes the training data will make poor validation predictions and receive low weight in Step 4.
 
 ---
 
 # Simulated Data
 
-We use a dataset where the true outcome is a nonlinear function of covariates with interactions, so that simple GLMs will struggle. This mirrors real-world settings where nuisance functions have complex forms.
+We use a dataset where the true outcome is a nonlinear function of covariates with interactions, so that simple GLMs will struggle. This mirrors real settings where nuisance functions take complex forms.
 
 ```{r}
 #| interactive: true
@@ -161,7 +161,7 @@ The GLM captures the broad trend but misses the nonlinear and interaction terms.
 
 # Hand-Coding Super Learner from Scratch
 
-Before using any package, let's implement Super Learner ourselves. This makes the algorithm completely transparent.
+Before reaching for a package, let's implement Super Learner ourselves. This leaves nothing about the algorithm hidden.
 
 ## Define candidate learners
 
@@ -268,7 +268,7 @@ Let's inspect the cross-validated predictions.
 head(Z)
 ```
 
-Every prediction in the matrix $\mathbf{Z}$ was made when the corresponding observation was *held out* of training. This is critical. If we had used in-sample predictions, a flexible learner like random forest would appear artificially good (because it can memorize the training data). By using honest out-of-fold predictions, we get a fair comparison of how each learner generalizes.
+Every prediction in the matrix $\mathbf{Z}$ was made when the corresponding observation was *held out* of training. This matters. Had we used in-sample predictions, a flexible learner like random forest would look artificially good simply because it can memorize the training data. Honest out-of-fold predictions give a fair comparison of how each learner generalizes.
 
 ## Evaluate each learner's cross-validated risk
 
@@ -296,13 +296,13 @@ tibble(
   arrange(`CV MSE (Brier)`)
 ```
 
-Lower risk = better predictions. The **Brier score** (MSE for binary outcomes) ranges from 0 (perfect) to 0.25 (useless, equivalent to predicting 0.5 for everyone). **Log-loss** penalizes confident wrong predictions more heavily, making it the preferred metric when well-calibrated probabilities matter; which is exactly our situation in causal inference, where we need accurate estimates of $P(A = 1 \mid W)$ and $E[Y \mid A, W]$.
+Lower risk means better predictions. The **Brier score** (MSE for binary outcomes) ranges from 0 (perfect) to 0.25 (useless, equivalent to predicting 0.5 for everyone). Log-loss penalizes confident wrong predictions more heavily, which makes it the preferred metric when well-calibrated probabilities matter. That is exactly our situation in causal inference, where we need accurate estimates of $P(A = 1 \mid W)$ and $E[Y \mid A, W]$.
 
 ## Fit the metalearner (non-negative least squares)
 
 The metalearner finds the optimal weighted combination of the candidates. We use **non-negative least squares (NNLS)**: minimize $\sum_i (Y_i - \sum_k \alpha_k Z_{ik})^2$ subject to $\alpha_k \geq 0$.
 
-In plain terms, this finds the combination of learners that best predicts the outcome, with the constraint that no learner can receive a negative weight (which would mean *anti-correlating* with the outcome, producing unstable behavior).
+In plain terms, this finds the combination of learners that best predicts the outcome, with the constraint that no learner can receive a negative weight. A negative weight would mean *anti-correlating* with the outcome, which tends to produce unstable behavior.
 
 ```{r}
 #| interactive: true
@@ -360,7 +360,7 @@ results <- tibble(
 results
 ```
 
-The Super Learner's cross-validated risk is at least as good as (and typically better than) the best individual learner. By optimally combining learners, Super Learner exploits the strengths of each algorithm while hedging against any single algorithm's weaknesses. Poorly performing learners receive near-zero weight.
+The Super Learner's cross-validated risk is at least as good as, and usually better than, the best individual learner. By combining learners optimally, it draws on the strength of each algorithm while hedging against any one algorithm's weakness. Poorly performing learners receive near-zero weight.
 
 ---
 
@@ -384,7 +384,7 @@ $$
 \hat{\alpha} = \arg\min_{\alpha \geq 0} -\sum_{i=1}^{n} \left[ Y_i \log\left(\sum_k \alpha_k Z_{ik}\right) + (1 - Y_i) \log\left(1 - \sum_k \alpha_k Z_{ik}\right) \right]
 $$
 
-This places greater emphasis on calibration; exactly what we want when the predictions feed into propensity scores or outcome regressions for causal inference.
+This puts more weight on calibration, which is exactly what we want when the predictions feed into propensity scores or outcome regressions for causal inference.
 
 ## Which metalearner should I choose?
 
@@ -398,7 +398,7 @@ This places greater emphasis on calibration; exactly what we want when the predi
 :::{.callout-important}
 ## Metalearner Choice Matters for Causal Inference
 
-When Super Learner predictions feed into TMLE or AIPW, we need well-calibrated *probabilities*, not just good rankings. Log-likelihood metalearners penalize overconfident wrong predictions (e.g., predicting 0.99 when the truth is 0), which keeps the propensity scores and outcome predictions from behaving badly in downstream causal estimation. An analyst would see the problem as extreme IPTW weights or a destabilized TMLE fluctuation step. AUC-based metalearners optimize rankings but may produce poorly calibrated probabilities; use them for classification, not for nuisance estimation in causal analyses.
+When Super Learner predictions feed into TMLE or AIPW, we need well-calibrated *probabilities*, not just good rankings. Log-likelihood metalearners penalize overconfident wrong predictions (predicting 0.99 when the truth is 0), which keeps the propensity scores and outcome predictions from misbehaving downstream. An analyst would see that misbehavior as extreme IPTW weights or a destabilized TMLE fluctuation step. AUC-based metalearners optimize rankings but may produce poorly calibrated probabilities. Use them for classification, not for nuisance estimation in causal analyses.
 :::
 
 ---
@@ -449,7 +449,7 @@ tibble(
 )
 ```
 
-The weights may differ slightly due to different random seeds for fold assignments and minor implementation details, but the pattern should be similar.
+The weights may differ slightly because of different random seeds for fold assignments and minor implementation details, but the pattern should look similar.
 
 :::{.callout-note}
 ## Key Package Outputs
@@ -542,7 +542,7 @@ listWrappers("SL")
 
 ## Creating custom learners with different tuning parameters
 
-A powerful feature of Super Learner is that you can include **multiple versions of the same algorithm** with different tuning parameters. Rather than tuning each learner separately, you let the metalearner figure out which version is best.
+A useful feature of Super Learner is that you can include **multiple versions of the same algorithm** with different tuning parameters. Rather than tune each learner separately, you let the metalearner figure out which version is best.
 
 ```{r}
 #| interactive: true
@@ -586,13 +586,13 @@ sl_expanded
 
 1. **Start diverse.** Include at least one parametric model (GLM), one regularized model (LASSO/elastic net), one tree-based model (random forest or xgboost), and one nonparametric smoother (MARS/earth or GAM).
 2. **Include a simple benchmark.** Always include `SL.mean` (intercept-only) and `SL.glm`. If these get most of the weight, your covariates may not be very predictive.
-3. **Vary tuning parameters.** Include 2–3 versions of flexible learners with different hyperparameters. This is computationally cheaper than formal grid search and lets the metalearner handle selection.
-4. **Including weak learners is generally safe.** They receive near-zero weight. In large samples, the penalty for library size is logarithmic in $K$, but in finite samples, very large libraries can reduce effective sample size for metalearner estimation.
+3. **Vary tuning parameters.** Include 2 to 3 versions of flexible learners with different hyperparameters. This is computationally cheaper than a formal grid search and lets the metalearner handle selection.
+4. **Including weak learners is generally safe.** They receive near-zero weight. In large samples the penalty for library size is logarithmic in $K$; in finite samples, very large libraries can eat into the effective sample size available for metalearner estimation.
 :::
 
 ## Using screening wrappers
 
-For high-dimensional data, you can **screen** variables before fitting a learner. This is especially useful for algorithms that scale poorly with many covariates.
+For high-dimensional data, you can **screen** variables before fitting a learner. This helps most for algorithms that scale poorly with many covariates.
 
 ```{r}
 #| eval: false
@@ -615,7 +615,7 @@ SL_lib_screen <- list(
 
 # Evaluating Super Learner: `CV.SuperLearner`
 
-How do we know if Super Learner is actually better than its best component? The `CV.SuperLearner` function adds an **outer layer** of cross-validation to produce an honest estimate of Super Learner's performance.
+How do we know Super Learner is actually better than its best component? The `CV.SuperLearner` function adds an **outer layer** of cross-validation to produce an honest estimate of Super Learner's performance.
 
 ```{r}
 #| interactive: true
@@ -644,15 +644,15 @@ plot(cv_sl) +
   )
 ```
 
-The plot shows cross-validated risk estimates with 95% confidence intervals for each individual candidate learner, the **discrete Super Learner** (selects the single best learner), and the **Super Learner** (optimal weighted combination). If the Super Learner's confidence interval overlaps substantially with the best individual learner, the ensemble offers modest improvement. If it is clearly lower, the ensemble is doing meaningful work by combining learners. Either way, using Super Learner is a safe default: it performs at least as well as the best candidate, and often better.
+The plot shows cross-validated risk estimates with 95% confidence intervals for each individual candidate learner, the **discrete Super Learner** (which selects the single best learner), and the **Super Learner** (the optimal weighted combination). If the Super Learner's confidence interval overlaps substantially with the best individual learner, the ensemble buys you only a modest improvement. If it sits clearly lower, the ensemble is doing real work by combining learners. Either way, Super Learner is a safe default: it performs at least as well as the best candidate, and often better.
 
 ---
 
 # Super Learner in the Causal Inference Pipeline
 
-We have been building prediction tools. Now let's connect them to the estimators from previous chapters. Here is a complete worked example that shows how Super Learner integrates into a TMLE analysis.
+We have been building prediction tools. Now let's connect them to the estimators from previous chapters. Here is a complete worked example that shows how Super Learner slots into a TMLE analysis.
 
-## Simulated treatment–outcome data
+## Simulated treatment and outcome data
 
 ```{r}
 #| interactive: true
@@ -817,14 +817,14 @@ This pipeline combines:
 2. **TMLE** for the causal estimate, providing double robustness and valid inference
 3. **EIC-based standard errors**, asymptotically valid even with machine learning
 
-The `tmle` and `tmle3` packages automate this pipeline. Understanding the hand-coded version ensures you know what happens under the hood.
+The `tmle` and `tmle3` packages automate this pipeline. Working through the hand-coded version once means you know what happens under the hood.
 :::
 
 ---
 
 # Using the `tmle` Package with Super Learner
 
-In practice, you will often use the `tmle` package, which handles the full pipeline internally. Here we show the concise version of the analysis from Section 10.
+In practice, you will often reach for the `tmle` package, which handles the full pipeline internally. Here is the concise version of the analysis above.
 
 ```{r}
 #| eval: false
@@ -871,7 +871,7 @@ SL_lib <- c(
 )
 ```
 
-This library balances interpretable models (GLM, LASSO) with flexible nonparametric learners (earth, ranger), plus a simple benchmark. It works well as a starting point for most causal analyses.
+This library balances interpretable models (GLM, LASSO) with flexible nonparametric learners (earth, ranger), plus a simple benchmark. It is a good starting point for most causal analyses.
 
 For **larger datasets** (n > 10,000) or **high-dimensional covariates**, consider adding:
 
@@ -890,9 +890,9 @@ For **larger datasets** (n > 10,000) or **high-dimensional covariates**, conside
 
 4. **Inspect the weights.** If one learner gets all the weight, your library may lack diversity. If the mean-only model gets substantial weight, the signal may be weak.
 
-5. **Watch computation time.** Super Learner with $V = 10$ folds and $K$ learners requires fitting $V \times K$ models. With large datasets and slow learners, this can be hours of computation. Start with a small library and expand as needed.
+5. **Watch computation time.** Super Learner with $V = 10$ folds and $K$ learners fits $V \times K$ models. With large datasets and slow learners, that can run to hours. Start with a small library and expand as needed.
 
-6. **Use Super Learner for nuisance functions, not for the causal effect.** Never use Super Learner to directly estimate the ATE. Use it to estimate $Q$ and $g$, then feed these into TMLE, AIPW, or another causal estimator.
+6. **Use Super Learner for nuisance functions, not for the causal effect.** Never use Super Learner to estimate the ATE directly. Use it to estimate $Q$ and $g$, then feed those into TMLE, AIPW, or another causal estimator.
 
 ---
 
@@ -929,7 +929,7 @@ If the intercept-only learner receives substantial weight, this may reflect weak
 <details>
 <summary><strong>Q3. A colleague argues that you should just use xgboost for the propensity score because "it always wins Kaggle competitions." How would you respond?</strong></summary>
 
-While xgboost is a powerful algorithm, no single learner dominates in all settings. "Winning Kaggle" requires optimizing prediction accuracy for a specific dataset with specific tuning; which is exactly what Super Learner automates. If xgboost truly is the best algorithm for your data, Super Learner will discover this and give it the largest weight. But if your data has a simpler structure where logistic regression or LASSO performs comparably, Super Learner will use those instead (or combine them). Additionally, for causal inference we care about *calibrated probabilities*, not just ranking accuracy. An out-of-the-box xgboost model optimized for classification accuracy may produce poorly calibrated propensity scores that create extreme IPTW weights. Super Learner with a log-likelihood metalearner directly optimizes calibration.
+xgboost is a powerful algorithm, but no single learner dominates in all settings. "Winning Kaggle" means optimizing prediction accuracy for a specific dataset with specific tuning, which is exactly what Super Learner automates. If xgboost really is the best algorithm for your data, Super Learner will discover that and give it the largest weight. If your data has a simpler structure where logistic regression or LASSO performs comparably, Super Learner will use those instead, or combine them. And for causal inference we care about *calibrated probabilities*, not just ranking accuracy. An out-of-the-box xgboost model tuned for classification accuracy may produce poorly calibrated propensity scores that create extreme IPTW weights. Super Learner with a log-likelihood metalearner optimizes calibration directly.
 
 </details>
 
@@ -951,7 +951,7 @@ Normalization is not strictly required by the theory, but it is standard practic
 
 ## What comes next
 
-This chapter equipped you with the core prediction engine that powers modern causal estimators. In the next part of the handbook, we move beyond point-treatment analyses to tackle **effect modification and heterogeneous treatment effects**, where Super Learner continues to play a central role in estimating nuisance functions across subgroups.
+This chapter equipped you with the core prediction engine behind modern causal estimators. In the next part of the handbook we move beyond point-treatment analyses to **effect modification and heterogeneous treatment effects**, where Super Learner again does much of the work of estimating nuisance functions across subgroups.
 
 ```{r}
 #| interactive: true

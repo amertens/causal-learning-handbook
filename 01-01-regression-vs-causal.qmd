@@ -6,13 +6,13 @@ format: html
 
 *Estimated reading time: 25 minutes*
 
-Most observational studies start with a causal question: does treatment A reduce the risk of outcome Y compared to treatment B? Researchers typically reach for a familiar tool: fit a Cox proportional hazards model, adjust for available confounders, and interpret the hazard ratio as the answer. This workflow is so common that it can feel like the *only* workflow.
+Most observational studies start with a causal question: does treatment A reduce the risk of outcome Y compared to treatment B? Researchers typically reach for a familiar tool. They fit a Cox proportional hazards model, adjust for available confounders, and interpret the hazard ratio as the answer. This workflow is so common that it can feel like the *only* workflow.
 
-But there are two distinct problems with this approach. First, the regression model may be **misspecified** (the wrong functional form, missing interactions, or omitted confounders can bias the coefficient). Second, and more fundamentally, even a perfectly specified model may answer the **wrong question**. A conditional hazard ratio from a Cox model is not the same quantity as "the causal effect of treatment on 3-year risk." The hazard ratio is a conditional, instantaneous rate measure that does not directly translate to a population-level risk difference or survival probability contrast. The causal question you want to answer may simply not correspond to any single regression coefficient.
+Two distinct problems lurk in this approach. First, the regression model may be **misspecified**: the wrong functional form, missing interactions, or omitted confounders can bias the coefficient. Second, and more fundamentally, even a perfectly specified model may answer the **wrong question**. A conditional hazard ratio from a Cox model is not the same quantity as "the causal effect of treatment on 3-year risk." The hazard ratio is a conditional, instantaneous rate measure, and it does not translate directly to a population-level risk difference or a survival probability contrast. The causal question you care about may simply not correspond to any single regression coefficient.
 
-Recognizing this gap is not a criticism of regression itself; regression remains a useful building block. The gap is a reason to adopt a more deliberate analytic workflow, a **Causal Roadmap** [@petersen2014causal; @dang2023causal], that starts with a clearly defined causal question, specifies a target estimand on a meaningful scale (such as the risk difference or restricted mean survival time difference), and chooses an estimation strategy that targets it directly. Later chapters introduce **longitudinal TMLE (L-TMLE)** [@vanderLaan2006tmle], which can estimate causal survival curve contrasts without relying on the proportional hazards assumption.
+None of this is a criticism of regression, which remains a useful building block. It is a reason to adopt a more deliberate analytic workflow: a **Causal Roadmap** [@petersen2014causal; @dang2023causal]. The Roadmap starts with a clearly defined causal question, specifies a target estimand on a meaningful scale (the risk difference, say, or the restricted mean survival time difference), and then chooses an estimation strategy that targets it directly. Later chapters introduce **longitudinal TMLE (L-TMLE)** [@vanderLaan2006tmle], which can estimate causal survival curve contrasts without relying on the proportional hazards assumption.
 
-This chapter uses a concrete clinical example to illustrate where the standard regression-only approach falls short, introduces the counterfactual framework that makes causal questions precise, and demonstrates g-computation as a first step toward targeted estimation. Later chapters build on these ideas with inverse probability weighting (IPTW), targeted minimum loss-based estimation (TMLE) [@vanderLaan2006tmle], and the full Causal Roadmap. The chapter proceeds as follows:
+This chapter uses a concrete clinical example to show where the standard regression-only approach falls short, introduces the counterfactual framework that makes causal questions precise, and works through g-computation as a first step toward targeted estimation. Later chapters build on these ideas with inverse probability weighting (IPTW), targeted minimum loss-based estimation (TMLE) [@vanderLaan2006tmle], and the full Causal Roadmap. The chapter proceeds as follows:
 
 1. A motivating example: HAART and HIV mortality
 2. What adjusted regression does and does not give you
@@ -44,17 +44,17 @@ knitr::opts_chunk$set(
 
 ## Why Not Just Use Regression?
 
-Multivariable regression has long been the standard tool in observational research for "adjusting" for confounders. But regression coefficients don't always represent causal effects. In fact, they almost never do without additional assumptions and deliberate analytic choices that go beyond what standard regression provides.
+Multivariable regression has long been the standard tool in observational research for "adjusting" for confounders. But regression coefficients don't always equal causal effects. In fact they almost never do, not without additional assumptions and deliberate analytic choices that go beyond what standard regression provides.
 
-**Key point.** If you've been trained to interpret an adjusted regression coefficient as "the effect of X on Y, holding all else equal," you're in good company, but that interpretation quietly smuggles in causal language that the model itself cannot justify. The coefficient tells you about the **conditional association** within strata defined by the other variables in the model. Whether that association equals a causal effect depends on assumptions that regression alone cannot verify.
+If you've been trained to read an adjusted regression coefficient as "the effect of X on Y, holding all else equal," you're in good company. But that reading quietly smuggles in causal language the model itself cannot justify. The coefficient tells you about the **conditional association** within strata defined by the other variables in the model. Whether that association equals a causal effect depends on assumptions regression alone cannot verify.
 
-The **table-2 fallacy** [@westreich2013table2] occurs when analysts interpret multiple coefficients from a single regression as if each one estimates a separate causal effect. Each coefficient in a multivariable regression has a different set of confounders, mediators, and colliders. A model that is correctly specified for the causal effect of treatment on the outcome may simultaneously produce a biased coefficient for a covariate in the same model. Treating all coefficients as causal is a common and consequential error in applied work.
+The **table-2 fallacy** [@westreich2013table2] occurs when analysts read multiple coefficients from a single regression as if each estimates a separate causal effect. Each coefficient in a multivariable regression has its own set of confounders, mediators, and colliders. A model that is correctly specified for the causal effect of treatment on the outcome can, at the same time, produce a biased coefficient for a covariate in that same model. Treating every coefficient as causal is a common and consequential error in applied work.
 
 ### Motivating Example: HAART and HIV Mortality
 
 Suppose we have an observational HIV cohort and want to know whether patients who ever initiated **highly active antiretroviral therapy (HAART)** had a different risk of death than patients who never initiated it. The causal question is straightforward: if we could assign everyone in this population to HAART versus to no HAART, would the mortality risk differ, and by how much?
 
-The standard approach is to fit a **Cox proportional hazards model**, adjust for confounders like age, sex, and baseline CD4 count, and report the adjusted hazard ratio. Let's see what that looks like on the running HAART cohort [@vanderwal2011ipw] (introduced in the [Running Case Study](00-case-study.qmd) and used as a point-treatment baseline snapshot here).
+The standard approach is to fit a **Cox proportional hazards model**, adjust for confounders like age, sex, and baseline CD4 count, and report the adjusted hazard ratio. Here is what that looks like on the running HAART cohort [@vanderwal2011ipw] (introduced in the [Running Case Study](00-case-study.qmd) and used here as a point-treatment baseline snapshot).
 
 ```{r, include=FALSE}
 #| code-fold: true
@@ -71,7 +71,7 @@ We adjust for age, sex, and baseline (square-root) CD4 count using a Cox model:
 
 :::{.callout-warning}
 ## A simplification with a known cost: immortal time
-This point-treatment analysis defines treatment as "ever initiated HAART during follow-up" and then analyzes it as if it were a baseline exposure. Because `haartind` is an absorbing event collapsed to a single label, patients counted as initiators are guaranteed to have survived until their initiation time, which induces **immortal time bias** by construction, exactly the error @sec-roadmap teaches you to avoid. We accept it here only to demonstrate estimator mechanics on one familiar dataset; the unbiased treatment of this question requires the longitudinal g-methods in Part III. See the [case study caveat](00-case-study.qmd#cohort-summary-of-baseline-characteristics) for the full statement.
+This point-treatment analysis defines treatment as "ever initiated HAART during follow-up" and then analyzes it as if it were a baseline exposure. Because `haartind` is an absorbing event collapsed to a single label, patients counted as initiators are guaranteed to have survived until their initiation time. This induces **immortal time bias** by construction, exactly the error @sec-roadmap teaches you to avoid. We accept it here only to demonstrate estimator mechanics on one familiar dataset. Answering this question without bias requires the longitudinal g-methods in Part III. See the [case study caveat](00-case-study.qmd#cohort-summary-of-baseline-characteristics) for the full statement.
 :::
 
 ```{r}
@@ -87,14 +87,14 @@ tidy(cox_model, conf.int = TRUE, exponentiate = TRUE) |>
 :::{.callout-warning}
 ## The Hazard Ratio Is NOT the Causal Effect You Want
 
-The adjusted hazard ratio for `ever_haart` quantifies an instantaneous rate ratio for death within strata of age, sex, and baseline CD4. But what does a clinician or policymaker actually need to know? They need to know: **if we initiated HAART in everyone eligible compared with no one, how would the cumulative mortality risk over follow-up change?** That quantity, the **marginal risk difference** in mortality, is the natural scale for comparing treatments and making decisions.
+The adjusted hazard ratio for `ever_haart` gives an instantaneous rate ratio for death within strata of age, sex, and baseline CD4. But what does a clinician or policymaker actually need to know? They need to know: if we initiated HAART in everyone eligible compared with no one, how would the cumulative mortality risk over follow-up change? That quantity, the **marginal risk difference** in mortality, is the natural scale for comparing treatments and making decisions.
 
 The Cox hazard ratio does not answer that question. It is a **conditional, instantaneous rate ratio** that:
 
-- Assumes **proportional hazards** (that the treatment effect is constant over time), which is often violated in practice.
-- Is **non-collapsible**: the conditional HR and marginal HR differ even without confounding, so the coefficient does not have a straightforward population-level interpretation.
-- Does not directly translate to a risk difference or survival probability contrast without additional computation.
-- Is also confounded by indication in observational HIV data: sicker patients (lower CD4) were more likely to start HAART, so the unadjusted association conflates the drug's benefit with baseline severity. We will return to this in the longitudinal section below.
+- Assumes **proportional hazards** (the treatment effect is constant over time), an assumption often violated in practice.
+- Is **non-collapsible**: the conditional HR and marginal HR differ even without confounding, so the coefficient has no straightforward population-level interpretation.
+- Does not translate to a risk difference or survival probability contrast without extra computation.
+- Is confounded by indication in observational HIV data: sicker patients (lower CD4) were more likely to start HAART, so the unadjusted association conflates the drug's benefit with baseline severity. We return to this in the longitudinal section below.
 
 In later chapters, we introduce **longitudinal TMLE (L-TMLE)**, which directly estimates causal survival curves and risk differences at specific time points without relying on the proportional hazards assumption.
 :::
@@ -108,7 +108,7 @@ $$
 ATE = E[Y(1) - Y(0)]
 $$
 
-The fundamental problem of causal inference is that each person only receives one treatment. We observe Y(1) or Y(0), never both. Under three key identification assumptions, **exchangeability** (no unmeasured confounding), **consistency** (the observed outcome under the treatment actually received equals the potential outcome), and **positivity** (every individual has a nonzero probability of receiving either treatment given their covariates), we can identify the causal ATE from observed data using the **g-computation formula**:
+The fundamental problem of causal inference is that each person receives only one treatment. We observe Y(1) or Y(0), never both. Three identification assumptions bridge the gap: **exchangeability** (no unmeasured confounding), **consistency** (the observed outcome under the treatment actually received equals the potential outcome), and **positivity** (every individual has a nonzero probability of receiving either treatment given their covariates). Under these assumptions we can identify the causal ATE from observed data using the **g-computation formula**:
 
 $$
 ATE = E_W\big[ E[Y \mid A = 1, W] - E[Y \mid A = 0, W] \big]
@@ -122,10 +122,10 @@ where W represents the measured confounders and A is the treatment. This express
 :::{.callout-warning}
 ## Model Misspecification Can Silently Bias Your Results
 
-Misspecification bias is **silent**. A regression with the wrong functional form still produces coefficients and p-values with no warning. This motivates semiparametric estimators (like TMLE with machine learning [@vanderLaan2006tmle; @bang2005doubly]) that relax parametric assumptions.
+Misspecification bias is **silent**. A regression with the wrong functional form still produces coefficients and p-values, with no warning. This is what motivates semiparametric estimators such as TMLE with machine learning [@vanderLaan2006tmle; @bang2005doubly], which relax parametric assumptions.
 :::
 
-Let's compare the Cox approach to g-computation, which directly targets the marginal risk difference for mortality over follow-up. Both models are fit on the *same* data and adjust for the *same* confounders; the only thing that changes is what we ask the fitted model to report.
+Compare the Cox approach to g-computation, which targets the marginal risk difference for mortality over follow-up. Both models are fit on the *same* data and adjust for the *same* confounders. The only thing that changes is what we ask the fitted model to report.
 
 ```{r}
 # G-computation: fit a logistic outcome model, then standardize
@@ -145,7 +145,7 @@ risk_ratio <- risk1 / risk0
 cox_hr <- exp(coef(cox_model)["ever_haart"])
 ```
 
-G-computation **predicts** counterfactual outcomes for every person under treatment and under control, then **averages** the difference. The result is a **marginal risk difference**, a population-level quantity directly relevant to decision-making, unlike the conditional hazard ratio from the Cox model. Placing the two side by side makes the gap concrete:
+G-computation predicts counterfactual outcomes for every person under treatment and under control, then averages the difference. The result is a **marginal risk difference**, a population-level quantity that speaks directly to decisions, unlike the conditional hazard ratio from the Cox model. Placing the two side by side makes the gap concrete.
 
 ```{r}
 #| label: tbl-cox-vs-gcomp
@@ -216,16 +216,16 @@ ggplot(gcomp_df, aes(strategy, risk, fill = strategy)) +
   theme(plot.title.position = "plot")
 ```
 
-The Cox model and the logistic g-computation are fitted on the same data, but they answer different questions. The hazard ratio is a conditional, instantaneous rate ratio that does not directly tell us how many deaths would be averted by HAART, and it is non-collapsible: the conditional HR differs from the marginal HR even without confounding. The g-computation risk difference $E[Y(1)] - E[Y(0)]$ is **negative** here, because HAART is protective: the figure and table print a number like $-X$ per 100, meaning that initiating HAART in everyone rather than no one *lowers* cumulative mortality by about $X$ per 100. Read the other way round, about $X$ more people per 100 would have died if no one had been initiated on HAART compared to if everyone had been. That is the kind of number patients and clinicians need to make decisions.
+The Cox model and the logistic g-computation are fit on the same data, yet they answer different questions. The hazard ratio is a conditional, instantaneous rate ratio; it does not tell us how many deaths HAART would avert, and it is non-collapsible, so the conditional HR differs from the marginal HR even without confounding. The g-computation risk difference $E[Y(1)] - E[Y(0)]$ is **negative** here because HAART is protective. The figure and table print a number like $-X$ per 100, meaning that initiating HAART in everyone rather than no one *lowers* cumulative mortality by about $X$ per 100. Read the other way round, about $X$ more people per 100 would have died had no one been initiated on HAART compared with everyone. That is the kind of number patients and clinicians need to make decisions.
 
 <!-- editor note: reconciled the sign per the editorial spec. The figure/table annotate the signed risk difference 100*risk_diff (= risk1 - risk0, negative for a protective treatment); the prose now reads that negative number correctly instead of asserting a positive value next to a negative printed one. -->
 
 
 ### Longitudinal failure: treatment-confounder feedback
 
-The point-treatment analysis above already shows that the *estimand* matters. The HAART setting also illustrates a deeper, structural problem that no choice of point-treatment estimator can fix. In the longitudinal HAART data, CD4 count is measured at each visit and used to guide treatment decisions. But CD4 is also affected by prior treatment: HAART improves CD4 counts. This creates **treatment–confounder feedback**, a structure where the same variable (CD4) is simultaneously a confounder of future treatment and a consequence of past treatment.
+The point-treatment analysis above already shows that the *estimand* matters. The HAART setting also illustrates a deeper, structural problem that no choice of point-treatment estimator can fix. In the longitudinal HAART data, CD4 count is measured at each visit and used to guide treatment decisions. But CD4 is itself affected by prior treatment, since HAART improves CD4 counts. This creates **treatment-confounder feedback**: the same variable (CD4) is at once a confounder of future treatment and a consequence of past treatment.
 
-Standard regression faces an impossible choice in this setting. If you do not adjust for time-varying CD4, you leave confounding of future treatment decisions unaddressed. If you do adjust for it, you block part of the causal pathway from HAART through improved CD4 to reduced mortality. Neither approach produces a consistent estimate of the total treatment effect. This is not a matter of choosing the right covariates or the right functional form. It is a structural limitation of the regression framework when applied to longitudinal data with feedback.
+Standard regression faces an impossible choice here. If you do not adjust for time-varying CD4, you leave confounding of future treatment decisions unaddressed. If you do adjust for it, you block part of the causal pathway from HAART through improved CD4 to reduced mortality. Neither approach yields a consistent estimate of the total treatment effect. The problem is not a matter of choosing the right covariates or the right functional form. It is a structural limitation of the regression framework applied to longitudinal data with feedback.
 
 The g-methods developed in this handbook (g-computation, IPTW with marginal structural models, and longitudinal TMLE) were designed for exactly this structure. We return to the longitudinal HAART data in the [Running Case Study](00-case-study.qmd) and develop the necessary methods in Part III.
 
@@ -235,19 +235,21 @@ The g-methods developed in this handbook (g-computation, IPTW with marginal stru
 ## Key Takeaways
 
 - **Regression is not inherently causal.** It estimates conditional associations under strong model assumptions. An adjusted coefficient is not the same as a causal effect.
-- **Causal inference starts with a question, not a model.** Define your causal question and target estimand (e.g., the ATE on the risk difference scale) *before* choosing an analytic method.
-- **The counterfactual framework clarifies what we want to estimate.** Y(1), Y(0), and the ATE give us precise, model-free definitions of causal effects.
-- **G-computation, IPTW, and TMLE estimate marginal causal effects.** These methods target the population-level quantity defined by the g-computation formula, rather than relying on regression coefficients that conflate the estimand with the model [@smith2023systematic].
-- **The hazard ratio from Cox regression is not the ATE.** Hazard ratios are conditional, instantaneous rate measures that do not directly translate to risk differences. This is perhaps the single most important distinction for epidemiologists moving from traditional regression to causal inference methods.
+- **Causal inference starts with a question, not a model.** Define your causal question and target estimand (for example, the ATE on the risk difference scale) *before* choosing an analytic method.
+- **The counterfactual framework clarifies what we want to estimate.** Y(1), Y(0), and the ATE give precise, model-free definitions of causal effects.
+- **G-computation, IPTW, and TMLE estimate marginal causal effects.** These methods target the population-level quantity defined by the g-computation formula instead of relying on regression coefficients that conflate the estimand with the model [@smith2023systematic].
+- **The hazard ratio from Cox regression is not the ATE.** Hazard ratios are conditional, instantaneous rate measures that do not translate directly to risk differences. For epidemiologists moving from traditional regression to causal inference methods, this may be the single most important distinction.
 :::
 
 ## What comes next
 
-Now that you understand why regression coefficients are not causal effects, the next chapter introduces the **Causal Roadmap**: a structured workflow that turns a scientific question into a defensible analysis plan, from question definition through estimation and interpretation.
+Now that you see why regression coefficients are not causal effects, the next chapter introduces the **Causal Roadmap**: a structured workflow that turns a scientific question into a defensible analysis plan, from question definition through estimation and interpretation.
 
 ## Check your understanding
 
 <details>
 <summary><strong>Q1. Why can't you interpret an adjusted logistic regression coefficient as the ATE?</strong></summary>
 
-The adjusted coefficient from logistic regression is a **conditional log-odds ratio**. It describes the association between treatment and outcome within strata defined by the covariates in the model. This differs from the ATE (a marginal risk difference) in at least two ways. First, the odds ratio is **non-collapsible**: even without confounding, a conditional odds ratio and a marginal odds ratio will differ, so you cannot read the coefficient as a population-level summary. Second, the coefficient li
+The adjusted coefficient from logistic regression is a **conditional log-odds ratio**. It describes the association between treatment and outcome within strata defined by the covariates in the model. This differs from the ATE (a marginal risk difference) in at least two ways. First, the odds ratio is **non-collapsible**: even without confounding, a conditional odds ratio and a marginal odds ratio will differ, so you cannot read the coefficient as a population-level summary. Second, the coefficient lives on the log-odds scale, not the probability scale, so it is not a risk difference and cannot be converted into one without knowing the baseline risk in each covariate stratum. To recover the ATE from the same logistic model, you predict each person's outcome probability under $A=1$ and under $A=0$, then average those predictions over the covariate distribution. That averaging step is g-computation. The bare coefficient skips it, so it answers a conditional, log-odds-scale question, whereas the ATE is a marginal, risk-difference question.
+
+</details>

@@ -9,7 +9,7 @@ format: html
 
 ::: {.callout-note}
 ## Optional / advanced chapter
-This chapter provides the full by-hand L-TMLE implementation for readers who want to see exactly how the algorithm works at the code level. It uses the same two-time-point HIV simulation from the preceding conceptual chapter. **Most applied readers can skip this chapter** and proceed to the LMTP chapters, which provide the recommended practical workflow for realistic longitudinal interventions. Return here if you need to understand the internals of the algorithm.
+This chapter works through the full by-hand L-TMLE implementation for readers who want to see exactly how the algorithm runs at the code level. It uses the same two-time-point HIV simulation as the preceding conceptual chapter. **Most applied readers can skip it** and go straight to the LMTP chapters, which give the recommended workflow for realistic longitudinal interventions. Come back here when you need to see the internals.
 :::
 
 ```{r}
@@ -28,7 +28,7 @@ logit <- function(p) log(p / (1 - p))
 
 # Setup: simulated data
 
-We use the same two-time-point HIV cohort [@vanderwal2011ipw] from the [conceptual L-TMLE chapter](03-09-illustrated-ltmle.qmd). The data encodes treatment-confounder feedback: ART adherence at visit 1 ($A_1$) raises CD4 ($L_1$), which affects visit-2 adherence ($A_2$) and virologic failure ($Y$).
+We use the same two-time-point HIV cohort [@vanderwal2011ipw] as the [conceptual L-TMLE chapter](03-09-illustrated-ltmle.qmd). The data encodes treatment-confounder feedback. ART adherence at visit 1 ($A_1$) raises CD4 ($L_1$), which in turn affects visit-2 adherence ($A_2$) and virologic failure ($Y$).
 
 ```{r}
 set.seed(2026)
@@ -87,8 +87,8 @@ g_cumulative <- g1_hat * g2_under_a1  # <3>
 cat("Cumulative g range:", round(range(g_cumulative), 3), "\n")
 ```
 1. `pmax(0.01, pmin(0.99, ...))` clips propensity scores to $[0.01, 0.99]$ to prevent division by zero in the clever covariate. The 0.01 floor is a common default; tighter truncation (e.g. 0.025) reduces variance from extreme weights at some cost in bias.
-2. `predict(g2_mod, newdata = dat %>% mutate(A1 = 1), ...)` evaluates $\hat{g}_2(A_1 = 1, L_1, W)$ for every observation — the probability of adhering at visit 2 *under the target regime* (A1 forced to 1), not the observed A1. Feeding the counterfactual history through the model is required to build the correct regime probability.
-3. Under "always adhere," the joint regime probability factors as $P(A_1=1 \mid W) \times P(A_2=1 \mid A_1=1, L_1, W)$ by the chain rule for sequential treatments. Small values here flag near-positivity violations — observations who would very rarely follow the full target regime.
+2. `predict(g2_mod, newdata = dat %>% mutate(A1 = 1), ...)` evaluates $\hat{g}_2(A_1 = 1, L_1, W)$ for every observation. This is the probability of adhering at visit 2 *under the target regime* (A1 forced to 1), not under the observed A1. Feeding the counterfactual history through the model is what gives the correct regime probability.
+3. Under "always adhere," the joint regime probability factors as $P(A_1=1 \mid W) \times P(A_2=1 \mid A_1=1, L_1, W)$ by the chain rule for sequential treatments. Small values here flag near-positivity violations: observations who would very rarely follow the full target regime.
 
 
 # Phase B: Sequential outcome regression (backwards)
@@ -105,7 +105,7 @@ cat("Q2(A2=1) range:", round(range(Q2_A2is1), 4), "\n")
 
 ## Step 2b: Move backwards (the critical step)
 
-Regress the time-2 predictions on $(A_1, W)$ only, **without** conditioning on $L_1$. This integrates $L_1$ out, preserving the mediated effect of $A_1$ through $L_1$.
+Regress the time-2 predictions on $(A_1, W)$ only, **without** conditioning on $L_1$. This integrates $L_1$ out and so preserves the mediated effect of $A_1$ through $L_1$.
 
 ```{r}
 Q1_mod <- glm(Q2_A2is1 ~ A1 + W, family = quasibinomial, data = dat)
@@ -114,7 +114,7 @@ cat("G-computation estimate E[Y(1,1)]:", round(mean(Q1_A1is1), 4), "\n")
 cat("True E[Y(1,1)]:                  ", round(true_EY_11, 4), "\n")
 ```
 
-This is longitudinal G-computation [@hernan2025whatif]. It depends on all models being correctly specified. The targeting steps below add robustness.
+This is longitudinal G-computation [@hernan2025whatif]. It leans on every model being correctly specified. The targeting steps below add robustness.
 
 
 # Phase C: Targeting for double robustness
@@ -139,11 +139,11 @@ eps2 <- coef(fluc2)
 Q2_star <- plogis(logit(Q2_A2is1) + eps2 / (g1_hat * g2_under_a1))  # <3>
 cat("Epsilon at time 2:", round(eps2, 5), "\n")
 ```
-1. The clever covariate $H_2 = I(A_1=1, A_2=1) / \hat{g}_{\text{cum}}$ is non-zero only for observations who actually followed the "always adhere" regime at both visits; for all others it is zero. It is the importance-weighting term that re-orients the observed data toward the target intervention.
+1. The clever covariate $H_2 = I(A_1=1, A_2=1) / \hat{g}_{\text{cum}}$ is non-zero only for observations who actually followed the "always adhere" regime at both visits, and zero for everyone else. It is the importance-weighting term that re-orients the observed data toward the target intervention.
 2. `-1` suppresses the intercept; `offset(logit(QA_init_t2))` anchors the logit of the initial $\hat{Q}_2$ as the starting value, so the model estimates only the scalar shift $\hat{\epsilon}_2$. A near-zero $\hat{\epsilon}_2$ means the outcome model was already well-calibrated for the causal estimand.
 3. The TMLE update applies $\hat{\epsilon}_2$ on the logit scale, evaluated under $A_2=1$ using the cumulative propensity score in the denominator. The `plogis(logit(...) + eps / g)` pattern is the canonical targeting-step update formula for a binary outcome.
 
-The coefficient $\hat{\epsilon}_2$ measures how much the initial outcome model needs correcting. A small value means the outcome model was already well-calibrated for the causal estimand.
+The coefficient $\hat{\epsilon}_2$ measures how much the initial outcome model needs correcting. When it comes out near zero, the initial fit already sat close to where the causal estimand needs it.
 
 ## Target at time 1
 
@@ -160,9 +160,9 @@ eps1 <- coef(fluc1)
 Q1_star <- plogis(logit(Q1_under_a1) + eps1 / g1_hat)  # <3>
 cat("Epsilon at time 1:", round(eps1, 5), "\n")
 ```
-1. The *outcome* for the time-1 backwards regression is `Q2_star` — the *targeted* visit-2 predictions — not the original binary `Y`. Using `Q2_star` propagates the time-2 correction backward; using `Y` directly would re-introduce $L_1$ as a confounder of $A_1$.
-2. `quasibinomial` is needed because `Q2_star` is a continuous probability in $(0,1)$, not 0/1. It keeps the logit link and binomial variance function but allows overdispersion $> 1$, making it valid for fractional pseudo-outcomes.
-3. The update applies $\hat{\epsilon}_1$ to `Q1_under_a1` — the *counterfactual* prediction at $A_1 = 1$ — not the observed-treatment prediction. The sample mean of `Q1_star` is the L-TMLE estimate $\hat{E}[Y^{(1,1)}]$.
+1. The *outcome* for the time-1 backwards regression is `Q2_star`, the *targeted* visit-2 predictions, not the original binary `Y`. Using `Q2_star` propagates the time-2 correction backward. Using `Y` directly would re-introduce $L_1$ as a confounder of $A_1$.
+2. `quasibinomial` is needed because `Q2_star` is a continuous probability in $(0,1)$, not 0/1. It keeps the logit link and binomial variance function but allows overdispersion $> 1$, which makes it valid for fractional pseudo-outcomes.
+3. The update applies $\hat{\epsilon}_1$ to `Q1_under_a1`, the *counterfactual* prediction at $A_1 = 1$, not the observed-treatment prediction. The sample mean of `Q1_star` is the L-TMLE estimate $\hat{E}[Y^{(1,1)}]$.
 
 # The final L-TMLE estimate
 
@@ -175,7 +175,7 @@ cat("True E[Y(1,1)]:           ", round(true_EY_11, 4), "\n")
 
 # Comparing estimators
 
-All estimators use simple main-terms GLMs for both the outcome and treatment models. With n = 1000 and correctly specified but inflexible parametric models, residual finite-sample bias is expected. The L-TMLE estimate will typically be closer to the truth than the naive regression or g-computation, but not perfectly unbiased. Using a richer Super Learner library [@vanderLaan2007superlearner] (as recommended in practice) would reduce this gap further.
+All estimators use simple main-terms GLMs for both the outcome and treatment models. With n = 1000 and models that are correctly specified but inflexible, some finite-sample bias is expected. The L-TMLE estimate usually lands closer to the truth than the naive regression or g-computation, though it is not perfectly unbiased. A richer Super Learner library [@vanderLaan2007superlearner], as recommended in practice, would shrink the remaining gap.
 
 ```{r}
 naive_mod <- glm(Y ~ A1 + A2 + L1 + W, family = binomial, data = dat)
@@ -267,7 +267,7 @@ Each backwards step conditions on $L_t$ where it confounds future treatment, and
 
 ## Sources
 
-- [@petersen2014causal] — targeted TMLE for dynamic and static longitudinal marginal structural working models.
-- [@diaz2021lmtp] — lmtp R package and modified treatment policy framework.
-- [@vanderLaan2007superlearner] — Super Learner ensemble for nuisance function estimation.
-- [@vanderwal2011ipw] — HAART observational cohort used as the running example.
+- [@petersen2014causal]: targeted TMLE for dynamic and static longitudinal marginal structural working models.
+- [@diaz2021lmtp]: lmtp R package and modified treatment policy framework.
+- [@vanderLaan2007superlearner]: Super Learner ensemble for nuisance function estimation.
+- [@vanderwal2011ipw]: HAART observational cohort used as the running example.
