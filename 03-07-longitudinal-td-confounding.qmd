@@ -72,13 +72,32 @@ L1 <- rnorm(n, 0.5 * A1 + 0.4 * W)     # CD4 end of year 1: improved by ART
 A2 <- rbinom(n, 1, plogis(0.5 * L1))   # ART adherence year 2 driven by current CD4
 Y  <- rbinom(n, 1, plogis(-1.5 + 0.4 * A1 + 0.4 * A2 + 0.3 * L1 + 0.3 * W))
 
-# Naive regression conditions on L1 (blocks A1 -> L1 -> Y)
+# The quantity we want is the TOTAL effect of sustained adherence on the risk
+# scale: failure risk if everyone always adhered (A1 = A2 = 1) minus if no one
+# did (A1 = A2 = 0). Simulate it from the known mechanism, letting CD4 (L1)
+# respond to year-1 treatment the way it does in the data-generating process.
+risk_under <- function(a) {
+  L1a <- rnorm(n, 0.5 * a + 0.4 * W)   # CD4 responds to the assigned regime
+  mean(plogis(-1.5 + 0.4 * a + 0.4 * a + 0.3 * L1a + 0.3 * W))
+}
+true_total_rd <- risk_under(1) - risk_under(0)
+
+# A regression that "controls for CD4" conditions on L1, which sits on the
+# A1 -> L1 -> Y pathway. Standardizing its predictions holds CD4 at its observed
+# values instead of letting treatment move it, so the mediated part of the
+# effect is discarded.
 naive_mod <- glm(Y ~ A1 + A2 + L1 + W, family = binomial)
-cat("Naive coefficient on A1 (attenuated):", round(coef(naive_mod)["A1"], 3),
-    " (true structural coefficient: 0.4)\n")
+dat_naive <- data.frame(A1, A2, L1, W)
+p_treat   <- predict(naive_mod, transform(dat_naive, A1 = 1, A2 = 1), type = "response")
+p_control <- predict(naive_mod, transform(dat_naive, A1 = 0, A2 = 0), type = "response")
+naive_rd  <- mean(p_treat) - mean(p_control)
+
+cat("True total effect of sustained ART (risk difference):", round(true_total_rd, 3), "\n")
+cat("CD4-adjusted regression estimate:                    ", round(naive_rd, 3), "\n")
+cat("Direct-effect-only A1 coefficient (logit scale):     ", round(coef(naive_mod)["A1"], 3), "\n")
 ```
 
-The coefficient on $A_1$ comes out attenuated because conditioning on $L_1$ absorbs the part of the $A_1$ effect that operates through CD4 recovery. This is structural bias, not sampling noise: it persists at any sample size.
+The regression that conditions on CD4 recovers only the *direct* effect of ART: its $A_1$ coefficient sits near 0.4, the direct structural parameter, and the standardized risk difference it implies falls short of the true total effect. Conditioning on $L_1$ holds the mediator fixed, so the part of the effect that runs through CD4 recovery is discarded. This is structural bias, not sampling noise. It persists at any sample size, because the problem is which pathway the model blocks, not how much data we have.
 
 
 # The HIV Cohort: Our Running Example

@@ -1376,17 +1376,19 @@ H_01 <- make_H(0, 1);  H_00 <- make_H(0, 0)
 # and also yields correct individual regime-mean CIs.
 
 # --- Step 3. ltmle with two Anodes: four targeted counterfactual means ---
-# Column order must be: W nodes, A nodes, Y node.
-# Anodes = c("A", "E") tells ltmle to treat both as jointly intervened-on
+# Column order must be: W nodes, A nodes, Y node, and the A-node ordering
+# must match the DGP's factorization P(E | W) P(A | E, W): E is drawn from W,
+# then A from (W, E), so E must precede A in both the column order and Anodes.
+# Anodes = c("E", "A") tells ltmle to treat both as jointly intervened-on
 # nodes at a single time point, targeting E[Y^{a_val, e_val}].
-ltmle_dat <- dat[, c("W1", "W2", "W3", "A", "E", "Y")]
+ltmle_dat <- dat[, c("W1", "W2", "W3", "E", "A", "Y")]
 
 run_regime <- function(a_val, e_val) {
   ltmle(
     data       = ltmle_dat,
-    Anodes     = c("A", "E"),
+    Anodes     = c("E", "A"),
     Ynodes     = "Y",
-    abar       = c(a_val, e_val),   # set A = a_val, E = e_val for everyone
+    abar       = c(e_val, a_val),   # order matches Anodes = c("E", "A")
     SL.library = c("SL.mean", "SL.glm", "SL.ranger"),
     estimate.time = FALSE
   )
@@ -1886,14 +1888,18 @@ your dataset.
 # Required data layout (wide format, one row per subject):
 #   W1, W2, W3  baseline confounders
 #   A, E        binary exposures set at baseline (treated as joint Anodes)
-#   C           censoring indicator at t* (1 = uncensored, 0 = censored
-#               before t*); add C1...Ck for multiple time points
+#   C           censoring node at t*: ltmle requires it coded as a factor
+#               via BinaryToCensoring, NOT a numeric 0/1 indicator. Build it
+#               from the uncensored indicator (1 = still observed at t*):
+#                 dat$C <- ltmle::BinaryToCensoring(is.uncensored = dat$uncens)
+#               add C1...Ck for multiple time points
 #   Y           event indicator at t* (1 = event occurred by t*, 0 = not)
 #               for multiple time points, use Y1...Yk with the Y absorbing
 #               the previous values (once 1, stays 1)
 #
 # Column order in surv_dat must follow: W nodes, A nodes, then (C, Y) pairs.
-# For a single horizon: surv_dat <- dat[, c("W1","W2","W3","A","E","C","Y")]
+# For a single horizon, with C already built as a BinaryToCensoring factor:
+#   surv_dat <- dat[, c("W1","W2","W3","A","E","C","Y")]
 # -----------------------------------------------------------------------
 
 library(ltmle)
@@ -2349,7 +2355,9 @@ for e_value in [0, 1]:
     tmle.exposure_model("W1 + W2 + W3")
     tmle.outcome_model("A + W1 + W2 + W3")
     tmle.fit()
-    print(f"E = {e_value}: ATE = {tmle.average_treatment_effect}")
+    # Y is binary, so zEpid populates risk_difference (average_treatment_effect
+    # stays None for binary outcomes)
+    print(f"E = {e_value}: RD = {tmle.risk_difference}")
 ```
 
 `DoWhy` and `CausalML` are useful complementary tools but are not primary

@@ -475,6 +475,10 @@ for (i in 1:n) {
   EY_1_M1 <- compute_EY(1, m_A1_Z1, z1, i)
 
   true_nde_vals[i] <- EY_1_M0 - EY_0_M0
+  # This "indirect" term shifts BOTH the mediator M and the treatment-induced
+  # confounder Z from their control to their treatment distributions, so it
+  # bundles A -> M -> Y with the A -> Z -> Y and A -> Z -> M -> Y pathways. It is
+  # not a mediator-only (natural) indirect effect, which is not identified here.
   true_nie_vals[i] <- EY_1_M1 - EY_1_M0
 }
 
@@ -483,10 +487,12 @@ true_NIE <- mean(true_nie_vals)
 true_TE  <- true_NDE + true_NIE
 
 cat("True Total Effect:", round(true_TE, 4), "\n")
-cat("True NDE (direct):", round(true_NDE, 4), "\n")
-cat("True NIE (via M): ", round(true_NIE, 4), "\n")
-cat("NDE + NIE:        ", round(true_NDE + true_NIE, 4), "\n")
+cat("True direct effect (NDE, M and Z at control):   ", round(true_NDE, 4), "\n")
+cat("True indirect effect (through M and A-induced Z):", round(true_NIE, 4), "\n")
+cat("Direct + indirect:                              ", round(true_NDE + true_NIE, 4), "\n")
 ```
+
+Because $Z$ is affected by treatment and confounds $M \to Y$, the effect through $M$ *alone* is not identified as a natural indirect effect (it would require the cross-world independence that a treatment-induced confounder violates). The "indirect" quantity above is a valid split of the total effect, but it moves $M$ together with $Z$, so it also carries the $A \to Z \to Y$ and $A \to Z \to M \to Y$ pathways. Separating the mediator-specific contribution requires the *randomized interventional* direct and indirect effects that `crumble` targets, where $Z$ is drawn from a fixed reference distribution rather than allowed to react to the shifted treatment.
 
 
 # Why Naive Approaches Fail
@@ -809,7 +815,7 @@ For TMLE-based mediation, the density ratio $f(M \mid A=0, W) / f(M \mid A=1, W)
 
 ```{r}
 #| code-fold: true
-m_mod <- lm(M ~ A + age + bmi + cd4_bl + egfr + Z, data = dat)
+m_mod <- lm(M ~ A + age + bmi + cd4_bl + egfr, data = dat)  # condition on baseline W only, not the post-treatment Z
 sigma_m <- sigma(m_mod)
 
 M_mean_a0 <- predict(m_mod, newdata = dat |> mutate(A = 0))

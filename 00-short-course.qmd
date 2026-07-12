@@ -290,6 +290,7 @@ The `tmle` package automates all four steps. Run it on the same data and we can 
 #| message: false
 #| warning: false
 library(tmle)
+set.seed(2026)   # tmle() uses cross-validated Super Learner fits; seed for reproducibility
 W <- as.data.frame(haart_baseline[, c("age", "sex", "cd4_sqrt_baseline")])
 
 fit <- tmle(
@@ -323,6 +324,7 @@ Re-run the packaged TMLE with `SL.glmnet` (penalized regression) added to both l
 #| label: ex21-soln
 #| message: false
 #| warning: false
+set.seed(2026)   # reproducible cross-validated Super Learner fits
 fit_sl <- tmle(
   Y = haart_baseline$died,
   A = haart_baseline$ever_haart,
@@ -476,16 +478,20 @@ n_lmtp <- 500
 # Baseline
 W0 <- rbinom(n_lmtp, 1, 0.5)
 A0 <- rbinom(n_lmtp, 1, 0.4)
-# Visit 1: adherence (continuous in [0,1]), CD4-like covariate, survival indicator
-PDC_1 <- plogis(rnorm(n_lmtp, 0.3 + 0.4 * W0))
-L_1   <- rbinom(n_lmtp, 1, plogis(-0.3 + PDC_1))
-Y_1   <- rbinom(n_lmtp, 1, plogis(-2.5 + 0.5 * PDC_1 + 0.3 * L_1))   # death by visit 1
-# Visit 2: only those alive continue; define values for all, lmtp handles survival
-PDC_2 <- plogis(rnorm(n_lmtp, 0.2 + 0.5 * L_1))
-L_2   <- rbinom(n_lmtp, 1, plogis(-0.3 + PDC_2))
+# Visit 1: the CD4-like confounder is measured FIRST, then adherence responds to
+# it, then survival. lmtp assumes each visit is ordered L_t -> PDC_t, so the
+# data-generating process must put the confounder before treatment at that visit.
+L_1   <- rbinom(n_lmtp, 1, plogis(-0.3 + 0.5 * W0 + 0.3 * A0))
+PDC_1 <- plogis(rnorm(n_lmtp, 0.3 + 0.4 * L_1))                    # adherence depends on current CD4
+Y_1   <- rbinom(n_lmtp, 1, plogis(-2.5 + 0.5 * PDC_1 + 0.3 * L_1)) # death by visit 1
+# Visit 2: prior adherence moves the next CD4 (treatment-confounder feedback),
+# which in turn drives visit-2 adherence. Values are defined for all; lmtp
+# handles the survival structure for those who already died.
+L_2   <- rbinom(n_lmtp, 1, plogis(-0.3 + 0.8 * PDC_1 + 0.4 * L_1)) # confounder responds to prior treatment
+PDC_2 <- plogis(rnorm(n_lmtp, 0.2 + 0.5 * L_2))                    # adherence depends on current CD4
 Y_2   <- pmax(Y_1, rbinom(n_lmtp, 1, plogis(-2.5 + 0.5 * PDC_2 + 0.3 * L_2)))
 
-my_data <- data.frame(W0, A0, PDC_1, L_1, Y_1, PDC_2, L_2, Y_2)
+my_data <- data.frame(W0, A0, L_1, PDC_1, Y_1, L_2, PDC_2, Y_2)
 
 # Shift function: increase adherence by 10 percentage points, capped at 1
 shift_up <- function(data, trt) pmin(data[[trt]] + 0.10, 1.0)

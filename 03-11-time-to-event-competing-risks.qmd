@@ -709,7 +709,7 @@ In the SUSTAIN-6 application, continuous-time TMLE gave 7 to 29% efficiency gain
 
 ## Worked Example: Survival TMLE with the ART Cohort {#sec-tte-example}
 
-We use the HIV antiretroviral therapy (ART) cohort from the `ipw` package [@vanderwal2011ipw], the running case study for this handbook. Here we frame a survival analysis: does initiating HAART reduce the risk of death by 2,000 days (about 5.5 years), accounting for confounding by indication and the competing event of dropout?
+We use the HIV antiretroviral therapy (ART) cohort from the `ipw` package [@vanderwal2011ipw], the running case study for this handbook. Here we frame a survival analysis: does initiating HAART reduce the risk of death by 2,000 days (about 5.5 years), accounting for confounding by indication and for dropout, which we treat as censoring in line with the taxonomy above?
 
 ### Setup and Data Preparation
 
@@ -782,7 +782,7 @@ This naive comparison is misleading: confounding by indication, where low CD4 dr
 
 ### Cumulative Incidence with Competing Risks (Aalen-Johansen)
 
-Dropout can be treated as a competing event. The Aalen-Johansen estimator provides cause-specific cumulative incidence functions, but does not adjust for confounding.
+For illustration, we display cumulative incidence with the Aalen-Johansen estimator by provisionally treating dropout as if it were a competing event. This shows the estimator's mechanics, but loss to follow-up is more properly handled as censoring (as in the taxonomy above and in the adjusted IPTW and TMLE analyses that follow), so this view is descriptive only and does not adjust for confounding. @sec-cr-applied works through a genuine competing event.
 
 ```{r}
 #| label: fig-aalen-johansen
@@ -851,6 +851,7 @@ For a doubly robust estimate, we use `survtmle` to target the risk difference at
 #| warning: false
 
 library(survtmle)
+set.seed(2027)   # cross-validated Super Learner nuisance fits; seed for reproducibility
 
 # survtmle requires positive event times; filter patients with time = 0
 haart_pos <- haart_surv |> filter(time > 0)
@@ -892,14 +893,16 @@ For continuous-time survival data, the `concrete` R package avoids discretizatio
 #| warning: false
 
 library(concrete)
+set.seed(2027)   # cross-validated Super Learner nuisance fits; seed for reproducibility
 
 # concrete requires positive event times; filter patients with time = 0
 haart_pos <- haart_surv |> filter(time > 0)
 
-# Format data for concrete
+# Format data for concrete. Treat dropout as censoring (death = 1, everything
+# else = 0), matching the survtmle analysis above and the chapter's taxonomy.
 concrete_data <- data.frame(
   T = haart_pos$time,
-  Delta = haart_pos$event_type,  # 0 = censored, 1 = death, 2 = dropout
+  Delta = ifelse(haart_pos$event_type == 1, 1L, 0L),  # 1 = death; 0 = censored (incl. dropout)
   A = haart_pos$A,
   age = haart_pos$age,
   sex = haart_pos$sex,
@@ -932,7 +935,7 @@ concrete_results <- getOutput(concrete_est)
 print(concrete_results)
 ```
 
-The `concrete` output gives risk estimates under each treatment level at the target time, along with risk differences and risk ratios with influence-curve-based confidence intervals. Compare these to the discrete-time `survtmle` estimates above: both target the same estimand, but `concrete` operates in continuous time.
+The `concrete` output gives risk estimates under each treatment level at the target time, along with risk differences and risk ratios with influence-curve-based confidence intervals. Compare these to the discrete-time `survtmle` estimates above: both now target the same estimand (the risk of death by day 2,000 with dropout treated as censoring), but `concrete` operates in continuous time rather than on a discretized grid.
 
 
 ## Applied Example: Heart Failure Hospitalization with Death as a Competing Event {#sec-cr-applied}
