@@ -42,7 +42,7 @@ knitr::opts_chunk$set(
 
 ---
 
-# Two Ideas, One Goal
+## Two Ideas, One Goal
 
 Two distinct ideas sit underneath modern RWE governance, and they are easy to conflate.
 
@@ -73,7 +73,7 @@ The goal in both cases is the same: an analytic decision made after seeing the t
 
 ---
 
-# The Causal Roadmap, Restated as Stages
+## The Causal Roadmap, Restated as Stages
 
 The Causal Roadmap [@petersen2014causal; @dang2023causal] sets out seven steps for any causal analysis: (1) state the causal question and estimand, (2) characterise the data, (3) assess identifiability, (4) define the statistical estimand, (5) choose a statistical model and estimator with prespecified operating characteristics, (6) specify sensitivity analyses, (7) compare alternative designs by simulation.
 
@@ -108,7 +108,7 @@ This sequencing addresses a limitation of pure preregistration. In practice, RWE
 
 ---
 
-# The `cleanTMLE` Package
+## The `cleanTMLE` Package
 
 `cleanTMLE` [@mertens2026cleantmle] is the R package that operationalises Stages 1a through 4 of this workflow for a binary point exposure, a binary outcome, and the marginal risk-difference estimand. It is the software layer of the clean room. It does not replace target-trial design, fit-for-purpose data review, validation studies, or independent governance, but it produces the reproducible record an external reviewer reads.
 
@@ -122,7 +122,7 @@ library(cleanTMLE)
 The package depends on `survival`, `ggplot2`, `digest`, and (for the SuperLearner library) `SuperLearner` and `glmnet`. The IPCW-TMLE (inverse probability of censoring weighting) path additionally uses the `tmle` package.
 :::
 
-## What the lock fingerprints
+### What the lock fingerprints
 
 `create_analysis_lock()` builds the central object on which every later stage depends. The lock contains:
 
@@ -135,7 +135,7 @@ It then computes a SHA-256 fingerprint over those fields plus the row count, col
 
 The estimand, sensitivity plan, decision thresholds, and audit-log entries live on the lock object but sit outside the fingerprint. They are tracked separately in the audit trail so that any later modification appears as its own entry; the lock hash is reserved for the core analytic specification.
 
-## Three workflow families
+### Three workflow families
 
 The package exposes three families of estimators for the binary-outcome scope:
 
@@ -145,7 +145,7 @@ The package exposes three families of estimators for the binary-outcome scope:
 
 TMLE is the prespecified primary estimator in the staged workflow; the conventional methods are concordance checks.
 
-## The data-quality stress test
+### The data-quality stress test
 
 The feature that sets the package apart is `run_plasmode_dq_stress()`. Standard outcome-blind plasmode selects the candidate with the best baseline RMSE under one locked synthetic outcome mechanism. The DQ stress test re-runs the same loop under four prespecified threat families and produces a **bias-severity curve** for each TMLE candidate: bias, RMSE, and coverage plotted against the severity of the threat.
 
@@ -162,7 +162,7 @@ The stress test supplements a SPIFD2-style [@gatto2023spifd2] fit-for-purpose re
 
 ---
 
-# A Schematic Walkthrough
+## A Schematic Walkthrough
 
 Before the HIV cohort example, here is the package used end to end, so that later code blocks can be read against a concrete sequence of calls. Each call produces a record that the audit trail carries forward, and the outcome column stays masked until the gate authorises Stage 4.
 
@@ -213,7 +213,7 @@ A useful mental check before reading the rest of the chapter: every function abo
 
 ---
 
-# Worked Example: HAART Initiation in the HIV Cohort
+## Worked Example: HAART Initiation in the HIV Cohort
 
 We apply the full staged workflow to the [HIV antiretroviral therapy cohort](00-case-study.qmd) that runs throughout this handbook. The cohort is a simulated registry of 1,200 HIV-positive adults followed from seroconversion, distributed as `haartdat` in the `ipw` package and described at length in the [running case study](00-case-study.qmd).
 
@@ -240,7 +240,7 @@ cat("Initiated HAART:", sum(dat$A), "(", round(100 * mean(dat$A), 1), "%)\n")
 cat("Deaths:          ", sum(dat$Y), "(", round(100 * mean(dat$Y), 1), "%)\n")
 ```
 
-## Stage 0: target trial and event-process classification
+### Stage 0: target trial and event-process classification
 
 The roadmap step that has to happen before any code runs is the target-trial specification [@hernan2016target]. We translate the clinical question into an eligibility window, a set of treatment strategies, a follow-up horizon, and a single primary outcome.
 
@@ -285,7 +285,7 @@ events <- clean_event_process_table(list(
 ))
 ```
 
-## Stage 1a: lock the analytic specification
+### Stage 1a: lock the analytic specification
 
 We sanitise the covariates, fingerprint the analytic specification, and attach the estimand and the prespecified decision rule. The lock is the object every later stage consumes.
 
@@ -339,7 +339,7 @@ print(lock)
 
 The hash is reproducible: any reviewer who reruns `create_analysis_lock()` on the same data with the same arguments gets the same fingerprint. Adding a covariate, expanding the Super Learner library, or even reordering the rows changes the hash.
 
-## Stage 1b: cohort adequacy
+### Stage 1b: cohort adequacy
 
 Before any modelling we confirm the cohort can support the analysis. `checkpoint_cohort_adequacy()` reads only the *pooled* event count and the per-arm sample sizes, never the per-arm event counts, so it cannot expose the crude treatment-outcome association. Design precision depends on the total number of events and the arm sizes, which is all the checkpoint reports. It returns a checkpoint object.
 
@@ -361,7 +361,7 @@ print(cp1)
 
 A `FLAG` here would let the workflow proceed under a documented review; a `STOP` would block authorisation entirely.
 
-## Stage 2a: propensity score, overlap, balance
+### Stage 2a: propensity score, overlap, balance
 
 We estimate the propensity score with a Super Learner on the locked covariate set and check overlap and post-weighting balance before any plasmode work begins.
 
@@ -421,7 +421,7 @@ ggplot(dat, aes(x = ps_hat, fill = factor(A))) +
 
 A weighted standardized mean difference (SMD) of $\le 0.10$ across all three covariates and an ESS above 50 % of $n$ would clear the prespecified balance threshold, and this cohort meets that bar with the simple GLM propensity model.
 
-## Stage 2b: outcome-blind candidate selection
+### Stage 2b: outcome-blind candidate selection
 
 We now compare prespecified TMLE candidates on plasmode-simulated outcomes. Plasmode simulation preserves the real covariate and treatment distributions and generates synthetic outcomes from a parametric model fitted on the cohort. That lets us evaluate bias, RMSE, and coverage against a *known* truth before unmasking the real outcome.
 
@@ -462,7 +462,7 @@ print(selected)
 The PS truncation level is not merely a numerical stabilisation parameter: different truncation thresholds imply different effective target populations. Two candidates with different truncation rules are therefore *paired estimator-and-estimand objects*, and the truncation rule is recorded in the lock alongside the learner library so the estimand-vs-estimator distinction stays auditable [@dang2023causal]. If only candidates with severe truncation pass the operating-characteristic thresholds, the practical conclusion is that the data may not support the original target population and the estimand itself needs revision.
 :::
 
-## Stage 2c: the data-quality stress test
+### Stage 2c: the data-quality stress test
 
 This is the part of the workflow that sets it apart, and the most useful diagnostic to add to a regulatory submission. We re-run the plasmode loop under four prespecified threat families, with severity ranges grounded in the fit-for-purpose review.
 
@@ -515,7 +515,7 @@ Two things to read from a table like this:
 
 The combined verdict (`cp_dq` returns FLAG because the OR 2.0/2.0 unmeasured-confounding scenario breaches the prespecified bias envelope) is exactly the kind of nuanced result the stress test is designed to produce. The candidate is not disqualified, but the reviewer is told *where* the candidate fails and *under which prespecified threat*.
 
-## Stage 3: negative-control outcomes
+### Stage 3: negative-control outcomes
 
 A negative-control outcome (NCO) is a variable that on substantive grounds is not caused by the treatment but shares the same confounding structure. If the analytic pipeline finds a non-null effect on the NCO, the assumption of no unmeasured confounding is suspect (see @sec-advanced-diagnostics).
 
@@ -535,7 +535,7 @@ print(nc)
 
 In a real submission, candidate NCOs for a HAART analysis might include incident injury at a specific anatomic site, or use of a clearly unrelated medication class. Neither should be causally affected by HAART initiation, yet both plausibly share confounders such as healthcare access and clinic attendance.
 
-## The pre-outcome decision
+### The pre-outcome decision
 
 The gate aggregates all checkpoint objects into a single classification and records the result in the audit log. Authorisation then issues a token that the Stage 4 estimators look for.
 
@@ -558,7 +558,7 @@ print(gate)
 
 `FLAG` is not a polite `STOP`. It is a structured instruction to proceed *and* to attach a documented qualification: here, the post-outcome interpretation must explicitly address what the DQ stress test surfaced. The decision log records the rationale; the audit log records the classification. A reviewer reading the dossier sees both.
 
-## Stage 4: the locked primary analysis
+### Stage 4: the locked primary analysis
 
 Only after the gate has issued an authorisation does any function read the observed outcome. `run_clean_tmle()` checks the authorisation, runs the four-step TMLE with the *locked* learner library and truncation rule from Stage 2b, and returns the targeted estimate.
 
@@ -661,7 +661,7 @@ ggplot(results,
   theme_minimal(base_size = 11)
 ```
 
-## Closing out the audit
+### Closing out the audit
 
 The audit and decision logs are exported as tidy data frames suitable for archiving alongside the lock. The dossier the reviewer reads at the end holds the lock, the audit trail, the decision log, the SPIFD2 narrative, the DQ stress-test figure, and the locked primary estimate, in that order.
 
@@ -680,7 +680,7 @@ write.csv(decisions,    "results/hiv_decision_log.csv", row.names = FALSE)
 
 ---
 
-# What the Workflow Does and Does Not Guarantee
+## What the Workflow Does and Does Not Guarantee
 
 It is worth being explicit about what passing the gate establishes. A workflow that returns `GO` shows the following:
 
@@ -701,7 +701,7 @@ The staged workflow turns an analyst's prespecification *from a paper plan into 
 
 ---
 
-# Connections to Other Chapters
+## Connections to Other Chapters
 
 The staged workflow draws on tools developed throughout the handbook:
 
@@ -713,7 +713,7 @@ The staged workflow draws on tools developed throughout the handbook:
 
 ---
 
-# Summary
+## Summary
 
 A staged design enforces the *order* of analytic decisions; a clean-room design adds *role separation* on top of that order. Both arrangements address the same concern: decisions made after seeing the treatment-outcome association are not credible. The `cleanTMLE` package operationalises the software portion of the staged workflow (the lock, the audit trail, the plasmode candidate selector, the data-quality stress test, and the GO / FLAG / STOP decision rule) while leaving target-trial design, fit-for-purpose review, source-data validation, and institutional governance as external responsibilities.
 
@@ -723,7 +723,7 @@ Applied to the HIV antiretroviral therapy cohort, the workflow turned an analyti
 
 ---
 
-# Further Reading
+## Further Reading
 
 - @muntner2024staging, the original "staging and clean room" article in *Pharmacoepidemiology and Drug Safety* introducing the construct, its three review-team verdicts, and the Romiplostim worked example.
 - @dang2023causal, the Causal Roadmap article that sets out the seven-step sequence the staged workflow operationalises.

@@ -27,7 +27,7 @@ knitr::opts_chunk$set(
 
 This chapter is a self-contained workshop, a condensed tour of the full handbook run on the single running case study: the HIV antiretroviral therapy (`haartdat`) cohort. Every method estimates the same effect on the same patients. Each module opens with a short "why this method exists" lead-in, then gives you runnable code, an interpretation of the number in mortality terms, and an exercise with a collapsible worked solution. The full handbook chapters develop each topic in more depth, and cross-references point you there.
 
-## Prerequisites and setup
+### Prerequisites and setup
 
 This workshop assumes **R 4.2 or later**. The code uses the following packages: `tidyverse` (data handling and plotting), `ipw` (the cohort), `SuperLearner` and `tmle` (targeted learning), `lmtp` (modified treatment policies), `ggdag` and `dagitty` (DAGs), and `broom` (tidy model output). The setup chunk below loads them, installing any that are missing, and then loads the shared cohort.
 
@@ -92,7 +92,7 @@ The exercises are inline, each with a collapsible solution right beside it, so y
 
 ---
 
-# Module 1 (~50 min): The Causal Roadmap and identification
+## Module 1 (~50 min): The Causal Roadmap and identification
 
 It is tempting to load the data and start fitting models. The roadmap resists that, because the model you reach for silently decides which question you end up answering. A fixed sequence keeps the scientific question, not the software, in charge. Every causal analysis in this handbook follows the same **seven steps** [@petersen2014causal]:
 
@@ -133,7 +133,7 @@ ggdag(simple_dag, text = FALSE, use_labels = "label") +
   labs(title = "Point-treatment DAG")
 ```
 
-## Identification: three assumptions
+### Identification: three assumptions
 
 Identification (Step 4) is the argument that, under stated assumptions, the unobservable causal effect equals a quantity we can compute from data. Three assumptions do the work. None can be tested from the data alone, so each has to be argued from subject-matter knowledge.
 
@@ -171,11 +171,11 @@ glimpse(haart_baseline)
 
 ---
 
-# Module 2 (~60 min): Point-treatment estimation on the HAART cohort
+## Module 2 (~60 min): Point-treatment estimation on the HAART cohort
 
 This module estimates the same effect, the risk difference in mortality between universal and no HAART initiation, four ways, all on `haart_baseline`. Watching the estimates land close together is the point: it builds trust that the number is a property of the data and the estimand, not of one modeling choice.
 
-## G-computation in three steps
+### G-computation in three steps
 
 **Why it exists.** G-computation is the most direct implementation of the identification formula: model the outcome, predict both counterfactual worlds, then average. It is the natural first estimator because each step maps onto a line of the formula.
 
@@ -196,7 +196,7 @@ cat("G-computation ATE (risk difference):", round(gcomp_ate, 4), "\n")
 
 **Reading the number.** The estimate is a marginal risk difference. A value of about `r round(gcomp_ate, 3)` means that, with the measured confounders held at their observed distribution, the mortality risk under universal HAART initiation is about `r round(abs(gcomp_ate) * 100, 1)` percentage points **lower** than under no initiation. It is negative because HAART is protective. G-computation depends entirely on the outcome model: if $Q$ is wrong, nothing downstream repairs it. The rest of the module works on that vulnerability.
 
-## IPTW: the treatment-model counterpart
+### IPTW: the treatment-model counterpart
 
 **Why it exists.** Instead of modeling the outcome, IPTW models *who got treated* and reweights the sample so that, in the weighted pseudo-population, treatment looks as if it were randomized given $W$ [@robins2000msm]. It depends on the propensity score $g(W)$ rather than the outcome model, so it fails and succeeds under different conditions than g-computation does. That contrast is what motivates combining the two.
 
@@ -233,7 +233,7 @@ tibble(ps = ps, haart = factor(haart_baseline$ever_haart,
 
 **What good overlap looks like** (@fig-sc-overlap): the two densities cover the same range, even if their peaks differ. That is the visual signature of positivity holding. Two curves that barely touch would warn of extreme weights and an unstable estimate. The stabilized IPTW estimate above, about `r round(iptw_ate, 3)`, lands close to the g-computation value, an early sign that the number is a property of the data rather than of one modeling choice. We keep IPTW brief here, since @sec-iptw covers it in full. Its job in this workshop is to set up the doubly robust methods next.
 
-## TMLE by hand
+### TMLE by hand
 
 **Why it exists.** G-computation trusts the outcome model; IPTW trusts the treatment model. TMLE uses *both* and is **doubly robust** [@vanderLaan2006tmle]: it stays consistent if either one is correct. It starts from the g-computation outcome model and adds one targeting step.
 
@@ -269,7 +269,7 @@ cat("TMLE ATE (by hand):", round(tmle_ate, 4), "\n")
 
 The fluctuation parameter $\hat{\epsilon}$ (here `r round(epsilon, 3)`) measures how much the treatment model had to correct the outcome model. A value near zero means the initial outcome model was already well-calibrated for the ATE.
 
-### Inference from the efficient influence curve
+#### Inference from the efficient influence curve
 
 **Why it exists.** A point estimate without a standard error cannot support a decision. TMLE's standard error comes from the **efficient influence curve**. Each patient contributes one number, and the estimate behaves like the average of those numbers. So its standard error is the spread of the per-patient contributions divided by $\sqrt{n}$, and a few patients with extreme contributions (typically those with extreme propensity scores) are what widen the interval.
 
@@ -288,7 +288,7 @@ cat("ATE:", round(tmle_ate, 4),
 
 **Reading the standard error:** think of it as the standard deviation of one number per patient, divided by $\sqrt{n}$. Most patients contribute a value near zero and barely move the estimate; a handful with extreme propensity scores contribute large values and set the width of the interval. If the confidence interval excludes zero, there is evidence at the 95% level that HAART changes mortality risk.
 
-## Software TMLE and a by-hand check
+### Software TMLE and a by-hand check
 
 The `tmle` package automates all four steps. Run it on the same data and we can confirm the by-hand mechanics.
 
@@ -316,7 +316,7 @@ cat("Package TMLE ATE: ", round(fit$estimates$ATE$psi, 4),
 
 The two estimates match closely. The small differences come from the Super Learner library the package uses for the nuisance fits, versus the single GLM we used by hand.
 
-## Super Learner: flexible nuisances in one orientation paragraph
+### Super Learner: flexible nuisances in one orientation paragraph
 
 The code above fit the outcome and treatment models with `glm`, which assumes the relationships are linear on the logit scale. When they are not, both nuisance estimates are biased and so is the causal estimate. **Super Learner** [@vanderLaan2007superlearner] replaces a single guessed model with a library of candidate algorithms (for example a logistic regression, a spline model, and a random forest) and uses cross-validation to weight them by how well each predicts data it did not see. In large samples the ensemble is about as accurate as the best candidate in the library, without you having to know in advance which one that is. Super Learner estimates the nuisance models and TMLE does the targeting on top, swapped in through the `Q.SL.library` and `g.SL.library` arguments above. @sec-superlearner covers it in full.
 
@@ -353,9 +353,9 @@ cat("With SL.glmnet:    ", round(fit_sl$estimates$ATE$psi, 4),
 
 ---
 
-# Module 3 (~60 min): Longitudinal causal inference and treatment-confounder feedback
+## Module 3 (~60 min): Longitudinal causal inference and treatment-confounder feedback
 
-## Why standard regression breaks
+### Why standard regression breaks
 
 In the real cohort, CD4 is measured at every visit and drives the decision to start HAART, but HAART *also raises CD4*. So CD4 at a later visit is at once a **confounder** of future treatment and a **consequence** of past treatment. This is **treatment-confounder feedback** (@fig-sc-long-dag), the defining feature of the dataset.
 
@@ -390,7 +390,7 @@ ggdag(long_dag, text = FALSE, use_labels = "label") +
 
 Here is the conceptual crux. To estimate the effect of treatment at the **second** visit, we *must* condition on CD4 measured before it: CD4 there is a confounder of the second treatment decision, and conditioning on it deconfounds that decision. But CD4 at that visit is itself a **consequence** of treatment at the **first** visit. So if we also condition on it when estimating the effect of the *first* treatment, we block the very pathway (HAART raises CD4, higher CD4 lowers death) through which the first treatment helps, throwing away part of the effect we are trying to measure. A single pooled regression has to make one choice for CD4 and apply it everywhere, so it cannot both deconfound the later decision and preserve the earlier mediated effect. Adjust for time-varying CD4 and you block the mediated benefit; leave it out and you keep the confounding. Neither is right, which is why feedback requires g-methods rather than one regression.
 
-## Longitudinal g-computation by hand
+### Longitudinal g-computation by hand
 
 We resolve the feedback with a **backwards sequential regression**: at the later time, condition on CD4 to deconfound; at the earlier time, do *not* condition on CD4, so its role as a mediator is preserved.
 
@@ -466,9 +466,9 @@ Time-varying CD4 plays two incompatible roles. For the *later* treatment decisio
 
 ---
 
-# Module 4 (~50 min): Realistic interventions with `lmtp`, plus diagnostics
+## Module 4 (~50 min): Realistic interventions with `lmtp`, plus diagnostics
 
-## Why modified treatment policies exist
+### Why modified treatment policies exist
 
 Static regimes like "treat everyone" or "treat no one" often violate positivity: there may be no data on what happens when a patient who would essentially never be treated is treated anyway, so the estimate has to extrapolate. A **modified treatment policy** [@diaz2021lmtp; @haneuse2013mtp] changes treatment by a feasible amount relative to what each patient would naturally have received, for example "shift each patient's adherence up by 10 percentage points." Because every shifted value stays within the observed support (no one is pushed to an impossible level), the intervention respects positivity where "treat everyone" does not. The `lmtp` package estimates such policies for longitudinal data.
 
@@ -547,7 +547,7 @@ contrast
 
 The `shift_up` function defines the intervention: raise each patient's adherence by 10 points at each visit, capped at 1.0. The `mtp = TRUE` flag tells `lmtp` that the shifted value depends on the patient's natural treatment value, which is what makes it a *modified* treatment policy rather than a static one. The contrast reports the additive difference in the survival-scale outcome between the shifted world and the natural course, with a confidence interval. In a real analysis you would read it as the change in survival from nudging adherence up by 10 points. Because this is a teaching simulation with arbitrary coefficients, the sign and magnitude here carry no clinical meaning; only the machinery does. @sec-applied-lmtp gives the full applied workflow on the real cohort.
 
-## Diagnostics: positivity, worked
+### Diagnostics: positivity, worked
 
 **Why it exists.** Every estimator in this workshop assumes positivity. The fastest check is to look at the propensity scores: if they pile up near 0 or 1, some covariate strata have essentially no comparison patients, and the estimand is poorly supported there. Here is that check on the real HAART propensity scores from Module 2 (@fig-sc-positivity).
 
@@ -586,7 +586,7 @@ A **larger** shift (20 points) intervenes more aggressively, so the expected eff
 
 ---
 
-# Wrap-up
+## Wrap-up
 
 You have now estimated one effect on one cohort with g-computation, IPTW, and TMLE, seen why time-varying confounding needs g-methods, set up a realistic modified-treatment-policy intervention, and run the positivity diagnostic. The threads connect because they all run on the same HAART data.
 
@@ -595,7 +595,7 @@ You have now estimated one effect on one cohort with g-computation, IPTW, and TM
 Every exercise has its worked solution in a collapsible block right next to it, not collected at the end. Attempt the exercise first, then expand the solution to check your reasoning while the context is fresh.
 :::
 
-## Where to go next
+### Where to go next
 
 Each module above is a doorway into a part of the full handbook. The most direct continuations are these.
 

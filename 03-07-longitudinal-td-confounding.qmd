@@ -32,11 +32,11 @@ knitr::opts_chunk$set(
 )
 ```
 
-## Why Longitudinal Treatments Are Different
+### Why Longitudinal Treatments Are Different
 
 Parts I and II dealt with point-treatment settings. Real clinical care is not so tidy. Patients start medications, clinicians monitor their health, and treatment gets adjusted in response to what the monitoring shows. That loop, treatment shaping health and health shaping the next treatment decision, repeats at every clinic visit, and it is what makes the longitudinal problem harder than the point-treatment case. This chapter explains why time-varying confounding affected by prior treatment breaks standard regression, lays out the identification assumptions, and previews the two estimation approaches developed in the next two chapters, L-TMLE and LMTP.
 
-## Treatment-confounder feedback in the HIV cohort
+### Treatment-confounder feedback in the HIV cohort
 
 Suppose we want the effect of sustained antiretroviral therapy (ART) on virologic failure over two years in an HIV cohort. At each visit, the clinician measures CD4 cell count and weighs it against adherence support and side-effect tolerance before deciding whether to continue or modify therapy. CD4 wears two hats at once. It is a **confounder** for future treatment, since low CD4 prompts more aggressive intervention and also predicts virologic failure, and it is a **mediator** of past treatment, since ART raises CD4 by suppressing viral replication. The DAG makes this explicit.
 
@@ -100,7 +100,7 @@ cat("Direct-effect-only A1 coefficient (logit scale):     ", round(coef(naive_mo
 The regression that conditions on CD4 recovers only the *direct* effect of ART: its $A_1$ coefficient sits near 0.4, the direct structural parameter, and the standardized risk difference it implies falls short of the true total effect. Conditioning on $L_1$ holds the mediator fixed, so the part of the effect that runs through CD4 recovery is discarded. This is structural bias, not sampling noise. It persists at any sample size, because the problem is which pathway the model blocks, not how much data we have.
 
 
-# The HIV Cohort: Our Running Example
+## The HIV Cohort: Our Running Example
 
 CD4 count is the canonical time-dependent confounder in the HIV literature [@petersen2007msm; @vanderwal2011ipw], and we will return to it throughout the next several chapters. Building on the toy two-period DAG above, here is the clinical question we are working toward:
 
@@ -121,11 +121,11 @@ At each visit, CD4 is measured first, then adherence is recorded, then we check 
 ART adherence at visit $t-1$ improves CD4 at visit $t$. Higher CD4 may in turn reduce clinical urgency and change adherence decisions, and CD4 also directly affects virologic failure risk. This is the same feedback structure as the toy two-period example above, scaled up to many time points.
 
 
-# Why Standard Regression Fails
+## Why Standard Regression Fails
 
 We have already seen the problem in the two-period HIV example, but it is worth spelling out precisely what goes wrong and why.
 
-## The treatment--confounder feedback loop
+### The treatment--confounder feedback loop
 
 When a time-varying covariate $L_t$ is (1) affected by prior treatment $A_{t-1}$ and (2) confounds the relationship between $A_t$ and $Y$, we say there is **treatment--confounder feedback**. In HIV, CD4 count satisfies both conditions: ART raises CD4, and CD4 predicts both future adherence decisions and virologic failure.
 
@@ -150,11 +150,11 @@ ggdag(dag_hiv, text = FALSE, use_labels = "label", text_size = 2.8) +
   theme_dag()
 ```
 
-## The dilemma
+### The dilemma
 
 A standard regression model, whether logistic, Cox, or GEE, faces a lose-lose choice. Adjust for $L_t$ and you block the causal pathway $A_{t-1} \to L_t \to Y$. Omit $L_t$ and you leave $A_t$ confounded. No regression specification manages to deconfound future treatment and preserve the mediated effect of past treatment at the same time.
 
-## Seeing the dilemma step by step
+### Seeing the dilemma step by step
 
 The following DAG panels isolate each component using a simplified two-period version of the HIV DAG.
 
@@ -245,7 +245,7 @@ draw_dag_step <- function(highlight_pairs = list(),
 }
 ```
 
-### Step 1: The full causal structure
+#### Step 1: The full causal structure
 
 ```{r}
 #| label: fig-dag-step1
@@ -256,7 +256,7 @@ draw_dag_step <- function(highlight_pairs = list(),
 draw_dag_step(highlight_pairs = list())
 ```
 
-### Step 2: Why adjusting for $L_1$ fails
+#### Step 2: Why adjusting for $L_1$ fails
 
 Conditioning on $L_1$ (shown by the box around the node) blocks the confounding paths $L_1 \to A_2$ and $L_1 \to Y$, which is what we want. But it *also* blocks the causal mediated path $A_1 \to L_1 \to Y$, which we wanted to keep open. The edge $L_1 \to Y$ sits on *both* paths at once: it is part of the confounding problem and part of the causal effect we are trying to estimate. That double duty is why no regression specification can solve both problems at once.
 
@@ -342,7 +342,7 @@ ggplot(dag_ch_df, aes(x = x, y = y)) +
   theme_dag(base_size = 14)
 ```
 
-### Step 3: The feedback loop
+#### Step 3: The feedback loop
 
 The reason $L_1$ is both a confounder and a mediator is the **feedback loop**: $A_1 \to L_1 \to A_2$. Prior treatment affects the time-varying confounder, which in turn affects future treatment.
 
@@ -364,12 +364,12 @@ draw_dag_step(
 
 g-methods (G-computation, IPTW, L-TMLE) get around this by integrating over the distribution of $L_1$ under the hypothetical intervention rather than conditioning on it.
 
-## What about GEE, mixed models, or covariate-adjusted regression?
+### What about GEE, mixed models, or covariate-adjusted regression?
 
 GEE, mixed models, and covariate-adjusted regression all condition on time-varying covariates the same way standard regression does, so none of them escape the treatment--confounder feedback problem. GEE and mixed models handle within-subject correlation, but correlation is a separate issue from the causal structure of feedback. A regression that omits time-varying covariates sidesteps the mediator-blocking problem, but it then targets a different estimand: a regression oracle that never integrates over the interventional distribution of $L_t$. When feedback is weak, that oracle can happen to agree with the causal truth, but the agreement falls apart once feedback is strong. One useful diagnostic is to ask what each method converges to under infinite data. If the regression oracle differs from the G-computation oracle, the two methods are estimating fundamentally different quantities.
 
 
-# Counterfactual Notation for Longitudinal Interventions
+## Counterfactual Notation for Longitudinal Interventions
 
 To formalize the causal question, we need notation for hypothetical treatment sequences.
 
@@ -386,7 +386,7 @@ $$
 where $Y(\bar{1})$ is the virologic failure probability if everyone had maintained high adherence at every visit, and $E[Y]$ is simply the mean outcome under the adherence patterns actually observed. That second term is a feature of the observed data, so it needs no potential-outcome notation. The two-period demonstration earlier in this chapter contrasted always-adhere with never-adhere rather than with the observed pattern, an all-or-nothing comparison that makes the mediated part of the effect easier to see.
 
 
-# Identification Assumptions
+## Identification Assumptions
 
 The potential outcome $Y(\bar{a})$ is a counterfactual quantity. To estimate it from observed data, we need assumptions that bridge what we observe and what would have happened under a hypothetical intervention. In the longitudinal setting, the familiar point-treatment assumptions have to hold at every time point rather than just once.
 
@@ -409,7 +409,7 @@ If some patient subgroups essentially never achieve high adherence (for example,
 All three assumptions are harder to satisfy in the longitudinal setting. [Sequential exchangeability](glossary.qmd) must hold at every visit, and positivity must hold for every covariate history. This is a large part of why stochastic regimes, which relax the positivity requirement, are often preferred over deterministic "always treat" regimes.
 
 
-# Why g-methods Are Needed
+## Why g-methods Are Needed
 
 Under the assumptions above, the causal quantity $E[Y(\bar{a})]$ can be expressed as a function of the observed data distribution through the **G-computation formula** [@robins1986gformula; @hernan2025whatif]:
 
@@ -430,15 +430,15 @@ The three main g-methods were each introduced for the point-treatment case in @s
 IPTW was historically the first approach applied to HIV data [@robins1994estimation; @robins2000msm], but it grows unstable as the number of visits climbs, because the weights are products of time-specific inverse probabilities and those products can become enormous. Longitudinal TMLE and LMTP tame this instability by using substitution estimators with targeting steps.
 
 
-# Preview of L-TMLE and LMTP
+## Preview of L-TMLE and LMTP
 
 The next two chapters develop two estimation approaches in detail, each suited to a different type of causal question.
 
-## L-TMLE for standard longitudinal interventions
+### L-TMLE for standard longitudinal interventions
 
 @sec-illustrated-ltmle introduces **longitudinal TMLE (L-TMLE)**, which runs the TMLE "model, then target" cycle backwards through time. At each step it conditions on $L_t$ to deconfound future treatment, then integrates $L_t$ out in the backwards regression so the mediated effect of past treatment survives. The `ltmle` R package implements this procedure.
 
-## LMTP for realistic adherence interventions
+### LMTP for realistic adherence interventions
 
 @sec-adherence-shift presents the **LMTP framework** (longitudinal modified treatment policies), which defines interventions in which the hypothetical treatment depends on the patient's natural treatment value. This includes stochastic shifts that sidestep the positivity problems baked into deterministic regimes. The `lmtp` R package implements this framework.
 
@@ -446,13 +446,13 @@ Both approaches build on the identification assumptions in this chapter. L-TMLE 
 
 For a detailed treatment of realistic adherence interventions and how LMTP addresses the positivity limitations of static regimes, see the [adherence chapter](03-03b-adherence-shift-methods.qmd).
 
-## What comes next
+### What comes next
 
 The next chapter walks through L-TMLE step by step using a two-time-point HIV cohort example with the `ltmle` package.
 
 ---
 
-## Check your understanding
+### Check your understanding
 
 <details>
 <summary><strong>Q1. Why can't you simply add time-varying confounders as covariates in a Cox regression when those confounders are affected by prior treatment?</strong></summary>
@@ -471,7 +471,7 @@ Ordinary (point-treatment) exchangeability requires that treatment is unconfound
 
 ---
 
-## Sources and further reading
+### Sources and further reading
 
 - [@robins1994estimation]: foundational paper on marginal structural models and IPTW for time-varying treatments.
 - [@petersen2007msm]: targeted TMLE estimation for dynamic and static longitudinal marginal structural working models.

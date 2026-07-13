@@ -26,7 +26,7 @@ logit <- function(p) log(p / (1 - p))
 ```
 
 
-# Setup: simulated data
+## Setup: simulated data
 
 We use the same two-time-point HIV cohort [@vanderwal2011ipw] as the [conceptual L-TMLE chapter](03-09-illustrated-ltmle.qmd). The data encodes treatment-confounder feedback. ART adherence at visit 1 ($A_1$) raises CD4 ($L_1$), which in turn affects visit-2 adherence ($A_2$) and virologic failure ($Y$).
 
@@ -65,7 +65,7 @@ cat("True E[Y^(1,1)]:", round(true_EY_11, 4), "\n")
 ```
 
 
-# Phase A: Estimate the treatment mechanisms
+## Phase A: Estimate the treatment mechanisms
 
 At each time point, estimate the probability of receiving treatment conditional on the observed history.
 
@@ -91,9 +91,9 @@ cat("Cumulative g range:", round(range(g_cumulative), 3), "\n")
 3. Under "always adhere," the joint regime probability factors as $P(A_1=1 \mid W) \times P(A_2=1 \mid A_1=1, L_1, W)$ by the chain rule for sequential treatments. Small values here flag near-positivity violations: observations who would very rarely follow the full target regime.
 
 
-# Phase B: Sequential outcome regression (backwards)
+## Phase B: Sequential outcome regression (backwards)
 
-## Step 2a: Model the final outcome
+### Step 2a: Model the final outcome
 
 Fit $E[Y \mid A_2, L_1, A_1, W]$, conditioning on $L_1$ to deconfound $A_2$. Then predict under $A_2 = 1$.
 
@@ -103,7 +103,7 @@ Q2_A2is1 <- predict(Q2_mod, newdata = dat %>% mutate(A2 = 1), type = "response")
 cat("Q2(A2=1) range:", round(range(Q2_A2is1), 4), "\n")
 ```
 
-## Step 2b: Move backwards (the critical step)
+### Step 2b: Move backwards (the critical step)
 
 Regress the time-2 predictions on $(A_1, W)$ only, **without** conditioning on $L_1$. This integrates $L_1$ out and so preserves the mediated effect of $A_1$ through $L_1$. This backwards, sequential-regression construction is due to @bang2005doubly.
 
@@ -117,11 +117,11 @@ cat("True E[Y^(1,1)]:                  ", round(true_EY_11, 4), "\n")
 This is longitudinal G-computation [@hernan2025whatif]. It leans on every model being correctly specified. The targeting steps below add robustness.
 
 
-# Phase C: Targeting for double robustness
+## Phase C: Targeting for double robustness
 
 The targeting steps below implement the longitudinal TMLE algorithm of @vanderLaan2012ltmle: working backwards from the last time point, each initial outcome model is fluctuated along its clever covariate so that the empirical mean of the efficient influence curve is driven to zero.
 
-## Target at time 2
+### Target at time 2
 
 The clever covariate at time 2 is the inverse cumulative probability of following the full regime:
 
@@ -147,7 +147,7 @@ cat("Epsilon at time 2:", round(eps2, 5), "\n")
 
 The coefficient $\hat{\epsilon}_2$ measures how much the initial outcome model needs correcting. When it comes out near zero, the initial fit already sat close to where the causal estimand needs it.
 
-## Target at time 1
+### Target at time 1
 
 ```{r}
 Q1_mod_updated <- glm(Q2_star ~ A1 + W, family = quasibinomial, data = dat)  # <1>
@@ -166,7 +166,7 @@ cat("Epsilon at time 1:", round(eps1, 5), "\n")
 2. `quasibinomial` is needed because `Q2_star` is a continuous probability in $(0,1)$, not 0/1. It keeps the logit link and binomial variance function but allows overdispersion $> 1$, which makes it valid for fractional pseudo-outcomes.
 3. The update applies $\hat{\epsilon}_1$ to `Q1_under_a1`, the *counterfactual* prediction at $A_1 = 1$, not the observed-treatment prediction. The sample mean of `Q1_star` is the L-TMLE estimate $\hat{E}[Y^{(1,1)}]$.
 
-# The final L-TMLE estimate
+## The final L-TMLE estimate
 
 ```{r}
 ltmle_est_11 <- mean(Q1_star)
@@ -192,7 +192,7 @@ Its three pieces are the time-2 residual $H_2\,(Y - Q_2^{*})$, the time-1 projec
 :::
 
 
-# Comparing estimators
+## Comparing estimators
 
 All estimators fit simple main-terms GLMs for both the outcome and treatment models, and here those outcome models are in fact correctly specified for $Y$. The naive plug-in still misses the truth, but not because of finite-sample noise: it standardizes over the *observed* $L_1$ distribution rather than the $L_1$ distribution induced by forcing $A_1 = 1$. In this data-generating process $L_1$ shifts upward with $A_1$ (each unit of adherence adds $1.2$ to the mean of $L_1$), and higher $L_1$ lowers the failure rate, so fixing $L_1$ at its observed, lower values biases the naive estimate upward. G-computation and L-TMLE avoid this by propagating the intervention through the backwards regression that integrates $L_1$ out under $A_1 = 1$; the small residual gap that remains for those estimators is the finite-sample piece that a richer Super Learner library [@vanderLaan2007superlearner] would shrink. Because the naive point estimate is biased, its influence-curve confidence interval is only nominally valid: correctly sized error bars drawn around the wrong center, so its coverage of the true value is poor.
 
@@ -271,7 +271,7 @@ ggplot(plot_df, aes(x = Estimate, y = factor(Method, levels = rev(plot_df$Method
 ```
 
 
-# Sequential double robustness
+## Sequential double robustness
 
 At each time point, L-TMLE is consistent if either the outcome model or the treatment model is correctly specified:
 
@@ -286,7 +286,7 @@ At each time point, L-TMLE is consistent if either the outcome model or the trea
 : Sequential double robustness of two-time-point L-TMLE: consistency holds if, at each time point, either the outcome model or the treatment model is correct [@vanderLaan2012ltmle]. {#tbl-sequential-dr}
 
 
-# Scaling to T time points
+## Scaling to T time points
 
 With $T$ time points, the same pattern applies:
 
@@ -299,7 +299,7 @@ With $T$ time points, the same pattern applies:
 Each backwards step conditions on $L_t$ where it confounds future treatment, and integrates it out where it mediates past treatment.
 
 
-## Sources
+### Sources
 
 - [@petersen2014causal]: targeted TMLE for dynamic and static longitudinal marginal structural working models.
 - [@diaz2021lmtp]: lmtp R package and modified treatment policy framework.

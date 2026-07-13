@@ -20,7 +20,7 @@ library(tidyverse)
 ```
 
 
-# What this chapter is about
+## What this chapter is about
 
 Earlier chapters introduced longitudinal TMLE for static interventions ("always maintain high adherence") and LMTP (longitudinal modified treatment policy) for modified treatment policies. Here we bring those tools to bear on a clinically important question: how do two antiretroviral drugs compare once we account for realistic adherence patterns? The focus is the adherence- and forgiveness-specific shift methods. For the full end-to-end LMTP workflow on a dynamic treatment rule, from question to estimate, see @sec-applied-lmtp.
 
@@ -58,7 +58,7 @@ data.frame(
 ```
 
 
-# The clinical question
+## The clinical question
 
 Consider two antiretroviral regimens for HIV treatment:
 
@@ -76,7 +76,7 @@ This question requires separating three components:
 Each component calls for longitudinal causal methods, because adherence and health co-evolve over time [@petersen2006msm].
 
 
-# Why this needs a causal method
+## Why this needs a causal method
 
 Adherence is measured after treatment starts, changes over time, and sits in a feedback loop with health [@rosenblum2009virologic]. Worse health lowers adherence through side effects and complications. Lower adherence worsens virologic control. Worse control feeds back into health, which shapes the next period's adherence. So the variable that confounds the adherence-to-failure relationship, current health status $L_t$, is at the same time a *consequence* of past adherence (@fig-adherence-dag).
 
@@ -108,7 +108,7 @@ flowchart LR
 Here is the dilemma that defeats ordinary regression. Condition on observed adherence and you adjust for the health-status confounding, but you also block the adherence effect you want to measure, because that effect runs through health. Leave health out of the model and the confounding stays in place. No single regression can do both. This is the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it is why estimating a forgiveness curve needs the g-methods developed there.
 
 
-# The data-generating process
+## The data-generating process
 
 The simulation generates longitudinal data in 90-day blocks (K = 3 blocks). The DGP builds in treatment-confounder feedback: poor adherence worsens health (higher L), and worse health reduces future adherence. Drug assignment is confounded by baseline severity, since sicker patients are channeled toward Drug A. That confounding by indication is the study's primary scenario, and setting `kappaW = 0` recovers a randomized trial. Drug A is more forgiving at low adherence levels, encoded through a drug-by-adherence interaction in the failure hazard.
 
@@ -238,7 +238,7 @@ dat |>
 
 Read this table as a description of the observed cohort, not as a forgiveness estimate. Taken at face value, Drug B looks like the better regimen: its patients have higher mean adherence and a lower crude failure percentage than Drug A's. That ranking is misleading, and it actually inverts the underlying pharmacology, since Drug A is the more forgiving drug by construction (the `gammaAP = -1.20` interaction). The culprit is confounding by indication. Sicker patients (higher `W0`) are channeled toward Drug A, so the Drug A column is enriched for patients who were always at higher risk and who adhere less well, partly for reasons unrelated to the drug's forgiveness (sicker patients) and partly because Drug A itself modestly lowers adherence (`alphaA`). The two drug groups are not exchangeable, so any crude difference in adherence or failure between the columns mixes the drugs' pharmacology with the difference in who received each drug. The crude cross-drug comparison is confounded and is not the forgiveness estimand. Recovering forgiveness, and watching Drug A's advantage emerge, takes the causal machinery developed below.
 
-# Why naive adherence analysis is biased
+## Why naive adherence analysis is biased
 
 Forgiveness is an **intervention-based estimand**, not a within-stratum association. The question is what the failure risk *would be* if adherence were set to a given level, with health allowed to respond, not what the failure rate happens to be among patients who adhered at that level.
 
@@ -324,7 +324,7 @@ ggplot(oracle, aes(adherence, risk, color = Drug)) +
 The solid lines are the causal forgiveness curves: the failure risk that would obtain if adherence were set to each level, with health allowed to respond. The open points are the crude failure rates among patients whose observed average adherence fell in each bin. Within each drug, the crude points tend to lie above the causal curve at low adherence and below it at high adherence, because low-adherence patients are sicker for reasons the crude comparison charges to adherence. So the crude comparison overstates the cost of poor adherence and understates the benefit of good adherence, exactly the bias the feedback loop predicts. This within-drug gap is treatment-confounder feedback, a separate issue from the confounding by indication that distorts the cross-drug comparison. Reading each drug's curve against its own crude points keeps the two from being conflated.
 
 
-# Two estimands, and the estimator each one needs
+## Two estimands, and the estimator each one needs
 
 The forgiveness question can be made precise in two ways, and they call for different estimators.
 
@@ -365,11 +365,11 @@ data.frame(
 Only a handful of patients sustain an extreme adherence band across all three blocks, so the static forgiveness-curve estimate rests on almost no data at the ends and is fragile there. This is why the feasible shift, which stays near the observed distribution, is preferred. The longitudinal positivity diagnostic in @sec-positivity-overlap is the general version of this check. A feasible shift sidesteps the problem, and that is the motivation for the LMTP approach below.
 
 
-# LMTP estimation
+## LMTP estimation
 
 We now code the estimators themselves. One estimand, the feasible shift, is fit live below so the reader sees a concrete estimate. The heavier study-grade fits (the static regime, the cross-regimen risk difference, and the quantile shift) appear as `#| eval: false` reference code. Throughout, `lmtp`'s survival mode returns $P(\text{survival})$, so the failure risk is $1 - \text{estimate}$, and a contrast on that scale is a difference in survival probability.
 
-## Shared setup
+### Shared setup
 
 A single small chunk fixes the node names and the learner library shared by every fit. The study fits with the cross-fitted `lmtp_tmle` (or the sequentially doubly robust `lmtp_sdr`), both with the same learner-agnostic library. `SL.earth` (MARS) is what lets the fit discover the drug-by-adherence interaction without being told it is there.
 
@@ -391,7 +391,7 @@ learners <- c("SL.mean", "SL.glm", "SL.earth")
 learners_fast <- c("SL.mean", "SL.glm")   # lighter library for the rendered fit below
 ```
 
-## Static regime: a point on the forgiveness curve
+### Static regime: a point on the forgiveness curve
 
 A static intervention sets PDC to a fixed level at every block. Fitting it on one drug's patients gives one point on that drug's forgiveness curve.
 
@@ -416,7 +416,7 @@ fit_static_A <- lmtp_tmle(
 
 Sweeping the fixed value over a grid traces the whole forgiveness curve, which is the static regime's strength. Its weakness is positivity, and it bites hardest at sustained extreme adherence. The support for "low every block" (or "near-perfect every block") thins as the horizon K grows, so the ends of the curve rest on little data. That is what motivates the feasible shift.
 
-## Feasible capped additive shift
+### Feasible capped additive shift
 
 The study's canonical bounded MTP raises each patient's PDC by a small `delta`, but only when the result stays under a `cap`, so no probability mass piles up at PDC = 1.
 
@@ -479,7 +479,7 @@ You can also confirm that the cap kept the density ratios bounded rather than as
 summary(fit_shift$density_ratios)
 ```
 
-## Cross-regimen risk difference: the forgiveness estimand
+### Cross-regimen risk difference: the forgiveness estimand
 
 The manuscript's headline quantity is a cross-regimen risk difference, a *joint* intervention that sets the drug and applies the adherence regime at once. The pattern prepends `A0` as the first treatment node, uses the single absorbing binomial outcome `Y_final` (so the estimate is the failure risk directly), and fits both drug arms on the *same* patients so their influence functions align before contrasting.
 
@@ -510,7 +510,7 @@ lmtp_contrast(fit_A, ref = fit_B, type = "additive")
 
 This cross-regimen RD is the forgiveness estimand. It asks how much the failure risk differs between drugs when both are held to the same adherence regime. That is a different question from a shift-versus-natural contrast within a single arm, `lmtp_contrast(fit_shift, ref = fit_natural, type = "additive")`, which answers the policy question "what would a universal +5pp adherence program achieve?". For a static-regime RD, swap the arm's adherence rule for `make_static_pdc_shift(value)` on the PDC nodes (keeping `mtp = TRUE`).
 
-## Quantile shift: what if Drug B adhered like Drug A?
+### Quantile shift: what if Drug B adhered like Drug A?
 
 The quantile shift maps each from-drug patient's PDC to the matching quantile of the to-drug's PDC, block by block, so a patient at the 30th percentile of one drug's adherence moves to the 30th percentile of the other's.
 
@@ -542,7 +542,7 @@ make_quantile_match_shift <- function(df, from_drug, to_drug, K = 3) {
 Informally, the quantile shift separates a real-world-effectiveness comparison (drugs as actually adhered to) from an adherence-controlled forgiveness comparison (drugs held to a common adherence profile). Think of it as an ICH-E9-style distinction between effectiveness and a more mechanism-focused estimand, not a formal mediation decomposition.
 
 
-# The forgiveness curve
+## The forgiveness curve
 
 The forgiveness curve maps sustained adherence level to counterfactual failure risk for each drug:
 
@@ -557,7 +557,7 @@ Static-regime L-TMLE traces this curve by estimating the failure risk at a grid 
 The curve is well-estimated only where positivity is adequate, and positivity is weakest at the extremes. Sustaining a low adherence level across all K = 3 blocks is a conjunction over blocks, so the supporting data thin as the horizon grows and the ends of the curve become unstable. LMTP shift interventions dodge this problem by staying close to the observed distribution.
 
 
-# Interpretation
+## Interpretation
 
 **Feasible, not hypothetical.** The capped +5pp shift corresponds to something a real adherence support program might achieve, so the estimate answers a concrete policy question.
 
@@ -568,12 +568,12 @@ The curve is well-estimated only where positivity is adequate, and positivity is
 **Read the shift estimate alongside the static curve, not alone.** Under positivity strain the variance of the LMTP shift estimator can be underestimated and its interval can under-cover. Trust the feasible-shift number most when it sits next to the static-regime estimates and the support diagnostics above, rather than standing alone.
 
 
-# Connection to mediation
+## Connection to mediation
 
 The quantile-matching analysis gives an informal decomposition of the total drug effect into an adherence-mediated component and a pharmacological (forgiveness) component. It is not formal mediation analysis, but an approximation based on distribution shifts. For the formal TMLE-based mediation framework with proper identification conditions, see @sec-mediation.
 
 
-## Sources and further reading
+### Sources and further reading
 
 - [@diaz2021lmtp; @williams2025lmtp]: lmtp R package and the LMTP framework for modified treatment policies.
 - [@haneuse2013mtp]: original modified treatment policy framework.
