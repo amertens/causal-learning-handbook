@@ -30,7 +30,7 @@ IPTW weights are constructed from the propensity score:
 - For treated:  \( \displaystyle w_i = \frac{1}{g(W_i)} \)
 - For control: \( \displaystyle w_i = \frac{1}{1 - g(W_i)} \)
 
-The propensity score is a **balancing score**: conditioning on it is sufficient to remove confounding by all measured covariates $W$. This is why a single scalar summary can replace adjustment for many covariates.
+The propensity score is a **balancing score**: conditioning on it balances the measured covariates $W$ across treatment groups just as conditioning on $W$ itself would, so it removes confounding by those covariates only under the separately assumed exchangeability given $W$. This is why a single scalar summary can replace adjustment for many covariates.
 :::
 
 ---
@@ -61,7 +61,7 @@ This is a **Horvitz-Thompson type** estimator: it has the same structure as the 
 
 # Data Example
 
-We use the HIV antiretroviral therapy cohort from `_data/load-haart-cohort.R` [@vanderwal2011ipw], the same dataset used throughout the handbook: ever initiating HAART (`ever_haart`, A=1) vs never initiating HAART (A=0) for mortality (`died`), with confounding by age, sex, and baseline CD4 count (`cd4_sqrt_baseline`).
+We use the HIV antiretroviral therapy cohort from `_data/load-haart-cohort.R` [@vanderwal2011ipw], the same dataset used throughout the handbook: ever initiating highly active antiretroviral therapy (HAART) (`ever_haart`, A=1) vs never initiating HAART (A=0) for mortality (`died`), with confounding by age, sex, and baseline CD4 count (`cd4_sqrt_baseline`).
 
 ```{r}
 #| interactive: true
@@ -102,6 +102,8 @@ dat %>%
 We can visualize the propensity score distribution.
 
 ```{r}
+#| label: fig-ps-overlap
+#| fig-cap: "Estimated propensity score densities for the treated (HAART) and untreated groups. Substantial overlap across the range of scores is what good positivity looks like."
 #| interactive: true
 #| code-fold: true
 ggplot(dat, aes(x = ps, fill = factor(ever_haart))) +
@@ -118,7 +120,7 @@ ggplot(dat, aes(x = ps, fill = factor(ever_haart))) +
 :::{.callout-important}
 ## Reading the Propensity Score Overlap Plot
 
-In this example, the propensity score distributions for treated and untreated overlap substantially. This is what **good overlap** looks like. The two density curves cover mostly the same range of propensity scores, even though their peaks differ. For most covariate patterns there are both treated and untreated patients, which is exactly what positivity requires.
+In this example (@fig-ps-overlap), the propensity score distributions for treated and untreated overlap substantially. This is what **good overlap** looks like. The two density curves cover mostly the same range of propensity scores, even though their peaks differ. For most covariate patterns there are both treated and untreated patients, which is exactly what positivity requires.
 
 **Bad overlap** looks like two density curves that barely touch, with the treated group concentrated at high propensity scores and the untreated group concentrated at low ones. When this happens:
 
@@ -156,7 +158,7 @@ Keep an eye on
 
 ### Stabilized weights
 
-Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment** [@hernan2025whatif] (the overall proportion of patients who received the treatment they actually received, ignoring covariates). This rescaling brings the weights closer to 1 on average and reduces their variance without affecting consistency for the marginal causal effect.
+Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment** [@hernan2025whatif; @cole2008ipw] (the overall proportion of patients who received the treatment they actually received, ignoring covariates). This rescaling brings the weights closer to 1 on average and reduces their variance without affecting consistency for the marginal causal effect.
 
 For a binary treatment, the stabilized weight for individual $i$ is:
 
@@ -170,10 +172,10 @@ Unstabilized weights create a pseudo-population larger than the original sample,
 
 In epidemiologic practice, stabilized weights are often preferred for the Horvitz-Thompson estimator. The choice is not automatic, though:
 
-- When fitting a **marginal structural model** [@petersen2007msm; @robins1994estimation] (weighted regression with covariates in the numerator), the numerator of the stabilized weight should include those covariates, not just the marginal treatment probability.
+- When fitting a **marginal structural model (MSM)** [@robins2000msm; @petersen2007msm; @robins1994estimation] (weighted regression with covariates in the numerator), the numerator of the stabilized weight should include those covariates, not just the marginal treatment probability.
 - When the **Hajek estimator** (ratio of weighted sums) is used, stabilization leaves the point estimate **unchanged**: multiplying every weight by the constant marginal treatment probability cancels exactly in the self-normalizing ratio. Stabilization still matters for non-self-normalizing (Horvitz-Thompson) forms and for marginal structural model fitting.
 - Unstabilized weights are appropriate when estimating **total counts** of events in the pseudo-population, since stabilization rescales the population size.
-- Always check weight diagnostics (Section 8 below) regardless of whether weights are stabilized.
+- Always check weight diagnostics (see @sec-iptw-diagnostics) regardless of whether weights are stabilized.
 
 ```{r}
 #| interactive: true
@@ -206,7 +208,7 @@ ggplot(dat, aes(sw_ipw, fill = factor(ever_haart, labels = c("No HAART", "HAART"
 
 ---
 
-# Estimating the ATE via IPTW
+# Estimating the Average Treatment Effect (ATE) via IPTW
 
 There are several equivalent ways to use the weights.
 
@@ -290,12 +292,12 @@ G-computation depends on correctly specifying the outcome model $E[Y \mid A, W]$
 
 ---
 
-# Diagnostics and Practical Tips
+# Diagnostics and Practical Tips {#sec-iptw-diagnostics}
 
 
 ### Check propensity score overlap
 
-To assess positivity, plot propensity score densities by treatment group and flag regions where one group is missing or sparse. For example, if elderly patients with prior cardiovascular disease are almost never prescribed the newer drug, you will see a gap in the treated distribution at high-risk covariate values. If the treated and untreated distributions do not overlap, the ATE may not be identifiable in that region. Consider restricting inference to the overlap population or reporting the ATT instead.
+To assess positivity, plot propensity score densities by treatment group and flag regions where one group is missing or sparse. For example, if elderly patients with prior cardiovascular disease are almost never prescribed the newer drug, you will see a gap in the treated distribution at high-risk covariate values. If the treated and untreated distributions do not overlap, the ATE may not be identifiable in that region. Consider restricting inference to the overlap population or reporting the average treatment effect on the treated (ATT) instead.
 
 ### Check weights
 
@@ -350,7 +352,7 @@ c(ate_truncated = ate_trunc)
 :::{.callout-warning}
 ## The Truncation Trade-Off: Bias vs. Variance
 
-Truncation (also called "winsorizing") reduces variance at the cost of introducing some bias. Capping extreme weights amounts to saying: "I am willing to accept a small amount of bias in exchange for a much more stable estimate."
+Truncation (also called "winsorizing") reduces variance at the cost of introducing some bias [@cole2008ipw]. Capping extreme weights amounts to saying: "I am willing to accept a small amount of bias in exchange for a much more stable estimate."
 
 **The trade-off in practice:**
 

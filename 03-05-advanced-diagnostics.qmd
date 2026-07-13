@@ -12,11 +12,11 @@ format: html
 Diagnostics are decision points, not box-ticking. Organize them around four questions. Are the identification assumptions plausible (overlap, negative controls)? Are the nuisance models actually fitting (Super Learner weights, calibration)? Is the estimator stable (influence-curve outliers, cross-validated TMLE)? And would the design have had a chance of working at all (outcome-blind simulation)? A tight confidence interval means little if the propensity scores pile up near 0 or 1.
 :::
 
-You run a TMLE analysis and get an ATE of 0.05 with a tight confidence interval. Should you believe it? That depends on a series of diagnostic checks that most applied analyses skip or report only in passing.
+You run a targeted maximum likelihood estimation (TMLE) analysis and get an average treatment effect (ATE) of 0.05 with a tight confidence interval. Should you believe it? That depends on a series of diagnostic checks that most applied analyses skip or report only in passing.
 
 Consider what could be going wrong beneath a clean-looking result. The propensity scores might pile up near zero for one treatment group, so the estimate hinges on a handful of heavily weighted observations. The Super Learner might have placed all its weight on the intercept model, a sign that the nuisance functions are not fitting the data. Or the influence curve might carry a few extreme outliers that drive the entire point estimate. Without checking, you cannot tell a credible finding from an artifact.
 
-Semiparametric estimators like TMLE and AIPW have specific conditions under which they perform well, and specific ways they can fail. Diagnostics help you assess whether those conditions hold in your data.
+Semiparametric estimators like TMLE and augmented inverse probability weighting (AIPW) have specific conditions under which they perform well, and specific ways they can fail. Diagnostics help you assess whether those conditions hold in your data.
 
 The diagnostics fall into four categories:
 
@@ -43,7 +43,7 @@ The chapter closes with a practical workflow for what to check first, followed b
 - Implement estimand adaptation strategies when identifying assumptions fail
 :::
 
-*Causal conclusions depend on the identification assumptions described in @sec-roadmap [@petersen2014causal]. The diagnostics here apply across TMLE, AIPW, IPTW, longitudinal TMLE, and modified treatment policy estimators. When flexible machine learning is used for nuisance estimation, valid inference typically requires cross-fitting or a cross-validated TMLE variant.*
+*Causal conclusions depend on the identification assumptions described in @sec-roadmap [@petersen2014causal]. The diagnostics here apply across TMLE, AIPW, inverse probability of treatment weighting (IPTW), longitudinal TMLE, and modified treatment policy estimators. When flexible machine learning is used for nuisance estimation, valid inference typically requires cross-fitting or a cross-validated TMLE variant.*
 
 ```{r}
 #| include: false
@@ -70,17 +70,17 @@ Every TMLE or AIPW analysis rests on three layers: identification assumptions (s
 
 4. **Design diagnostics** are conducted before the outcome data are analyzed, using only treatment and covariate information. Examples: positivity assessment, effective sample size, simulation-based power.
 
-Diagnostics are decision points, not just reporting exercises. If positivity diagnostics reveal severe violations, consider redefining the target population or shifting to a modified treatment policy. If model diagnostics show poor nuisance estimation, expand the Super Learner library. If estimator diagnostics reveal instability, apply truncation or acknowledge that the data cannot support the intended inference. Section 8 lays out a structured decision framework for these adaptations.
+Diagnostics are decision points, not just reporting exercises. If positivity diagnostics reveal severe violations, consider redefining the target population or shifting to a modified treatment policy. If model diagnostics show poor nuisance estimation, expand the Super Learner library. If estimator diagnostics reveal instability, apply truncation or acknowledge that the data cannot support the intended inference. @sec-adaptation lays out a structured decision framework for these adaptations.
 
 ---
 
-## 2. Diagnosing Identifiability Assumptions
+## 2. Diagnosing Identifiability Assumptions {#sec-identifiability}
 
 The three identification assumptions (exchangeability, positivity, and consistency) connect the causal parameter to the statistical estimand. If any one fails, the estimate loses its causal interpretation no matter which estimator produced it.
 
 None of the three is testable from observed data alone. The diagnostics here work indirectly: they assess plausibility through observable implications, quantify sensitivity to violations, and flag empirical patterns that would be unlikely if the assumptions held.
 
-### 2.1 Exchangeability (No Unmeasured Confounding)
+### 2.1 Exchangeability (No Unmeasured Confounding) {#sec-exchangeability}
 
 Exchangeability ($Y(a) \perp\!\!\!\perp A \mid W$) asserts that the potential outcomes are independent of treatment assignment conditional on the measured covariates $W$ (see @sec-roadmap for a full treatment). Reviewers, regulators, and scientific audiences question it more than any other assumption, precisely because it can never be verified from the data at hand. The diagnostics below provide indirect evidence for or against it.
 
@@ -104,7 +104,7 @@ A structured DAG review with clinical collaborators should proceed as follows. P
 
 #### 2.1.2 Negative Control Exposures and Outcomes
 
-Negative controls are one of the sharpest empirical tools for detecting violations of exchangeability [@hernan2025whatif]. The logic is falsification: if the identification assumptions hold, certain associations should be absent from the data. Finding those associations present is evidence that the assumptions may be violated.
+Negative controls are one of the sharpest empirical tools for detecting violations of exchangeability [@lipsitch2010negcontrol; @hernan2025whatif]. The logic is falsification: if the identification assumptions hold, certain associations should be absent from the data. Finding those associations present is evidence that the assumptions may be violated.
 
 A **negative control outcome** (NCO) is an outcome variable $Y^{nc}$ known, on substantive grounds, not to be causally affected by $A$ yet sharing the same confounding structure as the primary outcome $Y$. Estimate the effect of $A$ on $Y^{nc}$ with the same adjustment set $W$ and the same estimation procedure, and a non-null association is consistent with unmeasured confounding. The unmeasured confounder that biases the primary analysis biases the negative control analysis too, and since $A$ has no true effect on $Y^{nc}$, any detected association must come from bias.
 
@@ -131,13 +131,13 @@ if (requireNamespace("tmle", quietly = TRUE)) {
 
 Choosing negative controls requires careful scientific reasoning. The NCO must be plausibly unaffected by $A$ yet share the confounding structure of the primary outcome. In pharmacoepidemiology, a common NCO is an outcome that occurs before treatment initiation in a new-user design, or an outcome in an organ system unrelated to the drug's mechanism of action but tied to the same health-seeking behaviors that drive treatment selection. The whole analysis rests on the assumption that $A$ does not affect $Y^{nc}$. If that assumption is wrong, a null finding on the NCO does not validate the primary analysis, and a non-null finding does not necessarily indicate confounding.
 
-Negative controls can also be embedded in a formal bias-correction framework. Tchetgen Tchetgen and colleagues have developed methods that use negative control variables not merely as falsification tests but as instruments for estimating and correcting the bias from unmeasured confounding, under assumptions about the structure of that bias. These methods carry an extra assumption, that the negative control variable satisfies certain conditional independence relations with respect to the unmeasured confounder, but when it holds they give a more powerful diagnostic than a simple falsification test.
+Negative controls can also be embedded in a formal bias-correction framework. Tchetgen Tchetgen and colleagues have developed proximal causal inference methods that use negative control variables not merely as falsification tests but as instruments for estimating and correcting the bias from unmeasured confounding, under assumptions about the structure of that bias [@miao2018proximal]. These methods carry an extra assumption, that the negative control variable satisfies certain conditional independence relations with respect to the unmeasured confounder, but when it holds they give a more powerful diagnostic than a simple falsification test.
 
-#### 2.1.3 Sensitivity Analysis for Unmeasured Confounding
+#### 2.1.3 Sensitivity Analysis for Unmeasured Confounding {#sec-unmeasured-sensitivity}
 
 Because exchangeability cannot be verified from observed data, sensitivity analysis is how we assess how robust a causal conclusion is to potential violations. The question is simple to state: how strong would unmeasured confounding need to be to explain away the observed effect, or to change the conclusion in a meaningful way?
 
-**E-values.** The E-value, introduced by VanderWeele and Ding, provides a simple summary of the minimum strength of association that an unmeasured confounder $U$ would need to have with both the treatment $A$ and the outcome $Y$, conditional on the measured covariates $W$, to fully explain away the observed treatment-outcome association. For an observed risk ratio $\text{RR}$, the E-value is defined as:
+**E-values.** The E-value, introduced by VanderWeele and Ding [@vanderweele2017evalue], provides a simple summary of the minimum strength of association that an unmeasured confounder $U$ would need to have with both the treatment $A$ and the outcome $Y$, conditional on the measured covariates $W$, to fully explain away the observed treatment-outcome association. For an observed risk ratio $\text{RR}$, the E-value is defined as:
 
 $$
 E\text{-value} = \text{RR} + \sqrt{\text{RR} \times (\text{RR} - 1)}
@@ -145,7 +145,7 @@ $$
 
 An E-value of 3.5 means that an unmeasured confounder would need to be associated with at least a 3.5-fold increase in both the probability of treatment and the probability of the outcome, over and above the measured covariates, to pull the observed effect to the null. Compute the E-value for the confidence interval limit closest to the null as well, and you get a measure of how robust the statistical significance is, not just the point estimate, to unmeasured confounding.
 
-E-values come with limitations the analyst should state plainly. They assume a specific form for the confounding bias (the bounding factor of Ding and VanderWeele), which may not hold in every setting. They give a worst-case bound, not a point estimate of the bias, and they say nothing about several unmeasured confounders acting jointly. They also require the effect on the risk ratio scale, which may mean transforming from another scale. When the estimate is on the risk difference scale (as this handbook recommends), convert it to a risk ratio first: given a risk difference $\text{RD}$ and a baseline risk $p_0$ under control, compute $\text{RR} \approx 1 + \text{RD}/p_0$, then apply the E-value formula to this RR.
+E-values come with limitations the analyst should state plainly. They assume a specific form for the confounding bias (the bounding factor of Ding and VanderWeele [@ding2016sensitivity]), which may not hold in every setting. They give a worst-case bound, not a point estimate of the bias, and they say nothing about several unmeasured confounders acting jointly. They also require the effect on the risk ratio scale, which may mean transforming from another scale. When the estimate is on the risk difference scale (as this handbook recommends), convert it to a risk ratio first: given a risk difference $\text{RD}$ and a baseline risk $p_0$ under control, compute $\text{RR} \approx 1 + \text{RD}/p_0$, then apply the E-value formula to this RR.
 
 **Quantitative bias analysis.** Quantitative bias analysis (QBA) is a more flexible framework. It models the potential bias directly as a function of parameters that describe the unmeasured confounder. The analyst fixes a set of bias parameters, typically the prevalence of the unmeasured confounder $U$ in the exposed and unexposed groups together with the association between $U$ and the outcome, then computes the bias-adjusted estimate under each combination of values. Probabilistic QBA goes a step further and places prior distributions over the bias parameters to reflect uncertainty about the unmeasured confounding structure. The R packages `episensr` and `causalsens` implement QBA in practice.
 
@@ -375,11 +375,11 @@ Diagnostics for measurement error are limited without validation data. When vali
 
 In longitudinal settings with time-varying treatment, exchangeability takes a sequential form: at each time point $t$, the potential outcomes must be independent of the treatment at time $t$, conditional on the measured covariate and treatment history up to that point. This sequential version is both stronger and harder to assess than its point-treatment counterpart, because the set of potential confounders grows with the number of time points, and because time-varying confounders may themselves be affected by prior treatment.
 
-Diagnostics for time-varying confounding have to grapple with a specific difficulty: a variable $L_t$ can be, at once, a confounder of the treatment-outcome relationship at time $t+1$ and a mediator of the treatment effect at time $t$. Standard regression adjustment cannot handle this dual role without introducing bias; LTMLE, IPTW with stabilized weights, and the g-computation formula are built to address it. The diagnostic question is whether the measured time-varying covariates capture the time-varying confounding structure. Assess this by checking whether the DAG at each time point includes all relevant common causes, and by running negative control analyses with time-varying negative control outcomes to detect residual time-varying confounding.
+Diagnostics for time-varying confounding have to grapple with a specific difficulty: a variable $L_t$ can be, at once, a confounder of the treatment-outcome relationship at time $t+1$ and a mediator of the treatment effect at time $t$. Standard regression adjustment cannot handle this dual role without introducing bias; longitudinal TMLE (LTMLE), IPTW with stabilized weights, and the g-computation formula are built to address it. The diagnostic question is whether the measured time-varying covariates capture the time-varying confounding structure. Assess this by checking whether the DAG at each time point includes all relevant common causes, and by running negative control analyses with time-varying negative control outcomes to detect residual time-varying confounding.
 
-### 2.2 Positivity and Overlap
+### 2.2 Positivity and Overlap {#sec-positivity-diagnostics}
 
-Positivity requires that every unit has a nonzero probability of receiving each treatment level conditional on its covariates (see @sec-roadmap). Unlike exchangeability, positivity leaves fingerprints in the data: we can check whether certain covariate profiles are observed under only one treatment arm. Finite-sample diagnostics can detect practical positivity violations (regions where the estimated probability of treatment is near zero), though not structural violations (regions where the true probability is exactly zero). The diagnostics below go well beyond a simple propensity score histogram.
+Positivity requires that every unit has a nonzero probability of receiving each treatment level conditional on its covariates (see @sec-roadmap) [@westreichcole2010positivity]. Unlike exchangeability, positivity leaves fingerprints in the data: we can check whether certain covariate profiles are observed under only one treatment arm. Finite-sample diagnostics can detect practical positivity violations (regions where the estimated probability of treatment is near zero), though not structural violations (regions where the true probability is exactly zero). The diagnostics below go well beyond a simple propensity score histogram.
 
 #### 2.2.1 Propensity Score Distribution Diagnostics
 
@@ -408,9 +408,9 @@ ggplot(dat, aes(x = ps, fill = factor(A))) +
 
 Beyond density plots, examine the tails of the propensity score distribution with particular care. The tails are where positivity violations concentrate, and they exert outsized influence on weighted estimators. A propensity score of 0.01 produces an inverse probability weight of 100, so a single observation effectively stands in for 100 individuals in the pseudo-population. The fraction of observations with propensity scores below a threshold (0.025 or 0.05, say) or above its complement gives a direct summary of how severe the practical violations are.
 
-#### 2.2.2 Effective Sample Size Under Weighting
+#### 2.2.2 Effective Sample Size Under Weighting {#sec-ess-weighting}
 
-Extreme inverse probability weights shrink the effective sample size, the number of independent observations that contribute meaningfully to the estimate. Even when the nominal sample size is large, the effective sample size under weighting can be much smaller, which drives up variance and undermines inference.
+Extreme inverse probability weights shrink the effective sample size (ESS), the number of independent observations that contribute meaningfully to the estimate. Even when the nominal sample size is large, the effective sample size under weighting can be much smaller, which drives up variance and undermines inference.
 
 The effective sample size for IPTW can be computed as:
 
@@ -501,9 +501,9 @@ A practical positivity violation occurs when the true probability of treatment i
 
 The distinction matters for the fix. Structural violations call for changing the estimand: restricting the target population to exclude the affected subgroup, or switching to an estimand that does not require extrapolation into unsupported regions. Practical violations may yield to truncation, stabilized weights, or more flexible modeling, though each of these introduces its own bias and should travel with a sensitivity analysis.
 
-#### 2.2.6 Weight Truncation Rules and Their Implications
+#### 2.2.6 Weight Truncation Rules and Their Implications {#sec-weight-truncation}
 
-Weight truncation (also called weight clipping or trimming) is the most common way to ease practical positivity violations [@hernan2025whatif]. The analyst caps the inverse probability weights at some upper bound, or equivalently restricts the estimated propensity scores to lie within $[\delta, 1 - \delta]$ for some small $\delta > 0$. TMLE implements this through the `gbound` parameter; IPTW applies it directly to the computed weights.
+Weight truncation (also called weight clipping or trimming) is the most common way to ease practical positivity violations [@crump2009trimming; @hernan2025whatif]. The analyst caps the inverse probability weights at some upper bound, or equivalently restricts the estimated propensity scores to lie within $[\delta, 1 - \delta]$ for some small $\delta > 0$. TMLE implements this through the `gbound` parameter; IPTW applies it directly to the computed weights.
 
 Truncation buys lower variance at the price of bias. The bias appears because truncation quietly changes the estimand: the analyst is no longer targeting the ATE for the full population but for a population where extreme propensity scores have been modified. How large the bias gets depends on the share of observations affected and on the treatment effect heterogeneity in the truncated region.
 
@@ -550,7 +550,7 @@ Different estimators are affected by positivity violations in different ways.
 In every case the diagnostic approach is the same: examine the distribution of the relevant weights or clever covariates, compute effective sample sizes, and probe the sensitivity of the estimate to truncation. The thresholds for concern differ across estimators, but the logic does not.
 :::
 
-### 2.3 Consistency and Intervention Definition
+### 2.3 Consistency and Intervention Definition {#sec-consistency}
 
 Consistency requires that the observed outcome for an individual who received treatment $a$ equals that individual's potential outcome under treatment $a$ (see @sec-roadmap). This encodes a substantive requirement: the intervention corresponding to "setting $A = a$" must be well-defined, and the treatment as recorded in the data must correspond to this intervention without ambiguity.
 
@@ -668,7 +668,7 @@ If the dominant learner is highly flexible (a heavily tuned gradient boosting mo
 
 Examine the coefficient distribution separately for $\bar{Q}$ and $g$, since the two functions can differ in complexity. In many studies, simple learners capture the propensity score model well, because treatment decisions turn on a handful of strong predictors, while the outcome regression needs more flexible modeling.
 
-#### 3.1.3 Library Sensitivity Analysis
+#### 3.1.3 Library Sensitivity Analysis {#sec-library-sensitivity}
 
 A library sensitivity analysis asks whether the causal estimate is robust to changes in the Super Learner library. Fit the full causal estimator (TMLE or AIPW) under several library specifications (parametric learners only, tree-based learners only, the full library, and the full library plus highly adaptive lasso) and compare the resulting estimates. Close agreement across specifications is evidence that the nuisance function estimates are accurate across a range of modeling strategies. Divergence means the causal conclusion depends on the modeling choices, which undermines confidence in any single estimate.
 
@@ -712,7 +712,7 @@ cat("\nRange of ATE estimates:",
 
 This analysis answers a different question from the cross-validated risk comparison. The risk comparison identifies which learners fit the data best. The library sensitivity analysis identifies whether the causal estimate is sensitive to the choice of learners. The cross-validated risk can be similar across libraries (all of them fit the data reasonably well) while the causal estimates diverge (the libraries extrapolate differently in the regions of covariate space that matter for the causal contrast). The reverse is also possible: cross-validated risks that differ substantially while the causal estimates agree, because the differences in fit land in regions irrelevant to the causal parameter.
 
-A more concrete example runs three TMLE fits, each with a different library specification, on the simulated pharmacoepi dataset from Section 2.1.3, and lays the estimates side by side:
+A more concrete example runs three TMLE fits, each with a different library specification, on the simulated pharmacoepi dataset from @sec-unmeasured-sensitivity, and lays the estimates side by side:
 
 ```{r}
 #| warning: false
@@ -936,7 +936,7 @@ A treatment model that predicts treatment assignment with high accuracy may prod
 
 #### 3.3.1 Propensity Score Distribution and Tail Behavior
 
-The distribution of estimated propensity scores has already been discussed in the context of positivity diagnostics (Section 2.2). Here, the focus shifts from positivity as an identification assumption to the practical implications of propensity score distributions for nuisance function estimation quality. Specifically, the analyst should examine whether the estimated propensity scores are well-separated from the boundaries (0 and 1), whether the distribution is smooth and unimodal, and whether there are systematic differences in the distribution across subgroups defined by key covariates.
+The distribution of estimated propensity scores has already been discussed in the context of positivity diagnostics (@sec-positivity-diagnostics). Here, the focus shifts from positivity as an identification assumption to the practical implications of propensity score distributions for nuisance function estimation quality. Specifically, the analyst should examine whether the estimated propensity scores are well-separated from the boundaries (0 and 1), whether the distribution is smooth and unimodal, and whether there are systematic differences in the distribution across subgroups defined by key covariates.
 
 A multimodal propensity score distribution, with distinct clusters of high and low scores and few observations in between, suggests that treatment assignment is driven by a small number of strong predictors that partition the population into groups with very different treatment probabilities. This need not mean the propensity score model is wrong (it may be capturing the true mechanism faithfully), but it flags a difficult estimation environment where the causal estimate will lean heavily on a few observations with moderate propensity scores.
 
@@ -1097,13 +1097,13 @@ The EIF can be decomposed into three functionally distinct components that have 
 
 **The centering constant:** $-\psi_0$ ensures that the EIF has mean zero. In practice, $\psi_0$ is replaced by the estimated causal parameter $\hat{\psi}$.
 
-The double robustness property is encoded in the structure of the EIF. The key identity is:
+The double robustness property is encoded in the structure of the EIF. Evaluating the estimator at nuisance estimates $(\bar{Q}, g)$ rather than at the truth leaves a second-order remainder. For each counterfactual mean $E[Y(a)]$, this remainder is exactly
 
 $$
-E_{P_0}[D(O; \bar{Q}, g, \psi_0)] = E_{P_0}\left[\left(\frac{g_0(A \mid W)}{g(A \mid W)} - 1\right)\left(\bar{Q}_0(A, W) - \bar{Q}(A, W)\right)\right] \cdot (\text{terms})
+R_2(a) = E_{P_0}\left[\frac{g_0(a \mid W) - g(a \mid W)}{g(a \mid W)}\left(\bar{Q}_0(a, W) - \bar{Q}(a, W)\right)\right],
 $$
 
-This expression equals zero whenever either $g = g_0$ (the treatment model is correct) or $\bar{Q} = \bar{Q}_0$ (the outcome model is correct). The estimator's bias is thus a product of the errors in both nuisance functions, a second-order term that vanishes faster than either individual error, provided both are estimated at rates faster than $n^{-1/4}$. This rate condition is the formal requirement for the doubly robust estimator to achieve $\sqrt{n}$-consistency when machine learning estimates both nuisance functions.
+and the remainder for the ATE is $R_2(1) - R_2(0)$. Each term equals zero whenever either $g = g_0$ (the treatment model is correct) or $\bar{Q} = \bar{Q}_0$ (the outcome model is correct), because it is a product of the treatment-model error $g_0 - g$ and the outcome-model error $\bar{Q}_0 - \bar{Q}$. The estimator's bias is thus a product of the errors in both nuisance functions, a second-order term that vanishes faster than either individual error, provided both are estimated at rates faster than $n^{-1/4}$. This rate condition is the formal requirement for the doubly robust estimator to achieve $\sqrt{n}$-consistency when machine learning estimates both nuisance functions.
 
 ### 4.2 Empirical Mean of the EIF as a Diagnostic
 
@@ -1144,7 +1144,7 @@ cat("       |mean(EIF)| / SE =",
 
 Comparing the empirical EIF mean between TMLE and AIPW makes a useful cross-check. When both sit near zero, the nuisance functions look adequate. When the AIPW mean is substantially nonzero while the TMLE mean is zero (by construction), the gap between them shows how much bias correction the TMLE targeting step is doing. A large correction, moving the estimate well away from the initial plug-in value toward the targeted value, signals that the initial outcome regression estimate was substantially biased along the EIF direction, and it is worth investigating why.
 
-### 4.3 Variance Decomposition and Outlier Influence
+### 4.3 Variance Decomposition and Outlier Influence {#sec-variance-decomposition}
 
 The variance of the estimated EIF, $\hat{\sigma}^2 = n^{-1}\sum_{i=1}^{n} \hat{D}(O_i)^2$, is the basis for the Wald-type confidence interval $\hat{\psi} \pm z_{1-\alpha/2} \hat{\sigma} / \sqrt{n}$. Looking at how individual observations contribute to this variance reveals whether the estimate rests on a broad base or is dominated by a few outliers.
 
@@ -1322,13 +1322,13 @@ if (all(dat$Y %in% c(0, 1))) {
 
 **When double robustness masks instability.** A subtle failure mode of both AIPW and TMLE arises when both nuisance functions are moderately misspecified but their errors partly cancel, yielding a point estimate that looks reasonable alongside confidence intervals with the wrong coverage. It is hard to catch from the data alone, because the usual diagnostics (EIF mean near zero, reasonable variance) can all look fine. The most effective check is a simulation study using a data-generating process calibrated to the observed data: if the simulated coverage falls substantially below nominal, double robustness is not protecting you at this sample size.
 
-Masked instability shows up in a second way when the EIF variance is dominated by a small number of observations. The point estimate may be stable, since the mean of the EIF is constrained near zero, yet the variance estimate can be unreliable, giving confidence intervals that run too narrow (if the high-influence observations happen to have small EIF values in this sample) or too wide (if they happen to have large ones). The variance decomposition diagnostics in Section 4.3 are built to catch this pattern.
+Masked instability shows up in a second way when the EIF variance is dominated by a small number of observations. The point estimate may be stable, since the mean of the EIF is constrained near zero, yet the variance estimate can be unreliable, giving confidence intervals that run too narrow (if the high-influence observations happen to have small EIF values in this sample) or too wide (if they happen to have large ones). The variance decomposition diagnostics in @sec-variance-decomposition are built to catch this pattern.
 
 ---
 
 ## 5. Estimator Performance Diagnostics {#sec-performance}
 
-The preceding sections covered diagnostics for the identification assumptions (Section 2), the nuisance function estimates (Section 3), and the influence function structure (Section 4). This section turns to the estimator itself: given the fitted nuisance functions and the chosen procedure, how reliable is the resulting causal estimate? Estimator performance diagnostics ask whether the finite-sample behavior matches the asymptotic theory, whether the variance estimates and confidence intervals can be trusted, and whether alternative estimation strategies would tell a different story.
+The preceding sections covered diagnostics for the identification assumptions (@sec-identifiability), the nuisance function estimates (@sec-nuisance), and the influence function structure (@sec-eif). This section turns to the estimator itself: given the fitted nuisance functions and the chosen procedure, how reliable is the resulting causal estimate? Estimator performance diagnostics ask whether the finite-sample behavior matches the asymptotic theory, whether the variance estimates and confidence intervals can be trusted, and whether alternative estimation strategies would tell a different story.
 
 ### 5.1 Finite-Sample Bias and Monte Carlo Diagnostics
 
@@ -1407,7 +1407,7 @@ The design of the simulation DGP matters as much as the summary statistics. Buil
 
 **Small samples.** Sample sizes below 200 are especially hard on semiparametric estimators that rely on cross-fitting, because the training folds may be too small for the nuisance function estimators to perform well. Simulations at $n = 50, 100, 200$ can locate the minimum sample size at which the estimator is reliable.
 
-### 5.2 Bootstrap Diagnostics
+### 5.2 Bootstrap Diagnostics {#sec-bootstrap}
 
 The nonparametric bootstrap gives an independent read on the estimator's variability, one you can hold up against the influence-function-based variance estimate. For each bootstrap replicate $b = 1, \ldots, B$, draw a sample of size $n$ with replacement from the original data, apply the full estimation procedure (nuisance function estimation included), and record the resulting causal estimate $\hat{\psi}^{(b)}$. The bootstrap standard error is the standard deviation of $\hat{\psi}^{(b)}$ across replicates.
 
@@ -1479,7 +1479,7 @@ The analyst should assess the distribution of the estimated influence curve usin
 
 **Q-Q plots.** A normal Q-Q plot of the estimated influence curve values $\{\hat{D}(O_i)\}_{i=1}^{n}$ provides a visual assessment of normality. Systematic departures from the diagonal line indicate non-normality. Heavy tails (S-shaped departures) are the most common and most concerning pattern, as they indicate that a few observations exert disproportionate influence on the estimator.
 
-**Skewness and kurtosis.** The skewness and excess kurtosis of the influence curve distribution provide numerical summaries. For a normal distribution, the skewness is 0 and the kurtosis is 3 (excess kurtosis is 0). Positive skewness indicates that the right tail is heavier than the left; negative skewness indicates the opposite. Excess kurtosis greater than 3 indicates heavy tails relative to the normal distribution. As a rough guideline, $|\text{skewness}| > 1$ or excess kurtosis $> 5$ warrant concern about the normality approximation.
+**Skewness and kurtosis.** The skewness and excess kurtosis of the influence curve distribution provide numerical summaries. For a normal distribution, the skewness is 0 and the (raw) kurtosis is 3, so the excess kurtosis is 0. The code below reports raw kurtosis from `moments::kurtosis`, which centers the normal at 3. Positive skewness indicates that the right tail is heavier than the left; negative skewness indicates the opposite. Kurtosis greater than 3 (excess kurtosis above 0) indicates heavy tails relative to the normal distribution. As a rough guideline, $|\text{skewness}| > 1$ or raw kurtosis above 5 to 6 warrant concern about the normality approximation.
 
 **Formal normality tests.** The Shapiro-Wilk test provides a formal test of normality, but read it with care: in large samples even trivial departures produce significant $p$-values. It is most useful in moderate samples ($n = 100$ to $500$), where the power is enough to detect meaningful departures without rejecting normality for negligible reasons.
 
@@ -1522,9 +1522,9 @@ for (k in c(2, 3, 4, 5)) {
 }
 ```
 
-When the influence curve distribution is substantially non-normal, several options remain. The bootstrap (Section 5.2) offers a basis for confidence intervals that does not lean on the normal approximation. Small-sample corrections (Section 5.4) can sharpen Wald-type intervals. And when a small number of extreme observations tied to near-positivity violations drive the non-normality, truncation or estimand redefinition (Section 8) can address the root cause.
+When the influence curve distribution is substantially non-normal, several options remain. The bootstrap (@sec-bootstrap) offers a basis for confidence intervals that does not lean on the normal approximation. Small-sample corrections (@sec-small-sample) can sharpen Wald-type intervals. And when a small number of extreme observations tied to near-positivity violations drive the non-normality, truncation or estimand redefinition (@sec-adaptation) can address the root cause.
 
-### 5.4 Small-Sample Corrections
+### 5.4 Small-Sample Corrections {#sec-small-sample}
 
 When the sample size is small relative to the complexity of the estimation problem, several corrections can improve the finite-sample performance of TMLE and AIPW.
 
@@ -1638,7 +1638,7 @@ The Wald-type confidence interval $\hat{\psi} \pm z_{1-\alpha/2} \hat{\sigma}/\s
 
 **Near-positivity violations.** When propensity scores are near the boundaries, the influence curve has a heavy right tail (for observations with large $1/g$ terms), and the sum $n^{-1/2}\sum_i D(O_i)$ may not be well-approximated by a normal distribution even for moderate $n$. Diagnostic: maximum $|H|$ or $|D|$, effective sample size, proportion of observations with extreme weights.
 
-**Small effective sample size.** When the effective sample size (Section 2.2.2) is much smaller than the nominal sample size, the central limit theorem is effectively applied to a smaller sample, requiring more observations for the approximation to be accurate. Diagnostic: ESS ratio, comparison of IF-based and bootstrap standard errors.
+**Small effective sample size.** When the effective sample size (@sec-ess-weighting) is much smaller than the nominal sample size, the central limit theorem is effectively applied to a smaller sample, requiring more observations for the approximation to be accurate. Diagnostic: ESS ratio, comparison of IF-based and bootstrap standard errors.
 
 **Rare outcomes.** For binary outcomes with event rates below 5\%, the influence curve distribution is highly skewed (because most observations contribute small positive values and a few contribute large negative values, or vice versa). Diagnostic: event rate, skewness of the influence curve.
 
@@ -1706,7 +1706,7 @@ print(ps_summary, row.names = FALSE)
 
 A common pattern in longitudinal observational data is mild positivity violations at early time points that grow severe later on. The reason is that treatment history $\bar{A}_{t-1}$ becomes an ever stronger predictor of current treatment $A_t$ as $t$ increases: individuals who have been on treatment for several consecutive periods are very likely to continue, and vice versa. Identify the time point at which the violations become problematic, and weigh whether to restrict the analysis to a shorter horizon or to switch to an alternative estimand such as a modified treatment policy.
 
-### 6.2 Cumulative Weight Diagnostics
+### 6.2 Cumulative Weight Diagnostics {#sec-cumulative-weights}
 
 In longitudinal IPTW, each individual's weight is the product of time-specific inverse probability weights across all time points:
 
@@ -2075,7 +2075,7 @@ Simulation-based sample size diagnostics handle both problems. Specify a target 
 
 The simulation-based approach also shows whether the TMLE-specific variance differs substantially from the parametric variance. If the Super Learner reaches near-parametric rates of nuisance estimation, the TMLE variance sits close to the semiparametric efficiency bound, and the sample size requirement resembles the parametric calculation. If the nuisance estimation is less efficient (because the data-generating process is complex and the Super Learner library is limited), the TMLE variance is larger, and a correspondingly larger sample is needed.
 
-### 7.5 Regulatory Relevance of Design Diagnostics
+### 7.5 Regulatory Relevance of Design Diagnostics {#sec-regulatory-relevance}
 
 Design diagnostics are especially relevant for regulatory submissions involving real-world evidence (RWE), where the credibility of the analysis must be established before the results are known. The FDA, the EMA, and other agencies have increasingly stressed pre-specified analysis plans and design assessments for observational studies meant to support regulatory decisions.
 
@@ -2119,7 +2119,7 @@ The following decision framework maps specific diagnostic findings to specific a
 
 **Question 1: Does the target population include individuals for whom treatment is impossible or extremely unlikely?**
 
-If the propensity score diagnostics (Section 2.2) show that a nontrivial fraction of the target population has propensity scores near zero or one, consider restricting the target population to the overlap region, the set of individuals with $\delta \leq \hat{g}(1 \mid W_i) \leq 1 - \delta$ for a pre-specified threshold $\delta$. The resulting estimand is the ATE for the overlap population, a different and more modest causal quantity than the full-population ATE, but one that is identified and estimable.
+If the propensity score diagnostics (@sec-positivity-diagnostics) show that a nontrivial fraction of the target population has propensity scores near zero or one, consider restricting the target population to the overlap region, the set of individuals with $\delta \leq \hat{g}(1 \mid W_i) \leq 1 - \delta$ for a pre-specified threshold $\delta$. The resulting estimand is the ATE for the overlap population, a different and more modest causal quantity than the full-population ATE, but one that is identified and estimable.
 
 The choice of $\delta$ is a bias-variance tradeoff. A more aggressive restriction (larger $\delta$) buys a more stable estimate but targets a smaller and potentially less generalizable population. Report results for several values of $\delta$ and check how sensitive the estimate and its interpretation are to the choice.
 
@@ -2151,7 +2151,7 @@ for (delta in thresholds) {
 
 **Question 2: Is the treatment definition well-specified, or does it conflate distinct interventions?**
 
-If consistency diagnostics (Section 2.3) reveal that the treatment variable conflates multiple interventions with potentially different effects, consider redefining the treatment. Options include refining the treatment variable (distinguishing different drugs within a class), coarsening it (combining similar doses into a single level), or restricting the analysis to a specific treatment version.
+If consistency diagnostics (@sec-consistency) reveal that the treatment variable conflates multiple interventions with potentially different effects, consider redefining the treatment. Options include refining the treatment variable (distinguishing different drugs within a class), coarsening it (combining similar doses into a single level), or restricting the analysis to a specific treatment version.
 
 **Question 3: Is the static intervention plausible for all individuals?**
 
@@ -2165,7 +2165,7 @@ If the population-level ATE is poorly supported but the data support certain sub
 
 **Question 5: Is the longitudinal estimand feasible, or should the time horizon be shortened?**
 
-In longitudinal settings, positivity violations compound over time (Section 6.2). If the cumulative weight diagnostics reveal that the planned time horizon produces unacceptable weight variability, consider shortening the horizon or switching to a dynamic or stochastic intervention compatible with the observed treatment patterns at each time point.
+In longitudinal settings, positivity violations compound over time (@sec-cumulative-weights). If the cumulative weight diagnostics reveal that the planned time horizon produces unacceptable weight variability, consider shortening the horizon or switching to a dynamic or stochastic intervention compatible with the observed treatment patterns at each time point.
 
 ### 8.3 Mapping Diagnostics to Adaptations
 
@@ -2190,27 +2190,29 @@ When the analysis plan is modified in response to diagnostic findings, the ratio
 
 This documentation serves two purposes. It gives reviewers and regulators a transparent audit trail for judging whether the modification was principled or opportunistic. And it forces the analyst to articulate the link between the diagnostic findings and the adaptation, which is itself a form of quality control.
 
-When the adaptation rules are pre-specified in the statistical analysis plan (Section 7.5), the documentation is simpler: report which pre-specified rule was triggered and confirm that the adaptation followed the plan. When the adaptation is not pre-specified, the documentation must go further, and the analyst should acknowledge that the modification was data-driven and may color the interpretation of the results.
+When the adaptation rules are pre-specified in the statistical analysis plan (@sec-regulatory-relevance), the documentation is simpler: report which pre-specified rule was triggered and confirm that the adaptation followed the plan. When the adaptation is not pre-specified, the documentation must go further, and the analyst should acknowledge that the modification was data-driven and may color the interpretation of the results.
 
 ---
 
 ## 9. Sensitivity Analysis Frameworks {#sec-sensitivity}
 
-Sensitivity analysis quantifies how conclusions change when assumptions are relaxed. Section 2.1 introduced sensitivity analyses for exchangeability (E-values, quantitative bias analysis, negative controls), but the scope reaches well past unmeasured confounding. This section builds a framework that covers sensitivity to all three identification assumptions, sensitivity to nuisance estimation choices, and the distinction between statistical and causal uncertainty.
+Sensitivity analysis quantifies how conclusions change when assumptions are relaxed. @sec-exchangeability introduced sensitivity analyses for exchangeability (E-values, quantitative bias analysis, negative controls), but the scope reaches well past unmeasured confounding. This section builds a framework that covers sensitivity to all three identification assumptions, sensitivity to nuisance estimation choices, and the distinction between statistical and causal uncertainty.
 
 ### 9.1 Bias Function Sensitivity Analysis
 
-The general framework for sensitivity analysis begins with a formal characterization of the bias that arises when an identification assumption fails. For the average treatment effect under exchangeability, the bias of the observed-data estimand relative to the causal parameter can be written as:
+The general framework for sensitivity analysis begins with a formal characterization of the bias that arises when an identification assumption fails. For the average treatment effect under exchangeability, Ding and VanderWeele [@ding2016sensitivity] show that unmeasured confounding can inflate an observed effect by at most a bounding factor determined by two sensitivity parameters. On the log-risk-ratio scale, the maximum bias is:
 
 $$
-\text{Bias} = E\left[\frac{P(A=1 \mid W, U)}{P(A=1 \mid W)} \cdot E[Y(0) \mid A=1, W, U] - E[Y(0) \mid A=1, W]\right]
+\text{Bias}_{\max}(\gamma_A, \gamma_Y) = \log\!\left(\frac{\gamma_A \, \gamma_Y}{\gamma_A + \gamma_Y - 1}\right)
 $$
 
-where $U$ is the unmeasured confounder. This bias function depends on two quantities that cannot be estimated from observed data: the association between $U$ and treatment ($P(A=1 \mid W, U) / P(A=1 \mid W)$) and the association between $U$ and the outcome ($E[Y(0) \mid W, U]$ versus $E[Y(0) \mid W]$). A sensitivity analysis parameterizes these unknown quantities and evaluates the bias, and the bias-corrected estimate, across a range of parameter values.
+where $\gamma_A$ is the maximum ratio by which the prevalence of the unmeasured confounder $U$ differs between treatment groups, and $\gamma_Y$ is the maximum risk ratio relating $U$ to the outcome. Neither parameter can be estimated from the observed data. A sensitivity analysis fixes plausible values for the pair and evaluates the bias, and the bias-corrected estimate, across a range of parameter values.
 
-The bias function framework generalizes the E-value approach, which returns a single summary number, by producing a full surface of bias-adjusted estimates. For each pair of sensitivity parameters $(\gamma_A, \gamma_Y)$ describing the strength of $U$'s association with treatment and outcome, compute the bias-adjusted estimate $\hat{\psi}_{\text{adj}}(\gamma_A, \gamma_Y) = \hat{\psi} - \text{Bias}(\gamma_A, \gamma_Y)$. Display the result as a contour plot showing which parameter combinations would change the conclusion, shifting the adjusted estimate to zero or flipping the sign of the effect.
+The bounding-factor framework generalizes the E-value approach, which returns a single summary number, by producing a full surface of bias-adjusted estimates. For each pair of sensitivity parameters $(\gamma_A, \gamma_Y)$ describing the strength of $U$'s association with treatment and outcome, compute the bias-adjusted estimate $\hat{\psi}_{\text{adj}}(\gamma_A, \gamma_Y) = \hat{\psi} - \text{Bias}_{\max}(\gamma_A, \gamma_Y)$. Display the result as a contour plot (@fig-confounding-bias-contour) showing which parameter combinations would change the conclusion, shifting the adjusted estimate to zero or flipping the sign of the effect.
 
 ```{r}
+#| label: fig-confounding-bias-contour
+#| fig-cap: "Bias-adjusted estimate contours across the sensitivity parameters $\\gamma_A$ (confounder-treatment risk ratio) and $\\gamma_Y$ (confounder-outcome risk ratio). Contours trace where the adjusted estimate crosses the null; parameter combinations beyond the null contour would fully explain away the observed effect."
 #| code-fold: true
 ## Bias function sensitivity analysis
 ## Contour plot of bias-adjusted estimates
@@ -2251,7 +2253,7 @@ Read the contour plot by asking whether any plausible combination of $(\gamma_A,
 
 When the identification assumptions are known to fail, or when the analyst is unwilling to assume they hold, partial identification offers an alternative: bounds on the causal effect under minimal assumptions. Where point identification returns a single number for the causal parameter, partial identification returns an interval, the identified set, that contains the true parameter under the maintained assumptions.
 
-The most general bounds, due to Manski, assume only that the outcome is bounded and that the observed data distribution is known. For a binary outcome $Y \in \{0, 1\}$ and binary treatment $A \in \{0, 1\}$, the Manski bounds on the ATE are:
+The most general bounds, due to Manski [@manski1990bounds], assume only that the outcome is bounded and that the observed data distribution is known. For a binary outcome $Y \in \{0, 1\}$ and binary treatment $A \in \{0, 1\}$, the Manski bounds on the ATE are:
 
 $$
 E[Y \mid A=1] P(A=1) + 0 \cdot P(A=0) - E[Y \mid A=0] P(A=0) - 1 \cdot P(A=1) \leq \text{ATE} \leq E[Y \mid A=1] P(A=1) + 1 \cdot P(A=0) - E[Y \mid A=0] P(A=0) - 0 \cdot P(A=1)
@@ -2294,9 +2296,9 @@ Diagnostics for selection bias start by asking how the study population was asse
 
 When the selection mechanism depends on the outcome (sicker patients more likely to be lost to follow-up, say), IPSW alone cannot correct the bias without further assumptions. Sensitivity analysis for outcome-dependent selection means modeling the relationship between the outcome and the selection probability, much as with sensitivity analysis for unmeasured confounding.
 
-### 9.4 Sensitivity to Weight Truncation
+### 9.4 Sensitivity to Weight Truncation {#sec-truncation-sensitivity-framework}
 
-Section 2.2.6 introduced truncation as a response to practical positivity violations and described a truncation sensitivity analysis that reports the causal estimate across a range of thresholds. This section promotes truncation sensitivity to a formal part of the sensitivity analysis framework, on par with sensitivity to unmeasured confounding.
+@sec-weight-truncation introduced truncation as a response to practical positivity violations and described a truncation sensitivity analysis that reports the causal estimate across a range of thresholds. This section promotes truncation sensitivity to a formal part of the sensitivity analysis framework, on par with sensitivity to unmeasured confounding.
 
 The reason for treating it as a formal sensitivity analysis is that truncation changes the estimand. When propensity scores are clipped to $[\delta, 1-\delta]$, the estimate targets the ATE for a modified population in which the most extreme covariate profiles have been pulled in. The difference between the truncated and untruncated estimates measures how much the extreme-weight observations contribute to the full-population ATE. When that contribution is large, the full-population ATE leans heavily on extrapolation into poorly supported regions, and the truncation sensitivity analysis makes the dependence explicit.
 
@@ -2344,7 +2346,7 @@ ggplot(trunc_curve, aes(x = delta, y = ATE)) +
 
 ### 9.5 Sensitivity to Learner Library Choice
 
-The Super Learner library is a tuning parameter of the analysis that can move the causal estimate. Section 3.1.3 described a library sensitivity analysis as a nuisance model diagnostic. Here the same analysis is reframed as a sensitivity analysis: it quantifies how much the causal conclusion depends on the analyst's choice of machine learning algorithms for nuisance estimation.
+The Super Learner library is a tuning parameter of the analysis that can move the causal estimate. @sec-library-sensitivity described a library sensitivity analysis as a nuisance model diagnostic. Here the same analysis is reframed as a sensitivity analysis: it quantifies how much the causal conclusion depends on the analyst's choice of machine learning algorithms for nuisance estimation.
 
 It is most informative combined with the truncation sensitivity analysis. If the estimate is insensitive to both truncation level and library composition, that is strong evidence the result is robust to the nuisance estimation choices. If it is sensitive to one or both, report the range of estimates and acknowledge the model dependence.
 
@@ -2466,7 +2468,7 @@ Sensitivity analyses should be presented in a structured format that makes clear
 
 **Negative control results.** Report the estimated effect on the negative control outcome (or the estimated effect of the negative control exposure on the primary outcome), with the same adjustment set and estimation procedure used for the primary analysis. A null finding on the negative control supports (but does not prove) the validity of the exchangeability assumption.
 
-**Truncation sensitivity.** Report the truncation sensitivity curve (Section 9.4), with the range of estimates annotated.
+**Truncation sensitivity.** Report the truncation sensitivity curve (@sec-truncation-sensitivity-framework), with the range of estimates annotated.
 
 **Library sensitivity.** Report the causal estimate under each Super Learner library specification examined.
 
@@ -2617,7 +2619,7 @@ cat("E-value for HAART mortality estimate:", round(e_val_haart, 2), "\n")
 # ratio of at least this magnitude to fully explain away the result.
 ```
 
-Adherence is the most plausible unmeasured confounder here. Patients who adhere to HAART tend to be healthier and more engaged with care, which could inflate the apparent treatment benefit. The quantitative bias analysis from @sec-advanced-diagnostics applies directly: specify plausible values for adherence prevalence among treated and untreated patients, and for the effect of adherence on mortality, then compute a bias-corrected estimate. If the corrected estimate stays protective, the finding is more credible. The truncation sensitivity analysis is relevant too, since patients with very low or very high propensity for HAART initiation (driven by extreme CD4 values or `dropout` patterns) can produce unstable weights. The full longitudinal analysis using `haartdat` makes these diagnostics more involved: propensity scores for `haartind` must be estimated at each 100-day interval, and the cumulative product of inverse-probability weights across time points can amplify the instability further.
+Adherence is the most plausible unmeasured confounder here. Patients who adhere to HAART tend to be healthier and more engaged with care, which could inflate the apparent treatment benefit. The quantitative bias analysis from @sec-advanced-diagnostics applies directly: specify plausible values for adherence prevalence among treated and untreated patients, and for the effect of adherence on mortality, then compute a bias-corrected estimate. If the corrected estimate stays protective, the finding is more credible. The truncation sensitivity analysis is relevant too, since patients with very low or very high propensity for HAART initiation (driven by extreme CD4 values or `dropout` patterns) can produce unstable weights.
 
 ---
 

@@ -9,12 +9,12 @@ format: html
 
 ::: {.callout-tip}
 ## If you only read one thing
-A high-stakes real-world-evidence estimate is only as credible as the process that produced it. Lock the analysis plan and run every diagnostic outcome-blind, so that no analytic choice is made after seeing the treatment-outcome association. This chapter's `cleanTMLE` workflow enforces that discipline with an analysis lock, audit logs, a data-quality stress test, and a GO / FLAG / STOP rule that refuses to read the outcome until the prespecified checkpoints are recorded.
+A high-stakes real-world-evidence estimate is only as credible as the process that produced it. Lock the analysis plan and run every diagnostic outcome-blind, so that no analytic choice is made after seeing the treatment-outcome association. This chapter's `cleanTMLE` workflow enforces that discipline with an analysis lock, audit logs, a data-quality stress test, and a GO / FLAG / STOP rule that programmatically refuses to read the outcome until the prespecified checkpoints are recorded.
 :::
 
-You have specified a target trial, chosen an estimand, defended your DAG, fit a TMLE with Super Learner, and run the diagnostics in @sec-advanced-diagnostics. Should the reviewer believe the estimate? In a regulatory or multi-site RWE setting, the answer increasingly turns on the process that produced it rather than the estimator alone. Was the analysis plan fixed before the outcome was inspected? Were the design and estimator choices documented as they were made? Can an external reviewer reconstruct every decision from a single archived record?
+You have specified a target trial [@hernan2016target], chosen an estimand, defended your DAG, fit a TMLE with Super Learner, and run the diagnostics in @sec-advanced-diagnostics. Should the reviewer believe the estimate? In a regulatory or multi-site RWE setting, the answer increasingly turns on the process that produced it rather than the estimator alone. Was the analysis plan fixed before the outcome was inspected? Were the design and estimator choices documented as they were made? Can an external reviewer reconstruct every decision from a single archived record?
 
-This chapter introduces the staged, outcome-blind workflow of [@muntner2024staging] and the clean-room governance arrangement that surrounds it. We then walk through the `cleanTMLE` R package, which provides the software layer for a staged TMLE analysis: an analysis lock with a SHA-256 fingerprint, automatic audit and decision logs, plasmode-based candidate selection, a data-quality stress test, and a GO / FLAG / STOP pre-outcome decision rule that physically refuses to read the primary outcome until the prespecified checkpoints have been recorded. A complete worked example on the HIV antiretroviral therapy cohort closes the chapter.
+This chapter introduces the staged, outcome-blind workflow of [@muntner2024staging] and the clean-room governance arrangement that surrounds it. We then walk through the `cleanTMLE` R package, which provides the software layer for a staged TMLE analysis: an analysis lock with a SHA-256 fingerprint, automatic audit and decision logs, plasmode-based candidate selection, a data-quality stress test, and a GO / FLAG / STOP pre-outcome decision rule that programmatically refuses to read the primary outcome until the prespecified checkpoints have been recorded. A complete worked example on the HIV antiretroviral therapy cohort closes the chapter.
 
 ::: {.callout-note}
 ## Learning objectives
@@ -81,10 +81,10 @@ A staged clean-room workflow is that roadmap executed in a particular order, wit
 
 | Stage | Purpose | Reads the outcome? |
 |---|---|:---:|
-| 0 | Feasibility, target-trial specification, SAP drafting | No (no data access) |
+| 0 | Feasibility, target-trial specification, statistical analysis plan (SAP) drafting | No (no data access) |
 | 1a | Lock estimand, covariates, learners, candidate grid, thresholds | No |
-| 1b | Cohort adequacy: $N$ per arm, events, design precision | Event counts only |
-| 2a | Propensity-score diagnostics: overlap, ESS, balance | No |
+| 1b | Cohort adequacy: $N$ per arm, events, design precision | Total event count only |
+| 2a | Propensity-score diagnostics: overlap, effective sample size (ESS), balance | No |
 | 2b | Outcome-blind plasmode candidate selection | Synthetic outcome only |
 | 2c | Plasmode data-quality stress test | Synthetic outcome only |
 | 3 | Negative-control outcomes, residual-bias check | NC outcomes only |
@@ -119,7 +119,7 @@ This sequencing addresses a limitation of pure preregistration. In practice, RWE
 remotes::install_github("amertens/cleanTMLE")
 library(cleanTMLE)
 ```
-The package depends on `survival`, `ggplot2`, `digest`, and (for the SuperLearner library) `SuperLearner` and `glmnet`. The IPCW-TMLE path additionally uses the `tmle` package.
+The package depends on `survival`, `ggplot2`, `digest`, and (for the SuperLearner library) `SuperLearner` and `glmnet`. The IPCW-TMLE (inverse probability of censoring weighting) path additionally uses the `tmle` package.
 :::
 
 ## What the lock fingerprints
@@ -193,13 +193,14 @@ plas  <- run_plasmode_feasibility(lock, tmle_candidates = cands, reps = 50)
 dq    <- run_plasmode_dq_stress(lock, tmle_candidates = cands,
                                 scenarios = default_dq_scenarios())
 sel   <- select_tmle_candidate(plas, rule = "min_max_rmse", dq_results = dq)
+cp_dq <- gate_dq(dq, candidate = sel$candidate_id)
 
 # Stage 3: negative-control outcomes.
 nc <- run_residual_confounding_stage(lock,
         negative_controls = c("nc1", "nc2"))
 
 # Pre-outcome decision and authorisation.
-gate <- gate_all(cp1, cp2, nc$checkpoint, allow_flag = TRUE)
+gate <- gate_all(cp1, cp2, cp_dq, nc$checkpoint, allow_flag = TRUE)
 auth <- authorize_outcome_analysis(audit)
 #> Decision: GO
 
@@ -241,7 +242,7 @@ cat("Deaths:          ", sum(dat$Y), "(", round(100 * mean(dat$Y), 1), "%)\n")
 
 ## Stage 0: target trial and event-process classification
 
-The roadmap step that has to happen before any code runs is the target-trial specification. We translate the clinical question into an eligibility window, a set of treatment strategies, a follow-up horizon, and a single primary outcome.
+The roadmap step that has to happen before any code runs is the target-trial specification [@hernan2016target]. We translate the clinical question into an eligibility window, a set of treatment strategies, a follow-up horizon, and a single primary outcome.
 
 | Element | Specification |
 |---|---|
@@ -259,7 +260,7 @@ $$
 
 ::: {.callout-warning}
 ## Scope of this worked example
-The full HAART analysis treats `haartind` as a time-varying treatment with treatment-confounder feedback in CD4, exactly the longitudinal setting that motivates LTMPS and LTMLE in @sec-longitudinal-confounding and @sec-illustrated-ltmle. Collapsing to `ever_haart` here is a deliberate simplification to exercise the binary-outcome scope of `cleanTMLE` v0.1. The reported point estimates are pedagogical and should not be interpreted as causal effects of HAART; they illustrate the staged workflow, not the substantive question.
+The full HAART analysis treats `haartind` as a time-varying treatment with treatment-confounder feedback in CD4, exactly the longitudinal setting that motivates LMTP and LTMLE in @sec-longitudinal-confounding and @sec-illustrated-ltmle. Collapsing to `ever_haart` here is a deliberate simplification to exercise the binary-outcome scope of `cleanTMLE` v0.1. The reported point estimates are pedagogical and should not be interpreted as causal effects of HAART; they illustrate the staged workflow, not the substantive question.
 :::
 
 A clean-room workflow records this scoping decision rather than burying it in a silent analytic choice. In `cleanTMLE` the event-process classification is recorded structurally with `clean_event_process_table()`:
@@ -340,7 +341,7 @@ The hash is reproducible: any reviewer who reruns `create_analysis_lock()` on th
 
 ## Stage 1b: cohort adequacy
 
-Before any modelling we confirm the cohort can support the analysis. `checkpoint_cohort_adequacy()` reads event *counts*, not the joint distribution of $A$ and $Y$, and returns a checkpoint object.
+Before any modelling we confirm the cohort can support the analysis. `checkpoint_cohort_adequacy()` reads only the *pooled* event count and the per-arm sample sizes, never the per-arm event counts, so it cannot expose the crude treatment-outcome association. Design precision depends on the total number of events and the arm sizes, which is all the checkpoint reports. It returns a checkpoint object.
 
 ```{r}
 #| eval: false
@@ -354,7 +355,7 @@ print(cp1)
 #> Checkpoint  : Cohort adequacy (Stage 1b)
 #> Decision    : GO
 #>   n per arm        : 824 (A=0)  |  376 (A=1)         [≥ 100]
-#>   events per arm   : 209        |   78               [≥ 30]
+#>   total events     : 287 (pooled)                     [≥ 30]
 #>   marginal outcome : 23.9%                            [≥ 5%]
 ```
 
@@ -378,7 +379,7 @@ cp2 <- checkpoint_balance(diag,
 audit <- record_checkpoint(audit, cp2)
 ```
 
-For the HIV cohort the propensity for HAART initiation is driven largely by baseline CD4 count: lower CD4 raises the probability of initiation. With only three baseline covariates the overlap is generally adequate, though the lower tail of CD4 is sparser in the untreated arm, a positivity strain worth noting.
+For the HIV cohort the propensity for HAART initiation is driven largely by baseline CD4 count: lower CD4 raises the probability of initiation. With only three baseline covariates the overlap is generally adequate (@fig-ps-overlap), though the lower tail of CD4 is sparser in the untreated arm, a positivity strain worth noting.
 
 To make the diagnostics concrete without the package, here are the same calculations in base R:
 
@@ -407,6 +408,7 @@ round(balance, 3)
 
 ```{r}
 #| code-fold: true
+#| label: fig-ps-overlap
 #| fig-cap: "Propensity score overlap by treatment arm. Both densities cover the same range, but the untreated arm thins out for low CD4 values (high PS), the expected pattern of confounding by indication."
 ggplot(dat, aes(x = ps_hat, fill = factor(A))) +
   geom_density(alpha = 0.4) +
@@ -417,7 +419,7 @@ ggplot(dat, aes(x = ps_hat, fill = factor(A))) +
   theme_minimal()
 ```
 
-A weighted SMD of $\le 0.10$ across all three covariates and an ESS above 50 % of $n$ would clear the prespecified balance threshold, and this cohort meets that bar with the simple GLM propensity model.
+A weighted standardized mean difference (SMD) of $\le 0.10$ across all three covariates and an ESS above 50 % of $n$ would clear the prespecified balance threshold, and this cohort meets that bar with the simple GLM propensity model.
 
 ## Stage 2b: outcome-blind candidate selection
 
@@ -614,7 +616,7 @@ expit <- function(x) 1 / (1 + exp(-x))
 Qinit <- predict(Qmod, type = "response")     # initial outcome predictions
 H     <- with(dat, A / ps - (1 - A) / (1 - ps))   # clever covariate
 # Fluctuation: 1-parameter logistic regression of Y on H, with logit(Qinit)
-# as a fixed offset; eps is the targeting coefficient that solves the EIF equation
+# as a fixed offset; eps is the targeting coefficient that solves the EIC equation
 eps   <- glm(dat$Y ~ -1 + offset(logit(Qinit)) + H, family = binomial)$coef
 H1    <-   1 / dat$ps
 H0    <- -1 / (1 - dat$ps)
@@ -635,10 +637,11 @@ tibble(
   mutate(across(where(is.numeric), \(x) round(x, 3)))
 ```
 
-The crude difference is large and positive: treated patients in the registry have *higher* mortality because they started HAART when they were sicker, the classic confounding-by-indication signal. The three adjusted estimators all reverse the sign and agree closely on the direction and magnitude of the protective effect. The locked TMLE is reported as the primary estimate, the others as concordance checks.
+The crude difference is large and positive: treated patients in the registry have *higher* mortality because they started HAART when they were sicker, the classic confounding-by-indication signal. The three adjusted estimators all reverse the sign and agree closely on the direction and magnitude of the protective effect (@fig-estimator-agreement). The locked TMLE is reported as the primary estimate, the others as concordance checks.
 
 ```{r}
 #| code-fold: true
+#| label: fig-estimator-agreement
 #| fig-cap: "Four estimators on the HIV baseline cohort. The crude estimate is dominated by confounding by indication; the three adjusted estimators agree on a protective effect of HAART initiation. The locked TMLE is the prespecified primary; the others are reported as concordance checks."
 results <- tibble(
   estimator = c("Crude", "G-computation", "IPTW", "TMLE (primary)"),

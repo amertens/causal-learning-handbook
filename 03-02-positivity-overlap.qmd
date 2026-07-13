@@ -17,9 +17,11 @@ knitr::opts_chunk$set(
 
 ## A cautionary tale from pharmacoepidemiology
 
-A research team set out to estimate the effect of HAART initiation on mortality
+A research team set out to estimate the effect of highly active antiretroviral
+therapy (HAART) initiation on mortality
 in an HIV cohort. They assembled a claims-derived dataset, adjusted for
-dozens of confounders, and ran an IPTW analysis. The result was startling: a risk
+dozens of confounders, and ran an inverse probability of treatment weighting
+(IPTW) analysis. The result was startling: a risk
 ratio of 0.12 for mortality, implying HAART cut the death rate by 88%. Clinicians
 welcomed the magnitude, but treatment epidemiologists were skeptical. When the
 analysts inspected the propensity score distribution they found the problem.
@@ -105,7 +107,8 @@ Alternatively, one can restrict the target population to the subset with adequat
 
 # Structural vs. Practical Positivity Violations
 
-Not all positivity problems are alike. The distinction matters because the appropriate
+Not all positivity problems are alike. The distinction between structural and
+practical violations [@westreichcole2010positivity] matters because the appropriate
 response differs.
 
 ## Structural violations
@@ -227,7 +230,7 @@ ggplot(dat, aes(x = ps_hat, fill = factor(A))) +
     y = "Density",
     fill = "Group",
     title = "Propensity score overlap plot",
-    subtitle = "Poor overlap visible in the left tail (treated patients with very low PS)"
+    subtitle = "Non-overlapping regions in the tails, where one group carries density the other lacks, signal near-violations"
   ) +
   theme_minimal()
 ```
@@ -306,7 +309,7 @@ Read it as a checklist. Any appreciable mass with a propensity below 0.05 or abo
 # How Positivity Problems Affect Different Estimators {#sec-estimator-effects}
 
 Using our simulated data, let us see how each estimator behaves when positivity is
-violated. The true ATE in the data-generating process depends on the covariate
+violated. The true average treatment effect (ATE) in the data-generating process depends on the covariate
 distribution, so we will judge the estimates by their *stability* and *plausibility*
 rather than against a single truth.
 
@@ -331,9 +334,9 @@ dat |>
     pct_gt_10 = mean(ipw > 10) * 100,
     pct_gt_20 = mean(ipw > 20) * 100
   ) |>
-  knitr::kable(digits = 2, caption = "IPW weight summary: large weights signal trouble")
+  knitr::kable(digits = 2, caption = "IPTW weight summary: large weights signal trouble")
 
-# IPTW estimate (Horvitz-Thompson style)
+# IPTW estimate (Hajek / stabilized style)
 ate_iptw <- dat |>
   summarise(
     ate = weighted.mean(Y[A == 1], ipw[A == 1]) -
@@ -381,7 +384,7 @@ check it there. The model might predict that a 90-year-old with severe comorbidi
 
 TMLE (@sec-doubly-robust-tmle, `doubly-robust-tmle.qmd`) updates the initial outcome model
 using a "clever covariate" $H(A, W) = A / g(W) - (1-A) / (1 - g(W))$. When $g(W)$
-is near zero, this clever covariate explodes, just like the IPW weight. TMLE
+is near zero, this clever covariate explodes, just like the IPTW weight. TMLE
 inherits the instability of IPTW through its targeting step, even though it also uses
 an outcome model. In practice, you might see one or two observations with clever-covariate values ten times larger than the rest, a sign that those few patients are driving the entire estimate.
 
@@ -412,7 +415,7 @@ The bottom line is that no estimator is immune to positivity violations. IPTW sh
 ## Redefine the target population
 
 The most principled response is to restrict the analysis to the population where
-overlap exists. You are changing the *question*, not patching the estimator.
+overlap exists [@crump2009trimming]. You are changing the *question*, not patching the estimator.
 
 ```{r}
 # Restrict to the overlap region (e.g., PS between 0.05 and 0.95)
@@ -429,8 +432,8 @@ support, not the full population. Say so clearly in the write-up.
 
 ## Weight truncation with sensitivity analysis
 
-If trimming the population is not desirable, you can truncate (cap) the IPW weights at
-a threshold. This introduces some bias but reduces variance [@hernan2025whatif]. The trick is to try several
+If trimming the population is not desirable, you can truncate (cap) the IPTW weights at
+a threshold. This introduces some bias but reduces variance [@cole2008ipw; @hernan2025whatif]. The trick is to try several
 thresholds and watch how the estimate moves.
 
 ```{r}
@@ -501,7 +504,7 @@ The responses above are not a menu to pick from at random; the diagnosis points 
 |---|---|---|
 | A few extreme weights, estimate stable under truncation | Truncate and report a truncation sensitivity curve | Mild; the target is essentially unchanged |
 | A region of covariate space with no overlap | Restrict to the overlap region | The target becomes the ATE in the overlap population |
-| The question is about the treated, and controls are sparse | Target the ATT rather than the ATE | The question narrows to the treated |
+| The question is about the treated, and controls are sparse | Target the average treatment effect among the treated (ATT) rather than the ATE | The question narrows to the treated |
 | A static "treat everyone" regime has no support | Switch to a stochastic or modified treatment policy (@sec-adherence-shift, @sec-applied-lmtp) | The target becomes a feasible, support-respecting intervention |
 | A longitudinal regime loses support across visits | Use a feasible shift rule rather than a fixed path | As above, defined visit by visit |
 
@@ -513,7 +516,7 @@ When positivity problems remain after reasonable adjustments, the most important
 response is transparency. Report:
 
 - The proportion of patients in low-overlap regions.
-- The maximum and 99th-percentile IPW weights.
+- The maximum and 99th-percentile IPTW weights.
 - The effective sample size (next section).
 - Sensitivity analyses under different truncation levels.
 - The sub-populations where the estimate is well supported versus extrapolated.
@@ -565,7 +568,7 @@ There is no universal cutoff, but common recommendations include:
 
 - **ESS < 50% of actual sample size**: warning flag; inspect weights.
 - **ESS < 20% of actual sample size**: serious concern; consider trimming or population restriction.
-- **ESS < n for one group but not the other**: asymmetric positivity, which often means one treatment direction has poor support.
+- **ESS far below n for one group but not the other**: asymmetric positivity, which often means one treatment direction has poor support.
 
 ::: {.callout-important}
 ## ESS is a summary, not a diagnosis
@@ -614,7 +617,7 @@ ggplot(haart_baseline, aes(x = ps_hat, fill = factor(ever_haart))) +
 
 The overlap plot shows that patients with low `cd4_sqrt_baseline` cluster near propensity scores of 1, because clinical guidelines make HAART initiation near-certain for severely immunocompromised patients. This is a practical (not structural) positivity violation: HAART is not literally required, but it is rarely withheld.
 
-Any causal estimate for those patients leans heavily on model extrapolation rather than observed counterfactual data. One option is to restrict the target population to the overlap region; another is to report effective sample sizes (@sec-advanced-diagnostics), which quantify how much information these near-violations consume.
+Any causal estimate for those patients leans heavily on model extrapolation rather than observed counterfactual data. One option is to restrict the target population to the overlap region; another is to report effective sample sizes (@sec-ess), which quantify how much information these near-violations consume.
 
 ---
 
@@ -641,7 +644,7 @@ data.frame(
 )
 ```
 
-Each visit on its own looks tolerable, but the cumulative probability grows a long tail near zero, and the inverse of that cumulative probability is the weight a longitudinal IPW analysis would carry. TMLE-based longitudinal estimators (@sec-illustrated-ltmle) avoid forming explicit weight products, but they inherit the same support limitation: the contrast still rests on person-histories that barely occur. The visit-by-visit treatment-probability and effective-sample-size diagnostic in @sec-applied-lmtp is the applied version of this check. When the cumulative support is thin, the static regime is the wrong target, and a modified treatment policy that shifts treatment by a feasible amount (@sec-adherence-shift) restores support.
+Each visit on its own looks tolerable, but the cumulative probability grows a long tail near zero, and the inverse of that cumulative probability is the weight a longitudinal IPTW analysis would carry. TMLE-based longitudinal estimators (@sec-illustrated-ltmle) avoid forming explicit weight products, but they inherit the same support limitation: the contrast still rests on person-histories that barely occur. The visit-by-visit treatment-probability and effective-sample-size diagnostic in @sec-applied-lmtp is the applied version of this check. When the cumulative support is thin, the static regime is the wrong target, and a modified treatment policy that shifts treatment by a feasible amount (@sec-adherence-shift) restores support.
 
 ---
 

@@ -9,10 +9,10 @@ format: html
 
 ::: {.callout-note}
 ## Learning objectives
-- Explain why time-varying confounders affected by prior treatment break standard regression, GEE, and mixed models
+- Explain why time-varying confounders affected by prior treatment break standard regression, generalized estimating equations (GEE), and mixed models
 - Identify the treatment--confounder feedback loop in a DAG and distinguish confounding paths from causal mediated paths
 - State the sequential versions of consistency, exchangeability, and positivity
-- Describe why G-methods (G-computation, IPTW, L-TMLE) are needed and how they differ from regression
+- Describe why g-methods, namely G-computation, inverse probability of treatment weighting (IPTW), and longitudinal targeted maximum likelihood estimation (L-TMLE), are needed and how they differ from regression
 - Understand why static interventions may violate positivity and how stochastic interventions address this
 :::
 
@@ -47,7 +47,7 @@ Suppose we want the effect of sustained antiretroviral therapy (ART) on virologi
 #| fig-height: 3.5
 #| code-fold: true
 dag_hiv_intro <- dagify(
-  A1 ~ W, L1 ~ A1 + W, A2 ~ L1 + W, Y ~ A1 + A2 + L1 + W,
+  A1 ~ W, L1 ~ A1 + W, A2 ~ L1, Y ~ A1 + A2 + L1 + W,
   exposure = "A1", outcome = "Y",
   labels = c(W = "Baseline\n(age, sex, CD4_0)", A1 = "ART\nyear 1",
              L1 = "CD4\nend of year 1", A2 = "ART\nyear 2",
@@ -178,18 +178,18 @@ library(ggdag)
 dag_ch <- dagitty('dag {
   W   [pos="0,0.8"]
   A1  [pos="1,0"]
-  L2  [pos="2,0.8"]
+  L1  [pos="2,0.8"]
   A2  [pos="3,0"]
   Y   [pos="4,0"]
 
   W -> A1
-  W -> L2
+  W -> L1
   W -> A2
   W -> Y
-  A1 -> L2
+  A1 -> L1
   A1 -> Y
-  L2 -> A2
-  L2 -> Y
+  L1 -> A2
+  L1 -> Y
   A2 -> Y
 }')
 
@@ -197,7 +197,7 @@ dag_ch_tidy <- tidy_dagitty(dag_ch)
 dag_ch_df   <- dag_ch_tidy$data
 
 # Node roles for fill colour
-node_roles_ch <- c(W = "baseline", A1 = "treatment", L2 = "confounder",
+node_roles_ch <- c(W = "baseline", A1 = "treatment", L1 = "confounder",
                    A2 = "treatment", Y = "outcome")
 dag_ch_df$role <- node_roles_ch[dag_ch_df$name]
 
@@ -256,13 +256,13 @@ draw_dag_step <- function(highlight_pairs = list(),
 draw_dag_step(highlight_pairs = list())
 ```
 
-### Step 2: Why adjusting for $L_2$ fails
+### Step 2: Why adjusting for $L_1$ fails
 
-Conditioning on $L_2$ (shown by the box around the node) blocks the confounding paths $L_2 \to A_2$ and $L_2 \to Y$, which is what we want. But it *also* blocks the causal mediated path $A_1 \to L_2 \to Y$, which we wanted to keep open. The edge $L_2 \to Y$ sits on *both* paths at once: it is part of the confounding problem and part of the causal effect we are trying to estimate. That double duty is why no regression specification can solve both problems at once.
+Conditioning on $L_1$ (shown by the box around the node) blocks the confounding paths $L_1 \to A_2$ and $L_1 \to Y$, which is what we want. But it *also* blocks the causal mediated path $A_1 \to L_1 \to Y$, which we wanted to keep open. The edge $L_1 \to Y$ sits on *both* paths at once: it is part of the confounding problem and part of the causal effect we are trying to estimate. That double duty is why no regression specification can solve both problems at once.
 
 ```{r}
 #| label: fig-dag-step2
-#| fig-cap: "Step 2: Why adjusting for L2 fails. Red = confounding paths we want to block. Blue = causal mediated path also blocked by conditioning on L2. Purple = L2 -> Y is on BOTH paths. The box around L2 represents conditioning."
+#| fig-cap: "Step 2: Why adjusting for L1 fails. Red = confounding paths we want to block. Blue = causal mediated path also blocked by conditioning on L1. Purple = L1 -> Y is on BOTH paths. The box around L1 represents conditioning."
 #| fig-width: 8
 #| fig-height: 4.5
 #| code-fold: true
@@ -270,18 +270,18 @@ Conditioning on $L_2$ (shown by the box around the node) blocks the confounding 
 edges_step4 <- dag_ch_df[!is.na(dag_ch_df$to), ]
 edges_step4$step4_type <- "dim"
 
-# Confounding: L2 -> A2
-for (hp in list(c("L2", "A2"))) {
+# Confounding: L1 -> A2
+for (hp in list(c("L1", "A2"))) {
   idx <- edges_step4$name == hp[1] & edges_step4$to == hp[2]
   edges_step4$step4_type[idx] <- "confounding"
 }
-# Causal mediated: A1 -> L2
-for (hp in list(c("A1", "L2"))) {
+# Causal mediated: A1 -> L1
+for (hp in list(c("A1", "L1"))) {
   idx <- edges_step4$name == hp[1] & edges_step4$to == hp[2]
   edges_step4$step4_type[idx] <- "causal_mediated"
 }
-# L2 -> Y is on BOTH paths
-idx_both <- edges_step4$name == "L2" & edges_step4$to == "Y"
+# L1 -> Y is on BOTH paths
+idx_both <- edges_step4$name == "L1" & edges_step4$to == "Y"
 edges_step4$step4_type[idx_both] <- "both"
 
 xrng <- range(dag_ch_df$x, na.rm = TRUE)
@@ -303,7 +303,7 @@ ggplot(dag_ch_df, aes(x = x, y = y)) +
                aes(xend = xend, yend = yend),
                colour = tab10[["blue"]], linewidth = 1.0,
                arrow = arrow(length = unit(0.12, "inches"), type = "closed")) +
-  # Layer 4: Both paths (purple -- L2 -> Y)
+  # Layer 4: Both paths (purple -- L1 -> Y)
   geom_segment(data = edges_step4[edges_step4$step4_type == "both", ],
                aes(xend = xend, yend = yend),
                colour = tab10[["purple"]], linewidth = 1.1,
@@ -313,12 +313,12 @@ ggplot(dag_ch_df, aes(x = x, y = y)) +
              colour = "grey30", stroke = 0.6) +
   geom_text(aes(label = name), size = 3.5, fontface = "bold") +
   scale_fill_manual(values = role_fills_ch, guide = "none") +
-  # Conditioning box around L2
+  # Conditioning box around L1
   annotate("rect",
-           xmin = dag_ch_df$x[dag_ch_df$name == "L2"] - 0.45,
-           xmax = dag_ch_df$x[dag_ch_df$name == "L2"] + 0.45,
-           ymin = dag_ch_df$y[dag_ch_df$name == "L2"] - 0.35,
-           ymax = dag_ch_df$y[dag_ch_df$name == "L2"] + 0.35,
+           xmin = dag_ch_df$x[dag_ch_df$name == "L1"] - 0.45,
+           xmax = dag_ch_df$x[dag_ch_df$name == "L1"] + 0.45,
+           ymin = dag_ch_df$y[dag_ch_df$name == "L1"] - 0.35,
+           ymax = dag_ch_df$y[dag_ch_df$name == "L1"] + 0.35,
            fill = NA, colour = "black", linewidth = 1.2, linetype = "solid") +
   # Legend annotations
   annotate("segment", x = 0.3, xend = 0.9, y = -0.9, yend = -0.9,
@@ -330,12 +330,12 @@ ggplot(dag_ch_df, aes(x = x, y = y)) +
            colour = tab10[["blue"]], linewidth = 0.8,
            arrow = arrow(length = unit(0.08, "inches"), type = "closed")) +
   annotate("text", x = 1.0, y = -1.15,
-           label = "Causal path through L2 (also blocked!)", hjust = 0, size = 3) +
+           label = "Causal path through L1 (also blocked!)", hjust = 0, size = 3) +
   annotate("segment", x = 0.3, xend = 0.9, y = -1.4, yend = -1.4,
            colour = tab10[["purple"]], linewidth = 0.8,
            arrow = arrow(length = unit(0.08, "inches"), type = "closed")) +
   annotate("text", x = 1.0, y = -1.4,
-           label = "L2 -> Y: on BOTH paths (the dilemma)", hjust = 0, size = 3) +
+           label = "L1 -> Y: on BOTH paths (the dilemma)", hjust = 0, size = 3) +
   coord_cartesian(xlim = c(xrng[1] - 0.6, xrng[2] + 0.6),
                   ylim = c(-1.7, yrng[2] + 0.6),
                   clip = "off") +
@@ -344,25 +344,25 @@ ggplot(dag_ch_df, aes(x = x, y = y)) +
 
 ### Step 3: The feedback loop
 
-The reason $L_2$ is both a confounder and a mediator is the **feedback loop**: $A_1 \to L_2 \to A_2$. Prior treatment affects the time-varying confounder, which in turn affects future treatment.
+The reason $L_1$ is both a confounder and a mediator is the **feedback loop**: $A_1 \to L_1 \to A_2$. Prior treatment affects the time-varying confounder, which in turn affects future treatment.
 
 ```{r}
 #| label: fig-dag-step3
-#| fig-cap: "Step 3: The feedback loop. A1 -> L2 -> A2 is the path that makes L2 simultaneously a confounder and a mediator."
+#| fig-cap: "Step 3: The feedback loop. A1 -> L1 -> A2 is the path that makes L1 simultaneously a confounder and a mediator."
 #| fig-width: 8
 #| fig-height: 3.5
 #| code-fold: true
 draw_dag_step(
   highlight_pairs = list(
-    c("A1", "L2"),   # treatment affects future confounder
-    c("L2", "A2"),   # confounder affects future treatment
-    c("L2", "Y")     # confounder affects outcome
+    c("A1", "L1"),   # treatment affects future confounder
+    c("L1", "A2"),   # confounder affects future treatment
+    c("L1", "Y")     # confounder affects outcome
   ),
   highlight_colour = tab10[["orange"]]
 )
 ```
 
-G-methods (G-computation, IPTW, L-TMLE) get around this by integrating over the distribution of $L_2$ under the hypothetical intervention rather than conditioning on it.
+g-methods (G-computation, IPTW, L-TMLE) get around this by integrating over the distribution of $L_1$ under the hypothetical intervention rather than conditioning on it.
 
 ## What about GEE, mixed models, or covariate-adjusted regression?
 
@@ -380,10 +380,10 @@ A **static regime** assigns the same treatment at every visit regardless of pati
 The canonical estimand in the HIV example is the average counterfactual outcome under sustained high adherence versus the observed adherence pattern:
 
 $$
-\psi = E\big[Y(\bar{a} = \bar{1})\big] - E\big[Y^{\text{obs}}\big]
+\psi = E\big[Y(\bar{a} = \bar{1})\big] - E[Y]
 $$
 
-where $Y(\bar{1})$ is the virologic failure probability if everyone had maintained high adherence at every visit.
+where $Y(\bar{1})$ is the virologic failure probability if everyone had maintained high adherence at every visit, and $E[Y]$ is simply the mean outcome under the adherence patterns actually observed. That second term is a feature of the observed data, so it needs no potential-outcome notation. The two-period demonstration earlier in this chapter contrasted always-adhere with never-adhere rather than with the observed pattern, an all-or-nothing comparison that makes the mediated part of the effect easier to see.
 
 
 # Identification Assumptions
@@ -409,25 +409,25 @@ If some patient subgroups essentially never achieve high adherence (for example,
 All three assumptions are harder to satisfy in the longitudinal setting. [Sequential exchangeability](glossary.qmd) must hold at every visit, and positivity must hold for every covariate history. This is a large part of why stochastic regimes, which relax the positivity requirement, are often preferred over deterministic "always treat" regimes.
 
 
-# Why G-Methods Are Needed
+# Why g-methods Are Needed
 
-Under the assumptions above, the causal quantity $E[Y(\bar{a})]$ can be expressed as a function of the observed data distribution through the **G-computation formula** [@hernan2025whatif]:
+Under the assumptions above, the causal quantity $E[Y(\bar{a})]$ can be expressed as a function of the observed data distribution through the **G-computation formula** [@robins1986gformula; @hernan2025whatif]:
 
 $$
-E[Y(\bar{a})] = \sum_{\bar{l}} E[Y \mid \bar{A} = \bar{a}, \bar{L} = \bar{l}, W] \;\prod_t P(L_t = l_t \mid \bar{A}_{t-1} = \bar{a}_{t-1}, \bar{L}_{t-1} = \bar{l}_{t-1}, W)
+E[Y(\bar{a})] = E_W\!\left[ \sum_{\bar{l}} E[Y \mid \bar{A} = \bar{a}, \bar{L} = \bar{l}, W] \;\prod_t P(L_t = l_t \mid \bar{A}_{t-1} = \bar{a}_{t-1}, \bar{L}_{t-1} = \bar{l}_{t-1}, W) \right]
 $$
 
-The product term generates the interventional distribution of covariate trajectories, meaning what CD4 counts would look like under regime $\bar{a}$, and the outer expectation gives the outcome under those trajectories. Standard regression conditions on time-varying covariates instead of integrating over their interventional distribution, which is exactly the difference that matters here. The class of methods that can compute this quantity, namely G-computation, IPTW, and TMLE, are collectively called **g-methods**.
+The product term generates the interventional distribution of covariate trajectories, meaning what CD4 counts would look like under regime $\bar{a}$, and the outer expectation gives the outcome under those trajectories, averaged over the baseline covariates $W$. Standard regression conditions on time-varying covariates instead of integrating over their interventional distribution, which is exactly the difference that matters here. The class of methods that can compute this quantity, namely G-computation, IPTW, and targeted maximum likelihood estimation (TMLE), are collectively called **g-methods**.
 
 The three main g-methods were each introduced for the point-treatment case in @sec-gcomputation, @sec-iptw, and @sec-doubly-robust-tmle. Each brings its own strengths and limitations to the longitudinal setting:
 
 | Method | Core idea | Main limitation |
 |--------|-----------|----------------|
 | G-computation | Sequential outcome regressions, working backwards | Relies on correct outcome model specification |
-| IPTW (marginal structural models) [@robins1994estimation; @petersen2007msm] | Reweight by inverse of cumulative treatment probability | Cumulative weights become extreme with many time points |
+| IPTW (marginal structural models) [@robins1994estimation; @robins2000msm; @petersen2007msm] | Reweight by inverse of cumulative treatment probability | Cumulative weights become extreme with many time points |
 | Longitudinal TMLE | Sequential regressions plus targeting steps | More complex to implement, but doubly robust |
 
-IPTW was historically the first approach applied to HIV data [@robins1994estimation], but it grows unstable as the number of visits climbs, because the weights are products of time-specific inverse probabilities and those products can become enormous. Longitudinal TMLE and LMTP tame this instability by using substitution estimators with targeting steps.
+IPTW was historically the first approach applied to HIV data [@robins1994estimation; @robins2000msm], but it grows unstable as the number of visits climbs, because the weights are products of time-specific inverse probabilities and those products can become enormous. Longitudinal TMLE and LMTP tame this instability by using substitution estimators with targeting steps.
 
 
 # Preview of L-TMLE and LMTP
@@ -457,7 +457,7 @@ The next chapter walks through L-TMLE step by step using a two-time-point HIV co
 <details>
 <summary><strong>Q1. Why can't you simply add time-varying confounders as covariates in a Cox regression when those confounders are affected by prior treatment?</strong></summary>
 
-Because a time-varying confounder that is affected by prior treatment sits on the causal pathway between earlier treatment and the outcome. Adjust for it in a standard regression and you block part of the treatment effect (overadjustment bias). Omit it and you leave uncontrolled confounding. This is the treatment-confounder feedback problem, and G-methods get around it by integrating over the interventional distribution of the time-varying confounder rather than conditioning on it.
+Because a time-varying confounder that is affected by prior treatment sits on the causal pathway between earlier treatment and the outcome. Adjust for it in a standard regression and you block part of the treatment effect (overadjustment bias). Omit it and you leave uncontrolled confounding. This is the treatment-confounder feedback problem, and g-methods get around it by integrating over the interventional distribution of the time-varying confounder rather than conditioning on it.
 
 </details>
 

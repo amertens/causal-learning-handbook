@@ -9,7 +9,7 @@ format: html
 
 This chapter is about estimating nuisance functions, the outcome regression and propensity score, that every causal estimator from Part II depends on. The quality of these nuisance estimates directly affects the bias and variance of the downstream causal effect estimate.
 
-In the previous chapters you learned to estimate causal effects using g-computation, IPTW, AIPW, and TMLE. So far we have used simple logistic regressions for the nuisance functions. That is fine when the true relationships are roughly linear on the logit scale, but dangerous when they are not. Real data is rarely so obliging. Relationships bend, covariates interact, and the functional form is something we cannot guess in advance. Clinicians, for instance, often start treatment by threshold rules (start HAART when CD4 drops below 350), and a main-terms logistic regression has no way to capture the sharp nonlinearity that follows.
+In the previous chapters you learned to estimate causal effects using g-computation, IPTW, augmented inverse probability weighting (AIPW), and TMLE. So far we have used simple logistic regressions for the nuisance functions. That is fine when the true relationships are roughly linear on the logit scale, but dangerous when they are not. Real data is rarely so obliging. Relationships bend, covariates interact, and the functional form is something we cannot guess in advance. Clinicians, for instance, often start treatment by threshold rules (start HAART when CD4 drops below 350), and a main-terms logistic regression has no way to capture the sharp nonlinearity that follows.
 
 Rather than gamble on a single model, we can **stack** many candidate learners and let the data decide how to combine them. That is what **Super Learner** [@vanderLaan2007superlearner] does.
 
@@ -75,7 +75,7 @@ The oracle inequality is, in plain terms, a promise that you do not have to gues
 
 # How Super Learner Works
 
-Super Learner is an implementation of **stacked generalization** (stacking), adapted for statistical estimation [@vanderLaan2007superlearner; @vanderLaan2011targeted]. Here is the algorithm:
+Super Learner is an implementation of **stacked generalization** (stacking) [@wolpert1992stacking; @breiman1996stacking], adapted for statistical estimation [@vanderLaan2007superlearner; @vanderLaan2011targeted]. Here is the algorithm:
 
 :::{.callout-note}
 ## The Super Learner Algorithm
@@ -88,7 +88,7 @@ Super Learner is an implementation of **stacked generalization** (stacking), ada
    b. Fit each of the $K$ candidate learners on the training set.
    c. Generate predictions for every observation in the validation set from each fitted learner.
 3. **Assemble cross-validated predictions.** After cycling through all folds, every observation has a prediction from each learner (obtained when that observation was in the validation set). Stack these into an $n \times K$ matrix $\mathbf{Z}$.
-4. **Fit the metalearner.** Regress the outcome $Y$ on the columns of $\mathbf{Z}$ to find the optimal combination weights $\hat{\alpha}_1, \ldots, \hat{\alpha}_K$ that minimize the chosen loss function. Common metalearners include non-negative least squares (NNLS) and log-likelihood-based methods.
+4. **Fit the metalearner.** Regress the outcome $Y$ on the columns of $\mathbf{Z}$ to find the combination weights $\hat{\alpha}_1, \ldots, \hat{\alpha}_K$ that minimize the chosen loss function, subject to a convexity constraint: the weights are non-negative and sum to one ($\hat{\alpha}_k \geq 0$ and $\sum_k \hat{\alpha}_k = 1$). This convex combination is what the "best combination" and oracle language refer to, and it keeps the ensemble's predictions in the same range as the candidates'. Common metalearners include non-negative least squares (NNLS) and log-likelihood-based methods.
 5. **Refit on full data.** Fit each candidate learner on the *entire* dataset to obtain full-data predictions.
 6. **Combine.** The Super Learner prediction for a new observation is $\hat{Y}_{SL} = \sum_{k=1}^{K} \hat{\alpha}_k \hat{f}_k(X)$, where $\hat{f}_k$ is the $k$-th learner refit on the full data.
 :::
@@ -272,7 +272,7 @@ Every prediction in the matrix $\mathbf{Z}$ was made when the corresponding obse
 
 ## Evaluate each learner's cross-validated risk
 
-Before combining, let's see how each individual learner performs. Cross-validated risk is the standard criterion for comparing candidates [@zheng2010cvtmle].
+Before combining, let's see how each individual learner performs. Cross-validated risk is the standard criterion for comparing candidates [@dudoit2005asymptotics; @zheng2010cvtmle].
 
 ```{r}
 #| interactive: true
@@ -296,7 +296,7 @@ tibble(
   arrange(`CV MSE (Brier)`)
 ```
 
-Lower risk means better predictions. The **Brier score** (MSE for binary outcomes) ranges from 0 (perfect) to 0.25 (useless, equivalent to predicting 0.5 for everyone). Log-loss penalizes confident wrong predictions more heavily, which makes it the preferred metric when well-calibrated probabilities matter. That is exactly our situation in causal inference, where we need accurate estimates of $P(A = 1 \mid W)$ and $E[Y \mid A, W]$.
+Lower risk means better predictions. The **Brier score** (MSE for binary outcomes) is 0 for perfect predictions and 0.25 for the uninformative constant (0.5) predictor; a model that is confidently wrong on every observation reaches the worst possible value of 1. Log-loss penalizes confident wrong predictions more heavily, which makes it the preferred metric when well-calibrated probabilities matter. That is exactly our situation in causal inference, where we need accurate estimates of $P(A = 1 \mid W)$ and $E[Y \mid A, W]$.
 
 ## Fit the metalearner (non-negative least squares)
 
@@ -360,46 +360,7 @@ results <- tibble(
 results
 ```
 
-The Super Learner's cross-validated risk is at least as good as, and usually better than, the best individual learner. By combining learners optimally, it draws on the strength of each algorithm while hedging against any one algorithm's weakness. Poorly performing learners receive near-zero weight.
-
----
-
-# Understanding the Metalearner
-
-The metalearner is the "glue" that combines candidates. Different metalearners suit different problems.
-
-## Non-negative least squares (NNLS)
-
-What we used above. Minimizes squared error with non-negative weights. This is the default in the `SuperLearner` package for continuous and binary outcomes with MSE loss.
-
-$$
-\hat{\alpha} = \arg\min_{\alpha \geq 0} \sum_{i=1}^{n} \left(Y_i - \sum_{k=1}^{K} \alpha_k Z_{ik}\right)^2
-$$
-
-## Log-likelihood metalearner
-
-For binary outcomes, we may prefer to optimize log-likelihood instead:
-
-$$
-\hat{\alpha} = \arg\min_{\alpha \geq 0} -\sum_{i=1}^{n} \left[ Y_i \log\left(\sum_k \alpha_k Z_{ik}\right) + (1 - Y_i) \log\left(1 - \sum_k \alpha_k Z_{ik}\right) \right]
-$$
-
-This puts more weight on calibration, which is exactly what we want when the predictions feed into propensity scores or outcome regressions for causal inference.
-
-## Which metalearner should I choose?
-
-| Outcome type | Causal role | Recommended metalearner |
-|---|---|---|
-| Continuous | Outcome regression $E[Y \mid A, W]$ | NNLS (MSE) |
-| Binary | Outcome regression $E[Y \mid A, W]$ | Log-likelihood |
-| Binary | Propensity score $P(A \mid W)$ | Log-likelihood |
-| Binary | Discrimination / screening | AUC-based |
-
-:::{.callout-important}
-## Metalearner Choice Matters for Causal Inference
-
-When Super Learner predictions feed into TMLE or AIPW, we need well-calibrated *probabilities*, not just good rankings. Log-likelihood metalearners penalize overconfident wrong predictions (predicting 0.99 when the truth is 0), which keeps the propensity scores and outcome predictions from misbehaving downstream. An analyst would see that misbehavior as extreme IPTW weights or a destabilized TMLE fluctuation step. AUC-based metalearners optimize rankings but may produce poorly calibrated probabilities. Use them for classification, not for nuisance estimation in causal analyses.
-:::
+Asymptotically, and often in practice, the Super Learner's cross-validated risk is at least as good as the best individual learner. By combining learners optimally, it draws on the strength of each algorithm while hedging against any one algorithm's weakness, and poorly performing learners receive near-zero weight. One caveat applies to this particular comparison: the ensemble's cross-validated risk here is computed from the same out-of-fold predictions used to fit the metalearner weights, so it is optimistic and favors the Super Learner by construction. An honest Super-Learner-versus-candidate comparison needs an additional outer layer of cross-validation, which is exactly what `CV.SuperLearner` provides (we use it below).
 
 ---
 
@@ -438,10 +399,12 @@ sl_fit
 5. `"method.NNLS"` uses non-negative least squares for the metalearner; default for MSE loss; swap to `"method.NNloglik"` for log-likelihood loss on binary nuisance functions (recommended for causal inference)
 6. `V = 5L` sets 5-fold cross-validation; `L` suffix forces integer type required by the package. The `SuperLearner` default is `V = 10`, but 5 folds keep the chapter's runtime under a minute (the static build) or a few minutes (the WebR / interactive build) without materially changing the worked example. Use `V = 10` for production analyses.
 
-Compare the package output to our hand-coded version:
+@tbl-sl-weights compares the package output to our hand-coded version.
 
 ```{r}
 #| interactive: true
+#| label: tbl-sl-weights
+#| tbl-cap: "Super Learner weights from the hand-coded implementation versus the `SuperLearner` package, by candidate learner."
 tibble(
   Learner = c("GLM", "Mean", "LASSO", "RF"),
   `Hand-coded weight` = round(alpha, 4),
@@ -463,9 +426,23 @@ The weights may differ slightly because of different random seeds for fold assig
 
 ---
 
-# Choosing a Loss Function: MSE vs. Log-Likelihood vs. AUC
+# The Metalearner and Its Loss Function
 
-Super Learner allows different **loss functions**, which define what "best prediction" means.
+The metalearner is the "glue" that combines candidates, and the loss function it minimizes is what defines "best prediction." The two are really one choice: picking a loss function tells the metalearner how to weight the candidates. Different problems call for different losses.
+
+The metalearner we used by hand was **non-negative least squares (NNLS)**, which minimizes squared error subject to non-negative weights:
+
+$$
+\hat{\alpha} = \arg\min_{\alpha \geq 0} \sum_{i=1}^{n} \left(Y_i - \sum_{k=1}^{K} \alpha_k Z_{ik}\right)^2
+$$
+
+For binary outcomes we often prefer to optimize the log-likelihood instead:
+
+$$
+\hat{\alpha} = \arg\min_{\alpha \geq 0} -\sum_{i=1}^{n} \left[ Y_i \log\left(\sum_k \alpha_k Z_{ik}\right) + (1 - Y_i) \log\left(1 - \sum_k \alpha_k Z_{ik}\right) \right]
+$$
+
+which puts more weight on calibration, exactly what we want when the predictions feed into propensity scores or outcome regressions for causal inference. A third option, the **area under the curve (AUC)**, optimizes ranking rather than calibration. We take each in turn.
 
 ## Mean squared error (Brier score)
 
@@ -514,6 +491,12 @@ sl_auc <- SuperLearner(
 ```
 
 ## Practical guidance for causal inference
+
+:::{.callout-important}
+## Metalearner Choice Matters for Causal Inference
+
+When Super Learner predictions feed into TMLE or AIPW, we need well-calibrated *probabilities*, not just good rankings. Log-likelihood metalearners penalize overconfident wrong predictions (predicting 0.99 when the truth is 0), which keeps the propensity scores and outcome predictions from misbehaving downstream. An analyst would see that misbehavior as extreme IPTW weights or a destabilized TMLE fluctuation step. AUC-based metalearners optimize rankings but may produce poorly calibrated probabilities. Use them for classification, not for nuisance estimation in causal analyses.
+:::
 
 :::{.callout-tip}
 ## Which Loss Function for Which Nuisance Model?
@@ -636,6 +619,8 @@ summary(cv_sl)
 ```{r}
 #| interactive: true
 #| code-fold: true
+#| label: fig-cvsl
+#| fig-cap: "Cross-validated risk for each candidate learner, the discrete Super Learner, and the Super Learner ensemble, with 95% confidence intervals. Lower is better."
 plot(cv_sl) +
   theme_minimal() +
   labs(
@@ -644,7 +629,7 @@ plot(cv_sl) +
   )
 ```
 
-The plot shows cross-validated risk estimates with 95% confidence intervals for each individual candidate learner, the **discrete Super Learner** (which selects the single best learner), and the **Super Learner** (the optimal weighted combination). If the Super Learner's confidence interval overlaps substantially with the best individual learner, the ensemble buys you only a modest improvement. If it sits clearly lower, the ensemble is doing real work by combining learners. Either way, Super Learner is a safe default: it performs at least as well as the best candidate, and often better.
+@fig-cvsl shows cross-validated risk estimates with 95% confidence intervals for each individual candidate learner, the **discrete Super Learner** (which selects the single best learner), and the **Super Learner** (the optimal weighted combination). If the Super Learner's confidence interval overlaps substantially with the best individual learner, the ensemble buys you only a modest improvement. If it sits clearly lower, the ensemble is doing real work by combining learners. Either way, Super Learner is a safe default: asymptotically, and often in practice, it performs at least as well as the best candidate.
 
 ---
 

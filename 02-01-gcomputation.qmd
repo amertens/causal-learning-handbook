@@ -12,13 +12,25 @@ Outcome modeling and standardization, usually called **g-computation**, is one o
 
 ---
 
-G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions [@hernan2025whatif]. Nothing hinges on reading off a single regression coefficient. It implements the identification formula from @sec-roadmap directly ($E[Y(a)] = E_W[E[Y \mid A=a, W]]$, where the potential outcome $Y(a)$ is written $Y(1)$ and $Y(0)$ for the two treatment levels), which makes it the most concrete entry point for learning causal estimation and shows how a causal estimand maps to a statistical one.
+G-computation estimates causal effects by predicting what *would* happen to everyone under each treatment, then comparing those predictions [@hernan2025whatif]. Nothing hinges on reading off a single regression coefficient. It implements the identification formula from @sec-roadmap directly, an idea that traces back to the g-formula [@robins1986gformula] ($E[Y(a)] = E_W[E[Y \mid A=a, W]]$, where the potential outcome $Y(a)$ is written $Y(1)$ and $Y(0)$ for the two treatment levels), which makes it the most concrete entry point for learning causal estimation and shows how a causal estimand maps to a statistical one.
 
 The method reconstructs what would have happened if *everyone* received treatment ($A=1$) and, separately, if *everyone* received control ($A=0$). The recipe has three steps: fit an outcome model $E[Y \mid A, W]$, predict outcomes for each individual under both treatments, then average those predictions (standardization).
 
+:::{.callout-note}
+## Identification assumptions
+
+The equality $E[Y(a)] = E_W[E[Y \mid A=a, W]]$ holds only under three conditions, developed in @sec-roadmap:
+
+- **Exchangeability** (no unmeasured confounding): given $W$, treatment is independent of the potential outcomes.
+- **Positivity**: every covariate stratum has a positive probability of receiving each treatment level, so the model is never asked to extrapolate into regions with no support.
+- **Consistency**: the observed outcome under the treatment actually received equals the corresponding potential outcome.
+
+If any of these fail, the standardized estimate no longer carries a causal interpretation, no matter how well the outcome model fits.
+:::
+
 # Implementation Example: HIV Antiretroviral Therapy Cohort
 
-We use the shared HIV antiretroviral therapy cohort introduced in the case study [@vanderwal2011ipw]. It follows HIV-positive patients from seroconversion and records HAART initiation and mortality. Here we collapse the longitudinal data to a point-treatment snapshot: A = `ever_haart` (1 = initiated HAART at any point, 0 = never initiated), Y = `died` (1 = died, 0 = alive at end of follow-up), with confounders age, sex, and baseline CD4 count (square-root transformed).
+We use the shared HIV antiretroviral therapy cohort introduced in the case study [@vanderwal2011ipw]. It follows HIV-positive patients from seroconversion and records highly active antiretroviral therapy (HAART) initiation and mortality. Here we collapse the longitudinal data to a point-treatment snapshot: A = `ever_haart` (1 = initiated HAART at any point, 0 = never initiated), Y = `died` (1 = died, 0 = alive at end of follow-up), with confounders age, sex, and baseline CD4 count (square-root transformed).
 
 ```{r}
 #| interactive: true
@@ -71,6 +83,8 @@ Here `p1[i]` and `p0[i]` are the predicted outcomes for person *i* under treatme
 Averaging the counterfactual predictions over the *entire population* turns model-based predictions into a causal estimate: a standardized (marginal) risk difference, the same quantity a well-randomized trial would yield.
 
 ```{r}
+#| label: tbl-gcomp-riskdiff
+#| tbl-cap: "Standardized risks under universal HAART initiation and under no initiation, and their difference (the ATE on the risk scale)."
 #| interactive: true
 #| code-fold: true
 risk1 <- mean(p1)
@@ -82,7 +96,7 @@ knitr::kable(data.frame(risk1 = risk1, risk0 = risk0, ate = ate))
 
 ```{r}
 #| label: fig-gcomp-counterfactual
-#| fig-cap: "Predicted mortality risk for every individual under universal HAART initiation ($A=1$) versus no initiation ($A=0$). G-computation averages each distribution down to a single standardized risk (dashed lines); the gap between those averages is the ATE."
+#| fig-cap: "Predicted mortality risk for every individual under universal HAART initiation ($A=1$) versus no initiation ($A=0$). G-computation averages each distribution down to a single standardized risk (dashed lines); the gap between those averages is the average treatment effect (ATE)."
 #| code-fold: true
 library(ggplot2)
 tibble::tibble(
@@ -97,13 +111,15 @@ tibble::tibble(
   theme_minimal()
 ```
 
-**How to interpret these results:** `ate` is the standardized (marginal) risk difference, and it is the causal number, not either regression coefficient. Read it as follows. If the entire population had initiated HAART rather than not, the estimated mortality risk would change by `ate` (about `r round(ate * 100, 1)` percentage points), with the measured confounders' distribution held fixed. `risk1` and `risk0` are the standardized risks under universal treatment and under no treatment, and the contrast between them is what a well-randomized trial would have estimated.
+**How to interpret these results:** In @tbl-gcomp-riskdiff, `ate` is the standardized (marginal) risk difference, and it is the causal number, not either regression coefficient. @fig-gcomp-counterfactual plots the full counterfactual risk distributions behind those numbers, with the dashed lines marking `risk1` and `risk0` and the gap between them showing the ATE. Read the estimate as follows. If the entire population had initiated HAART rather than not, the estimated mortality risk would change by `ate` (about `r round(ate * 100, 1)` percentage points), with the measured confounders' distribution held fixed. `risk1` and `risk0` are the standardized risks under universal treatment and under no treatment, and the contrast between them is what a well-randomized trial would have estimated.
 
 ### Beyond the Risk Difference: Relative Risk and Population Attributable Fraction
 
 One strength of g-computation is that once you have the counterfactual predictions `p1` and `p0`, you can compute *any* contrast, not just the risk difference. A single regression coefficient does not give you that.
 
 ```{r}
+#| label: tbl-gcomp-contrasts
+#| tbl-cap: "Alternative causal contrasts computed from the same counterfactual predictions: risk difference, relative risk, and prevented fraction relative to a world in which no one initiated HAART."
 #| interactive: true
 #| code-fold: true
 # Relative risk (risk ratio)
@@ -123,12 +139,13 @@ knitr::kable(data.frame(
 ))
 ```
 
-The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **prevented fraction** compares the observed (current) mortality risk to the risk in a counterfactual world where *no one* initiated HAART: $(P(Y=1) - P(Y(0)=1)) / P(Y=1)$. The familiar "population attributable fraction" reading, the fraction of cases that would be *eliminated* by removing exposure, applies to a *harmful* exposure. HAART is protective, so the sign flips. Here $\text{risk0} > \text{overall risk}$, the quantity comes out **negative**, and a negative value means the current treatment distribution *prevents* that fraction of deaths relative to a world where no one is treated. Read literally, moving everyone to no-HAART would *add* deaths, not eliminate them. Under the identification assumptions (exchangeability, positivity, consistency), this contrast carries a causal interpretation. The traditional epidemiologic PAF formula does not: it uses observed prevalence, needs no causal assumptions, and returns a number you cannot read causally.
+@tbl-gcomp-contrasts collects three contrasts computed from the same `p1` and `p0`. The **relative risk** tells you how many times more likely the outcome is under treatment versus control. The **prevented fraction** compares the observed mortality risk to the risk in a counterfactual world where *no one* initiated HAART. None of these is available from a single logistic regression coefficient; you would have to exponentiate and back-transform under strong scale assumptions, whereas g-computation reads them straight off the predicted counterfactual risks.
 
-<!-- editor note: implemented Option A from the editorial spec. The original code/prose labeled (overall_risk - risk0)/overall_risk as a "population attributable fraction" eliminated by removing exposure, which is sign-inverted for a protective treatment. Kept the formula, renamed to "prevented fraction", and stated the sign direction explicitly. -->
+:::{.callout-warning}
+## Watch the sign of the prevented fraction
 
-
-Neither measure is directly available from a single logistic regression coefficient. You would need to exponentiate and back-transform under strong assumptions about the scale. With g-computation you compute them directly from the predicted counterfactual risks.
+The prevented fraction is $(P(Y=1) - P(Y(0)=1)) / P(Y=1)$. The familiar "population attributable fraction" reading, the share of cases *eliminated* by removing exposure, assumes a *harmful* exposure. HAART is protective, so $\text{risk0} > \text{overall risk}$ and the quantity comes out **negative**: the current treatment distribution *prevents* that fraction of deaths, and moving everyone to no-HAART would *add* deaths rather than eliminate them. Under the identification assumptions above this contrast is causal; the traditional epidemiologic PAF formula, built from observed prevalence, is not.
+:::
 
 
 # Why G-Computation Works
@@ -148,7 +165,7 @@ In plain terms, this averages the predicted outcomes under treatment (or control
 
 This is one of the most commonly confused points in epidemiology:
 
-- **Conditional log-odds ratio** (what logistic regression gives you): "Among people with the *same* age, sex, and baseline CD4, how do the odds of death differ between those who initiated HAART and those who did not?" This is a measure of *association within strata*. It does not tell you what would happen if you intervened on the whole population. It is also non-collapsible, meaning it changes depending on which covariates you condition on, even without confounding.
+- **Conditional log-odds ratio** (what logistic regression gives you): "Among people with the *same* age, sex, and baseline CD4, how do the odds of death differ between those who initiated HAART and those who did not?" This is a measure of *association within strata*. It does not tell you what would happen if you intervened on the whole population. It is also non-collapsible, meaning it changes depending on which covariates you condition on, even without confounding [@greenland1999collapsibility].
 
 - **Marginal risk difference** (what g-computation gives you): "If we could treat *everyone* versus *no one*, how much would the overall population risk change?" This is a *causal* contrast on the risk scale, the kind of number a clinician or policy maker can act on.
 
@@ -197,7 +214,7 @@ ate_flex <- mean(predict(m_flex, transform(d, A = 1), type = "response") -
 round(c(truth = true_ate, main_terms = ate_wrong, flexible = ate_flex), 3)
 ```
 
-The main-terms estimate misses the true risk difference because it cannot represent the curvature or the above-65 interaction. The flexible model, which happens to include exactly those terms, recovers the truth. The catch in real data is that no one tells you which terms to add. That is the problem Super Learner (@sec-superlearner) solves: instead of guessing the functional form, it lets a library of algorithms and cross-validation choose it [@vanderLaan2007superlearner]. That is why the next chapters build g-computation and TMLE on top of machine learning rather than a single hand-specified regression.
+The main-terms estimate misses the true risk difference because it cannot represent the curvature or the above-65 interaction. The flexible model, which happens to include exactly those terms, recovers the truth. The catch in real data is that no one tells you which terms to add. That is the problem Super Learner (@sec-superlearner) solves: instead of guessing the functional form, it lets a library of algorithms and cross-validation choose it [@vanderLaan2007superlearner]. That is why the next chapters build g-computation and targeted maximum likelihood estimation (TMLE) on top of machine learning rather than a single hand-specified regression.
 
 ---
 

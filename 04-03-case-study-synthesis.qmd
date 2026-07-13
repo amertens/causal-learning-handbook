@@ -21,20 +21,20 @@ Throughout this handbook we have leaned on one dataset, the longitudinal HIV ant
 
 ## What a naive analysis might have done
 
-Without the roadmap, a researcher would likely fit a Cox or pooled logistic regression, adjust for time-varying CD4 because it is a confounder, and report the hazard ratio as the effect of HAART. Two of those moves are the traps we developed earlier in the book. Adjusting for CD4 blocks part of the treatment effect, since CD4 is itself affected by prior treatment (@sec-longitudinal-confounding), and the hazard ratio answers a different question than the one a clinician asks (@sec-regression-vs-causal). As the running case study shows, the upshot can make an effective treatment look harmful.
+Without the roadmap, a researcher would likely fit a Cox or pooled logistic regression, adjust for time-varying CD4 because it is a confounder, and report the hazard ratio as the effect of highly active antiretroviral therapy (HAART). Two of those moves are the traps we developed earlier in the book. Adjusting for CD4 blocks part of the treatment effect, since CD4 is itself affected by prior treatment (@sec-longitudinal-confounding), and the hazard ratio answers a different question than the one a clinician asks (@sec-regression-vs-causal). As the running case study shows, the upshot can make an effective treatment look harmful.
 
 ## How the Causal Roadmap clarified the question
 
-Running the seven steps of @sec-roadmap on this cohort fixed each of those problems before any model was fit. A target trial protocol set the question: the effect on mortality of initiating HAART at seroconversion versus not. A DAG made the dual role of CD4 explicit, a confounder of future treatment and a mediator of past treatment. The estimand was the marginal risk difference, not a hazard ratio. And the identification assumptions (exchangeability, consistency, positivity) were stated alongside where they might fail, namely unmeasured adherence and clinical staging. Only then were g-computation, IPTW, and TMLE [@vanderLaan2006tmle] applied and compared, using Super Learner [@vanderLaan2007superlearner] for flexible nuisance estimation.
+Running the seven steps of @sec-roadmap on this cohort fixed each of those problems before any model was fit. A target trial protocol set the question: the effect on mortality of initiating HAART at seroconversion versus not. A directed acyclic graph (DAG) made the dual role of CD4 explicit, a confounder of future treatment and a mediator of past treatment. The estimand was the marginal risk difference, not a hazard ratio. And the identification assumptions (exchangeability, consistency, positivity) were stated alongside where they might fail, namely unmeasured adherence and clinical staging. Only then were g-computation [@robins1986gformula], IPTW (inverse probability of treatment weighting), and TMLE (targeted maximum likelihood estimation) [@vanderLaan2006tmle] applied and compared, using Super Learner [@vanderLaan2007superlearner] for flexible nuisance estimation.
 
 ## Why time-dependent confounding required longitudinal methods
 
 The central lesson of this case study is that **standard regression cannot handle treatment-confounder feedback**. When a time-varying confounder (`cd4.sqrt`) is both a consequence of prior treatment (`haartind`) and a cause of future treatment, the analyst faces an impossible choice in a regression framework:
 
 - **Do not adjust for time-varying CD4:** leaves confounding of future treatment unaddressed.
-- **Adjust for time-varying CD4:** blocks part of the treatment effect and introduces collider bias.
+- **Adjust for time-varying CD4:** blocks part of the treatment effect, and can introduce collider bias when CD4 shares an unmeasured common cause with the outcome.
 
-Neither option produces a consistent estimate of the causal effect, as @sec-longitudinal-confounding demonstrates concretely. The g-methods (g-computation, IPTW with marginal structural models, longitudinal TMLE) escape the dilemma by modeling the treatment mechanism separately from the outcome and then using that model to reweight or standardize the analysis. @sec-illustrated-ltmle walked through the mechanics of longitudinal TMLE step by step: backwards sequential regression conditions on `cd4.sqrt` where it confounds future treatment and integrates it out where it mediates past treatment. This is not a minor technical improvement. It changes what can be estimated at all.
+Neither option produces a consistent estimate of the causal effect, as @sec-longitudinal-confounding demonstrates concretely. The g-methods (g-computation, IPTW with marginal structural models [@robins2000msm], longitudinal TMLE) escape the dilemma by separating the treatment mechanism from the outcome mechanism, modeling one or both explicitly, then reweighting (IPTW) or standardizing (g-computation) rather than naively conditioning; TMLE combines both. @sec-illustrated-ltmle walked through the mechanics of longitudinal TMLE step by step: backwards sequential regression conditions on `cd4.sqrt` where it confounds future treatment and integrates it out where it mediates past treatment. This is not a minor technical improvement. It changes what can be estimated at all.
 
 ## What the example illustrates about real-world evidence analyses
 
@@ -55,7 +55,11 @@ In every one of these settings, estimating causal effects correctly calls for th
 
 ## Summary
 
+@tbl-approach-comparison lays out how each approach handles confounding, treatment-confounder feedback, marginal effects, and valid inference.
+
 ```{r}
+#| label: tbl-approach-comparison
+#| tbl-cap: "Comparison of approaches for the HAART case study"
 #| code-fold: true
 source("_data/load-haart-cohort.R")
 
@@ -69,21 +73,20 @@ tibble::tribble(
   "IPTW / MSM",                "Yes", "Yes", "Yes", "Sandwich SE",
   "TMLE",                      "Yes", "Yes (longitudinal)", "Yes", "Influence curve"
 ) |>
-  knitr::kable(caption = "Comparison of approaches for the HAART case study")
+  knitr::kable()
 ```
 
-Even after longitudinal methods, the results still rest on untestable identification assumptions. @sec-advanced-diagnostics showed how to probe that dependence with E-values, quantitative bias analysis, and truncation sensitivity. For the HAART cohort, unmeasured adherence is the most plausible threat: patients who adhere to treatment tend to be healthier, which can inflate the apparent benefit. A sensitivity analysis tells us how strong such confounding would have to be to explain away the estimated effect.
+Even after longitudinal methods, the results still rest on untestable identification assumptions. @sec-advanced-diagnostics showed how to probe that dependence with E-values [@vanderweele2017evalue], quantitative bias analysis, and truncation sensitivity. For the HAART cohort, unmeasured adherence is the most plausible threat: patients who adhere to treatment tend to be healthier, which can inflate the apparent benefit. A sensitivity analysis tells us how strong such confounding would have to be to explain away the estimated effect.
 
 The move from naive regression to longitudinal TMLE is not sophistication for its own sake. Each step solves a concrete problem the previous approach could not. The antiretroviral therapy case study makes both the problems and their solutions tangible.
 
 ## Sources
 
-- Robins JM, Hernan MA, Brumback B (2000). Marginal structural models and causal inference in epidemiology. *Epidemiology* 11(5):550-560.
+- Robins JM, Hernan MA, Brumback B (2000). Marginal structural models and causal inference in epidemiology. *Epidemiology* 11(5):550-560 [@robins2000msm].
 - Hernan MA, Brumback B, Robins JM (2000). Marginal structural models to estimate the causal effect of zidovudine on the survival of HIV-positive men. *Epidemiology* 11(5):561-570.
 - Van der Wal WM, Geskus RB (2011). ipw: An R Package for Inverse Probability Weighting. *Journal of Statistical Software* 43(13):1-23 [@vanderwal2011ipw].
 - Petersen ML, van der Laan MJ (2014). Causal models and learning from data. *Epidemiology* 25(3):418-426 [@petersen2014causal].
 - Dang LE et al. (2023). A causal roadmap for generating high-quality real-world evidence. *J Clin Transl Sci* [@dang2023causal].
 - van der Laan MJ, Rubin DB (2006). Targeted maximum likelihood learning [@vanderLaan2006tmle].
 - van der Laan MJ, Polley EC, Hubbard AE (2007). Super learner [@vanderLaan2007superlearner].
-- Díaz I et al. (2021). Non-parametric efficient causal mediation with intermediate confounders. *Biometrika* [@diaz2021lmtp].
 - Hernan MA, Robins JM (2025). *Causal Inference: What If*. Chapman & Hall/CRC [@hernan2025whatif].

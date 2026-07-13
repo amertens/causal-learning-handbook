@@ -9,10 +9,10 @@ format: html
 
 ::: {.callout-note}
 ## Learning objectives
-- Understand the backwards sequential regression logic that underpins L-TMLE
+- Understand the backwards sequential regression logic that underpins longitudinal targeted maximum likelihood estimation (L-TMLE), the longitudinal extension of targeted maximum likelihood estimation (TMLE)
 - Explain why conditioning on the time-varying confounder is needed at one time step but harmful at another
 - Describe the role of targeting (fluctuation steps) in the longitudinal setting
-- Recognize when static regimes violate positivity and when LMTP offers a better framework
+- Recognize when static regimes violate positivity and when a longitudinal modified treatment policy (LMTP) offers a better framework
 :::
 
 ```{r}
@@ -40,9 +40,9 @@ The previous chapter explained why treatment-confounder feedback breaks standard
 
 # The causal question
 
-We use a two-time-point HIV cohort [@vanderwal2011ipw] to make the mechanics visible. The question: what is the probability of virologic failure if every patient maintained high ART adherence at each visit, compared to never maintaining high adherence?
+We use a simulated two-time-point HIV cohort modeled on [@vanderwal2011ipw] to make the mechanics visible. The question: what is the probability of virologic failure if every patient maintained high antiretroviral therapy (ART) adherence at each visit, compared to never maintaining high adherence?
 
-This compares two static regimes, $\bar{a} = (1,1)$ versus $\bar{a} = (0,0)$, with treatment-confounder feedback running through CD4 count. Two time points keep the picture clear, but the same logic extends to any number of visits.
+This compares two static regimes, $\bar{a} = (1,1)$ versus $\bar{a} = (0,0)$, with treatment-confounder feedback running through CD4 count. Two time points keep the picture clear, but the same logic extends to any number of visits. @fig-hiv-node-order shows the node ordering: baseline covariates (including viral load, VL) come first, then visit-1 adherence, then the visit-1 CD4 count that sits between the two treatment decisions, then visit-2 adherence, and finally the outcome.
 
 ```{r}
 #| label: fig-hiv-node-order
@@ -99,11 +99,11 @@ cat("Failure rate:", round(mean(Y), 3), "\n")
 
 Think of it as solving a maze from the exit. We start at the final outcome and work back toward the first treatment decision, so each step already knows where it needs to end up. L-TMLE puts three ideas together.
 
-**Sequential regressions, working backwards.** Start at the final outcome and model $E[Y \mid A_2, L_1, A_1, W]$. This conditions on $L_1$ to deconfound $A_2$. Then move backwards: take the predicted outcomes under $A_2 = 1$ and regress them on $(A_1, W)$ only, leaving $L_1$ out. That integrates $L_1$ out and preserves the mediated effect of $A_1$ through $L_1$.
+**Sequential regressions, working backwards** [@bang2005doubly]**.** Start at the final outcome and model $E[Y \mid A_2, L_1, A_1, W]$. This conditions on $L_1$ to deconfound $A_2$. Then move backwards: take the predicted outcomes under $A_2 = 1$ and regress them on $(A_1, W)$ only, leaving $L_1$ out. That integrates $L_1$ out and preserves the mediated effect of $A_1$ through $L_1$.
 
 **Treatment mechanism models.** Estimate the probability of receiving treatment at each visit conditional on history: $\hat{g}_1(W)$ and $\hat{g}_2(A_1, L_1, W)$.
 
-**Targeting steps.** Use the treatment mechanism to construct clever covariates that correct the sequential regressions for any remaining bias. At each time point, the final estimate is consistent if either the outcome regression or the treatment model is correctly specified (sequential double robustness).
+**Targeting steps.** Use the treatment mechanism to construct clever covariates, covariates built from the estimated treatment probabilities that reweight each regression toward the causal target, which correct the sequential regressions for any remaining bias. At each time point, the final estimate is consistent if either the outcome regression or the treatment model is correctly specified (sequential double robustness).
 
 Here is the key point. Conditioning on $L_1$ at time 2 deconfounds $A_2$, while not conditioning on $L_1$ at time 1 preserves the indirect effect $A_1 \to L_1 \to Y$. Standard regression cannot do both in a single model.
 
@@ -162,6 +162,8 @@ The complete L-TMLE algorithm, with code for treatment mechanism estimation, seq
 
 
 # When static regimes break down
+
+The regimes we have compared so far are static: they assign the same treatment sequence, such as "always adhere," to every patient regardless of what happens along the way. A dynamic regime, by contrast, is a treatment rule that responds to a patient's accrued covariate history, for example "start ART once CD4 drops below 350." L-TMLE estimates the effects of dynamic regimes as readily as static ones, and dynamic rules often stay closer to the observed data. Even so, the positivity concern below applies to any regime, static or dynamic, that pushes treatment into rarely observed territory.
 
 The "always adhere" regime is pedagogically useful, but it carries a practical limitation: no real intervention achieves 100% adherence. When the static regime assigns treatment values that are rare in the observed data, positivity breaks down. Propensity scores approach zero, clever covariates explode, and the estimate becomes unstable.
 

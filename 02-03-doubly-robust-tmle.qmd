@@ -12,7 +12,7 @@ In previous chapters, you learned:
 - **G-computation** depends on correctly modeling the *outcome*
 - **IPTW** depends on correctly modeling the *treatment mechanism*
 
-Each of those methods stakes everything on one model: g-computation on the outcome model, IPTW on the treatment model. AIPW and TMLE draw on both, and stay consistent if **either** model is correctly specified.
+Each of those methods stakes everything on one model: g-computation on the outcome model, IPTW on the treatment model. AIPW (augmented inverse probability weighting) and TMLE (targeted maximum likelihood estimation) draw on both, and stay consistent if **either** model is correctly specified.
 
 ---
 
@@ -24,7 +24,7 @@ A doubly robust estimator stays consistent if **either** the treatment model or 
 
 # Two Roads to the Same Destination: AIPW and TMLE
 
-AIPW [@robins1994estimation; @bang2005doubly] and TMLE [@vanderLaan2006tmle] are not competing methods aimed at different problems. They are **two strategies for solving the same problem**: producing an estimator of the ATE that is doubly robust, semiparametrically efficient, and uses both the outcome model $Q(A, W) = E[Y \mid A, W]$ and the propensity score $g(W) = P(A=1 \mid W)$. Both are derived from the **[efficient influence function](notation.qmd) (EIF)** for the ATE, and under regularity conditions both reach the same asymptotic distribution and the same semiparametric efficiency bound.
+AIPW [@robins1994estimation; @bang2005doubly] and TMLE [@vanderLaan2006tmle] are not competing methods aimed at different problems. They are **two strategies for solving the same problem**: producing an estimator of the ATE (average treatment effect) that is doubly robust, semiparametrically efficient, and uses both the outcome model $Q(A, W) = E[Y \mid A, W]$ and the propensity score $g(W) = P(A=1 \mid W)$. Both are derived from the **[efficient influence function](notation.qmd) (EIF)** for the ATE, and under regularity conditions both reach the same asymptotic distribution and the same semiparametric efficiency bound.
 
 What separates them is **how** they put the EIF to work:
 
@@ -48,7 +48,7 @@ On large samples with good overlap the three agree. The differences surface in f
 ::: {.callout-note}
 ## What is an influence function? (plain version)
 
-Almost any estimator in this book can be rewritten, to a close approximation, as a simple average of one number per patient. That per-patient number is the patient's value of the **influence function**: it says how far, and in which direction, that single patient pulls the final estimate. An applied reader needs only two consequences of this. First, the spread of those per-patient pulls is what sets the standard error: take their standard deviation and divide by the square root of the sample size. Second, an estimator reaches the smallest possible standard error when its influence function is the *efficient* one, and TMLE earns that efficiency by nudging the fitted models until the pulls average to zero.
+Almost any estimator in this book can be rewritten, to a close approximation, as a simple average of one number per patient. That per-patient number is the patient's value of the **influence function**: it says how far, and in which direction, that single patient pulls the final estimate. An applied reader needs only two consequences of this. First, the spread of those per-patient pulls is what sets the standard error: take their standard deviation and divide by the square root of the sample size. Second, an estimator reaches the smallest possible standard error when its influence function is the *efficient* one. TMLE nudges the fitted models until the pulls average to zero, which is what makes it consistent and doubly robust, and because the pulls it zeroes out are the *efficient* influence function specifically, the estimator also attains the efficiency bound.
 
 Every patient casts a vote on the final estimate. Most votes are quiet, but a few loud ones set the margin of error. A two-patient picture makes it concrete. Suppose the estimate is a risk difference and we have computed each patient's influence value. An ordinary patient, well matched on covariates with a predictable outcome, might have an influence value near $0$, so dropping them barely moves the estimate. A high-leverage patient, say a treated patient whose propensity score was only $0.03$ (very unlikely to be treated) and who then had the outcome, might have an influence value of $+18$. That one patient hauls the estimate upward, and a handful like them widen the confidence interval. The standard error is just the standard deviation of these per-patient values over the square root of $n$, so a few large values inflate it. The inference code later in this chapter computes exactly these per-patient numbers.
 :::
@@ -64,7 +64,7 @@ AIPW augments the G-computation estimator with an inverse-probability-weighted r
 
 - If the **treatment model** is correctly specified (and positivity holds), the IPW correction yields a consistent estimate of the causal effect even when the outcome model is wrong
 - If the **outcome model** is correctly specified, the correction term has mean zero and the G-computation component carries the estimate
-- If **both** are correctly specified (and nuisances converge fast enough), the estimator hits the **semiparametric efficiency bound**, the smallest asymptotic variance available among regular asymptotically linear estimators
+- If **both** are correctly specified (and nuisances converge fast enough), the estimator hits the **semiparametric efficiency bound** [@hahn1998efficiency], the smallest asymptotic variance available among regular asymptotically linear estimators
 
 This is the *one-step* idea from semiparametric theory: take a plug-in estimator, add the empirical mean of the EIF correction, and the result is a $\sqrt{n}$-consistent estimator that solves the EIF estimating equation [@robins1994estimation; @bang2005doubly].
 
@@ -256,7 +256,7 @@ The initial outcome and propensity score models need not be simple GLMs. They ca
 
 # TMLE Inference: Standard Errors and Confidence Intervals
 
-One major advantage of TMLE is that inference follows directly from the **efficient influence function (EIF)**. Using the clever covariate notation from Section 7, where $H(A, W) = A/g(W) - (1-A)/(1-g(W))$, the EIF for the ATE at the TMLE fit can be written in a single unified form:
+One major advantage of TMLE is that inference follows directly from the **efficient influence function (EIF)**. Using the clever covariate $H(A, W)$ defined above, where $H(A, W) = A/g(W) - (1-A)/(1-g(W))$, the EIF for the ATE at the TMLE fit can be written in a single unified form:
 
 $$
 D_i = H(A_i, W_i)\big(Y_i - Q^*(A_i, W_i)\big) + Q^*(1, W_i) - Q^*(0, W_i) - \hat{\psi}
@@ -268,7 +268,7 @@ $$
 D_i = \frac{A_i}{g(W_i)}\big(Y_i - Q_1^*(W_i)\big) - \frac{1-A_i}{1-g(W_i)}\big(Y_i - Q_0^*(W_i)\big) + Q_1^*(W_i) - Q_0^*(W_i) - \hat{\psi}
 $$
 
-where $\hat{\psi}$ is the TMLE ATE estimate. The variance of the ATE is estimated by the sample variance of the EIF divided by $n$: $\hat{\sigma}^2 = \frac{1}{n}\sum_i D_i^2$.
+where $\hat{\psi}$ is the TMLE ATE estimate. Because the EIF is mean-zero at the TMLE fit, its sample variance is $\hat{\sigma}^2 = \frac{1}{n}\sum_i D_i^2$. The variance of the estimator is then this EIF variance divided by the sample size, $\widehat{\text{Var}}(\hat{\psi}) = \hat{\sigma}^2 / n$, so the standard error is $\hat{\sigma}/\sqrt{n}$.
 
 The same EIF underlies AIPW's variance estimator, which is the deeper reason both estimators share an asymptotic distribution. They differ in how they *form* the point estimate, not in the influence function used for inference.
 
@@ -322,7 +322,7 @@ tibble(eic = EIC) |>
 2. The EIF has two parts: (a) $H(A,W)(Y - Q^*)$; an IPW-weighted residual that corrects any outcome model bias, and (b) $(Q_1^* - Q_0^* - \hat\psi)$; the centered substitution component. When the fluctuation step correctly solved the EIF equation, the sample mean of the EIF is exactly zero.
 3. The EIF variance divided by $n$ yields the semiparametric efficient variance; this is valid even when machine learning is used for nuisance models (with appropriate cross-fitting)
 
-The EIF-based standard error is a key output of TMLE. Because the fluctuation step solves the EIF estimating equation, the resulting confidence interval achieves approximately correct coverage under regularity conditions, even when machine learning is used for the nuisance models (provided cross-fitting or another sample-splitting technique is employed). If the confidence interval excludes zero, we have evidence at the 95% confidence level that the treatment has a non-null causal effect on the outcome.
+The EIF-based standard error is a key output of TMLE. @fig-tmle-eic plots each patient's EIF contribution, and the standard error is simply the spread of that histogram divided by $\sqrt{n}$, with the tails doing most of the work. Because the fluctuation step solves the EIF estimating equation, the resulting confidence interval achieves approximately correct coverage under regularity conditions, even when machine learning is used for the nuisance models (provided cross-fitting or another sample-splitting technique is employed). If the confidence interval excludes zero, we have evidence at the 95% confidence level that the treatment has a non-null causal effect on the outcome.
 
 ---
 

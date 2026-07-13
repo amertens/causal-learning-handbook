@@ -6,7 +6,7 @@ format: html
 # Identification Beyond Conditional Exchangeability {#sec-beyond-exchangeability}
 *Instrumental variables, negative controls, and proximal inference when adjustment is not enough*
 
-*Estimated reading time: 35 minutes*
+*Estimated reading time: 15 minutes*
 
 Every method in this handbook so far rests on the same load-bearing assumption: that the measured covariates are enough to remove confounding, so that treated and untreated patients with the same covariate values are comparable. The Causal Roadmap (@sec-roadmap) calls it conditional exchangeability, and it is the one assumption the data cannot check [@hernan2025whatif; @petersen2014causal]. In pharmacoepidemiology it is also the assumption most likely to fail. Sicker patients are treated more aggressively, healthier patients adhere better, and the frailty or disease severity that drives both treatment and outcome is rarely captured fully in claims or records. When adjustment is not credible no matter how rich the covariate set, three strategies let an analysis make progress. Each trades the no-unmeasured-confounding assumption for a different structural assumption that may be easier to defend in the problem at hand.
 
@@ -23,6 +23,15 @@ Every method in this handbook so far rests on the same load-bearing assumption: 
 This chapter covers identification strategies that relax conditional exchangeability while staying within the targeted-learning and potential-outcomes framework. The classic quasi-experimental designs of econometrics and policy evaluation (difference-in-differences, regression discontinuity, and interrupted time series) solve related problems with different machinery. They are pointed to in the further reading rather than developed here.
 :::
 
+```{r}
+#| include: false
+#| code-fold: true
+library(dagitty)
+library(ggdag)
+library(ggplot2)
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.align = "center")
+```
+
 ---
 
 ## 1. The assumption you cannot test, and usually cannot trust
@@ -35,11 +44,31 @@ The strategies below share a common move. Each introduces an extra variable (an 
 
 ## 2. Instrumental variables
 
-Sometimes the data contain a hidden coin flip. Which physician a patient happened to see, not how sick they were, tipped the treatment one way or the other, and that accident is what lets us learn the effect. An instrument is a variable that nudges treatment without otherwise touching the outcome. Formally it must satisfy three conditions: it is associated with treatment (relevance); it affects the outcome only through treatment (the exclusion restriction); and it shares no common cause with the outcome (independence). A classic pharmacoepidemiologic instrument is a physician's or facility's prescribing preference. Two patients who happen to see a doctor with a strong preference for drug A over drug B are, on average, exchangeable in their own characteristics, yet they receive different treatments because of the prescriber. The prescriber's preference nudges treatment without being caused by the patient's prognosis [@hernan2016target]. Calendar-time policy changes play the same role, as does an inherited variant used in Mendelian randomization.
+Sometimes the data contain a hidden coin flip. Which physician a patient happened to see, not how sick they were, tipped the treatment one way or the other, and that accident is what lets us learn the effect. An instrument is a variable that nudges treatment without otherwise touching the outcome. Formally it must satisfy three conditions: it is associated with treatment (relevance); it affects the outcome only through treatment (the exclusion restriction); and it shares no common cause with the outcome (independence). A classic pharmacoepidemiologic instrument is a physician's or facility's prescribing preference. Two patients who happen to see a doctor with a strong preference for drug A over drug B are, on average, exchangeable in their own characteristics, yet they receive different treatments because of the prescriber. The prescriber's preference nudges treatment without being caused by the patient's prognosis [@hernan2016target]. Calendar-time policy changes play the same role, as does an inherited variant used in Mendelian randomization. The DAG below shows the structure the three conditions demand.
 
-An instrument buys identification without measuring the confounder, because it induces variation in treatment that is unrelated to the unmeasured driver. What it costs is twofold and worth stating plainly. First, the estimand changes. Under a monotonicity assumption, an instrument identifies the effect among the patients whose treatment the instrument actually moved (the so-called compliers), not the average effect in the whole population. In the prescribing-preference example, that is the effect among patients whose treatment would differ depending on which physician they happened to see. That is a real and policy-relevant group, but it is not everyone. Second, the exclusion restriction and independence are themselves untestable, and a weak instrument, one only loosely associated with treatment, produces estimates that are both imprecise and biased toward the confounded answer. A credible instrumental-variable analysis therefore leans on a strong, mechanistically justified instrument and reports the local nature of the effect it identifies.
+```{r}
+#| label: fig-iv-dag
+#| fig-cap: "Instrumental-variable structure. The instrument Z affects treatment A, which affects outcome Y. An unmeasured confounder U drives both A and Y. Relevance is the Z to A edge; the exclusion restriction forbids any Z to Y path except through A; independence forbids a Z to U link."
+#| fig-width: 7
+#| fig-height: 3
+#| code-fold: true
+dag_iv <- dagify(
+  A ~ Z + U, Y ~ A + U,
+  exposure = "A", outcome = "Y",
+  labels = c(Z = "Z\ninstrument", A = "A\ntreatment",
+             Y = "Y\noutcome", U = "U\nunmeasured\nconfounder"),
+  coords = list(
+    x = c(Z = 0, A = 1, Y = 2, U = 1.5),
+    y = c(Z = 0, A = 0, Y = 0, U = 1)
+  )
+)
+ggdag(dag_iv, text = FALSE, use_labels = "label", text_size = 2.8) +
+  theme_dag()
+```
 
-The targeted-learning toolkit extends to instrumental-variable estimands: doubly robust and machine-learning-based estimators of the local effect exist and use the same Super Learner nuisance machinery seen elsewhere in this book. The example below contrasts a naive confounded estimate with a two-stage least-squares instrumental-variable estimate on simulated data.
+An instrument buys identification without measuring the confounder, because it induces variation in treatment that is unrelated to the unmeasured driver. What it costs is twofold and worth stating plainly. First, the estimand changes. Under a monotonicity assumption, an instrument identifies the local average treatment effect (LATE): the effect among the patients whose treatment the instrument actually moved (the so-called compliers), not the average effect in the whole population [@imbens1994late]. In the prescribing-preference example, that is the effect among patients whose treatment would differ depending on which physician they happened to see. That is a real and policy-relevant group, but it is not everyone. Second, the exclusion restriction and independence are themselves untestable, and a weak instrument, one only loosely associated with treatment, produces estimates that are both imprecise and biased toward the confounded answer. A credible instrumental-variable analysis therefore leans on a strong, mechanistically justified instrument and reports the local nature of the effect it identifies.
+
+The targeted-learning toolkit extends to instrumental-variable estimands: doubly robust and machine-learning-based estimators of the local effect exist and use the same Super Learner nuisance machinery seen elsewhere in this book. The example below contrasts a naive confounded estimate with a two-stage least squares (2SLS) instrumental-variable estimate on simulated data.
 
 ```{r}
 set.seed(2026)
@@ -66,7 +95,7 @@ The naive coefficient picks up the confounding through `U` and points to an effe
 
 ## 3. Negative controls
 
-A negative control is a variable chosen so that one of its causal links is known to be absent, which lets it act as a tripwire for confounding. A **negative control outcome** is an outcome the treatment cannot plausibly cause, yet which shares the confounding structure of the real outcome. A **negative control exposure** is an exposure that cannot plausibly cause the real outcome, yet which shares the same confounders. If a careful analysis finds a treatment effect on a negative control outcome, or an effect of the negative control exposure on the real outcome, the most likely explanation is residual confounding, because the causal link that would explain it is known to be absent.
+A negative control is a variable chosen so that one of its causal links is known to be absent, which lets it act as a tripwire for confounding [@lipsitch2010negcontrol]. A **negative control outcome** is an outcome the treatment cannot plausibly cause, yet which shares the confounding structure of the real outcome. A **negative control exposure** is an exposure that cannot plausibly cause the real outcome, yet which shares the same confounders. If a careful analysis finds a treatment effect on a negative control outcome, or an effect of the negative control exposure on the real outcome, the most likely explanation is residual confounding, because the causal link that would explain it is known to be absent.
 
 The canonical example comes from influenza-vaccine studies. Vaccinated older adults appeared to have much lower all-cause mortality than unvaccinated peers, including before the influenza season had begun. Death in the pre-season period is a negative control outcome: the vaccine cannot prevent deaths from influenza that has not yet circulated, so the apparent benefit in that window had to be confounding, the healthy-vaccinee effect. That called the headline estimate into question [@hernan2025whatif]. The negative-control diagnostics in @sec-advanced-diagnostics apply the same idea as a falsification check.
 
@@ -76,7 +105,7 @@ Used this way a negative control is a falsification test: it can reveal bias but
 
 ## 4. Proximal causal inference
 
-Proximal causal inference starts from a simple observation. If a negative control carries information about the unmeasured confounder, then with enough negative controls of the right kinds it should be possible not just to detect the bias but to remove it. The setup uses two proxies of the unmeasured confounder: one connected to the treatment side, sometimes called a treatment-inducing proxy, and one connected to the outcome side, which is essentially a negative control outcome. Neither proxy measures the confounder directly, and neither alone is enough. Used together, under conditions that link them to the hidden confounder, they identify the causal effect through a pair of equations (bridge functions) that play the role the unmeasured confounder would have played if it had been observed.
+Proximal causal inference starts from a simple observation. If a negative control carries information about the unmeasured confounder, then with enough negative controls of the right kinds it should be possible not just to detect the bias but to remove it. The setup uses two proxies of the unmeasured confounder: one connected to the treatment side, sometimes called a treatment-inducing proxy, and one connected to the outcome side, which is essentially a negative control outcome. Neither proxy measures the confounder directly, and neither alone is enough. Used together, under conditions that link them to the hidden confounder, they identify the causal effect through a pair of equations (bridge functions) that play the role the unmeasured confounder would have played if it had been observed [@miao2018proximal].
 
 The intuition is worth holding onto even without the equations. Two imperfect, noisy measurements of the same hidden variable can, in combination, stand in for that variable in a way that neither could alone, much as two angles fix a position that one angle leaves ambiguous. Take a concrete pharmacoepidemiologic instance. Baseline disease severity is unmeasured, but a pre-treatment lab value related to how aggressively a clinician treats can act as the treatment-side proxy, and a pre-treatment symptom score related to prognosis can act as the outcome-side proxy. Proximal methods combine the two to recover the effect that adjustment alone could not.
 
@@ -88,7 +117,7 @@ Proximal inference is the most technically demanding of the three strategies, an
 
 These three strategies do not compete so much as suit different situations, and each fails in a characteristic way. An instrumental-variable analysis lives or dies on the instrument. A strong, mechanistically justified instrument such as a genuine prescribing preference can be compelling, while a weak or arguable one delivers an estimate that is imprecise and quietly biased back toward the confounded answer, and even a perfect instrument identifies only the effect among the patients it moved. A negative-control analysis depends on finding a control that truly shares the confounding structure while being genuinely unaffected by the causal link in question; a poorly chosen control either misses real bias or raises a false alarm. Proximal inference depends on two valid proxies, on conditions that are hard to verify, and on software and expertise that are still developing.
 
-The common thread is that none of these strategies escapes untestable assumptions; they relocate them. The reason to reach for one is that its assumption follows from something you know about how the data were generated: a known prescribing mechanism, a biologically impossible link, a measured proxy for a known confounder. That is a different thing from hoping the covariate list is complete. When that substantive justification is absent, the honest move is a sensitivity analysis (@sec-advanced-diagnostics) that reports how strong an unmeasured confounder would have to be to overturn the result, not a switch to a design whose own assumptions are no more defensible.
+The common thread is that none of these strategies escapes untestable assumptions; they relocate them. The reason to reach for one is that its assumption follows from something you know about how the data were generated: a known prescribing mechanism, a biologically impossible link, a measured proxy for a known confounder. That is a different thing from hoping the covariate list is complete. When that substantive justification is absent, the honest move is a sensitivity analysis (@sec-advanced-diagnostics) that reports how strong an unmeasured confounder would have to be to overturn the result, not a switch to a design whose own assumptions are no more defensible. A complementary option is partial identification: when point identification fails, Manski-style nonparametric bounds trade a single number for an assumption-lean identification region that is guaranteed to contain the effect under far weaker premises [@manski1990bounds].
 
 ---
 
@@ -104,6 +133,12 @@ This chapter addresses the identification step of the Causal Roadmap (@sec-roadm
 - Petersen ML, van der Laan MJ (2014). Causal models and learning from data. *Epidemiology* 25(3):418-426 [@petersen2014causal].
 - Lipsitch M, Tchetgen Tchetgen E, Cohen T (2010). Negative controls: a tool for detecting confounding and bias in observational studies. *Epidemiology* 21(3):383-388.
 - Tchetgen Tchetgen EJ, Ying A, Cui Y, Shi X, Miao W (2020). An introduction to proximal causal learning. arXiv:2009.10982. <https://arxiv.org/abs/2009.10982>
+
+On the quasi-experimental designs named in the scope note but not developed here:
+
+- Callaway B, Sant'Anna PHC (2021). Difference-in-differences with multiple time periods. *Journal of Econometrics* 225(2):200-230. A modern treatment of difference-in-differences.
+- Card D, Krueger AB (1994). Minimum wages and employment: a case study of the fast-food industry in New Jersey and Pennsylvania. *American Economic Review* 84(4):772-793. A canonical natural-experiment and difference-in-differences analysis.
+- Angrist JD, Pischke JS (2009). *Mostly Harmless Econometrics: An Empiricist's Companion*. Princeton University Press. A practical reference for instrumental variables, difference-in-differences, and regression discontinuity.
 
 ## Check your understanding
 

@@ -71,7 +71,7 @@ Once we agree that competing events change *what we mean*, the next step is to s
 |---|---|---|---|
 | **Observed-world risk** | "By 5 years, what proportion of patients will have relapsed under treatment $a$, in the world where some die of other causes first?" | Treatment-specific cumulative incidence $F_1^a(t) = P(T^a \le t, J^a = 1)$ | AJ, adjusted CIF, FG, TMLE for CIF |
 | **Etiologic / mechanistic** | "Among patients still alive and event-free, how does treatment change the *rate* at which relapse occurs?" | Cause-specific hazard ratio | Cause-specific Cox |
-| **Pathway / hypothetical** | "What would the relapse risk be if we could prevent non-cancer death?" or "What part of the treatment effect on relapse is *not* mediated through mortality?" | Controlled direct effect on CIF; separable effects | IPCW, g-formula, AIPW, TMLE with hypothetical censoring |
+| **Pathway / hypothetical** | "What would the relapse risk be if we could prevent non-cancer death?" or "What part of the treatment effect on relapse is *not* mediated through mortality?" | Controlled direct effect on CIF; separable effects | IPCW, g-formula, AIPW (augmented inverse probability weighting), TMLE with hypothetical censoring |
 
 : Three families of questions and their natural estimands {#tbl-cr-families}
 
@@ -85,13 +85,13 @@ The counterfactual risk (cumulative incidence) at a pre-specified time point *t*
 
 $$\Psi = P(T^{a=1} \leq t) - P(T^{a=0} \leq t)$$
 
-This is a marginal risk difference with a clear causal interpretation: "If everyone in the population received treatment versus control, how much would the probability of the event by time *t* differ?" It is compatible with regulator recommendations for trial estimands and does not require proportional hazards.
+This is a marginal risk difference with a clear causal interpretation: "If everyone in the population received treatment versus control, how much would the probability of the event by time *t* differ?" It is compatible with regulator recommendations for trial estimands and does not require proportional hazards. This subsection assumes a single event type, so $P(T^a \le t)$ is an ordinary all-cause risk; once competing events are present, the same estimand is carried by the cause-specific cumulative incidence $F_1^a(t) = P(T^a \le t,\ J^a = 1)$ that the rest of the chapter targets, and $P(T^a \le t)$ should not be read as that CIF.
 
-The RMST up to time $\tau$ is the area under the survival curve from 0 to $\tau$:
+The RMST (restricted mean survival time) up to time $\tau$ is the area under the survival curve from 0 to $\tau$:
 
 $$\text{RMST}(\tau) = \int_0^\tau S(t) \, dt$$
 
-The causal contrast $\text{RMST}^{a=1}(\tau) - \text{RMST}^{a=0}(\tau)$ summarizes the entire survival curve up to $\tau$ and does not require proportional hazards [@stensrud2019limitations].
+Here $S(t)$ is the all-cause survival function, so this RMST is the mean time a patient spends alive (not event-free) up to $\tau$. The causal contrast $\text{RMST}^{a=1}(\tau) - \text{RMST}^{a=0}(\tau)$ summarizes the entire survival curve up to $\tau$ and does not require proportional hazards [@stensrud2019limitations].
 
 ::: {.callout-warning}
 ## Hazard ratios are not straightforward causal parameters
@@ -141,7 +141,7 @@ It helps to keep five distinct ideas apart. They often get lumped under "censori
 | **Death (when the endpoint is nonfatal)** | The patient dies before the event of interest can occur. | A **competing event**. It is part of the outcome process, not a censoring process. |
 | **True competing event (e.g., transplant before waitlist death)** | An event that, by definition, makes the event of interest impossible thereafter. | Same as death above: part of the outcome process. |
 
-: Administrative censoring, LTF, discontinuation, death, and true competing events are five different things {#tbl-cr-vocab}
+: Administrative censoring, LTFU, discontinuation, death, and true competing events are five different things {#tbl-cr-vocab}
 
 The most common conceptual error in applied competing-risks work is treating the bottom two rows like the top two. Death is not a study-management problem. It is a clinical event that changes the joint outcome process.
 
@@ -164,7 +164,7 @@ In words: among individuals who are still alive **and** event-free at time $t$, 
 For the event of interest,
 
 $$
-\tilde\lambda_1(t) = \lim_{\Delta t \to 0} \frac{P(t \le T < t+\Delta t,\ J=1 \mid T \ge t \ \text{or}\ (T \le t,\ J \ne 1))}{\Delta t}.
+\tilde\lambda_1(t) = \lim_{\Delta t \to 0} \frac{P(t \le T < t+\Delta t,\ J=1 \mid T \ge t \ \text{or}\ (T < t,\ J \ne 1))}{\Delta t}.
 $$
 
 The denominator deliberately keeps subjects who already had the *competing* event in an extended risk set, which is what links $\tilde\lambda_1$ algebraically to the cumulative incidence function. This is mathematically convenient (Fine-Gray regression coefficients map directly to effects on $F_1$), but $\tilde\lambda_1$ is not a physical event rate among truly event-free people.
@@ -220,7 +220,7 @@ The Causal Roadmap [@petersen2014causal; @dang2023causal] is a framework for int
 A single dataset can support several causal analyses, each targeting a different estimand and leaning on different identification assumptions. Take the SUSTAIN-6 cardiovascular outcome trial as an illustration [@chen2023concrete; @marso2016sustain6]:
 
 - **Intent-to-treat**: What is the effect of being *assigned* to semaglutide vs. placebo? Only requires that loss-to-follow-up is non-informative.
-- **On-treatment (right-censoring)**: What would the effect be if all patients *adhered* to their assigned treatment? Requires that treatment discontinuation for any reason is conditionally independent of MACE given baseline covariates, a much stronger assumption.
+- **On-treatment (right-censoring)**: What would the effect be if all patients *adhered* to their assigned treatment? Requires that treatment discontinuation for any reason is conditionally independent of MACE (major adverse cardiovascular events) given baseline covariates, a much stronger assumption.
 - **On-treatment (competing risks)**: What is the effect on MACE occurring *before* treatment discontinuation due to adverse events? Requires only that discontinuation for reasons *other* than adverse events is conditionally independent of MACE, which is arguably more plausible than the right-censoring assumption.
 
 These three analyses use the same data but answer different clinical questions, target different estimands, and require different assumptions. The Causal Roadmap forces you to spell out each one.
@@ -234,7 +234,7 @@ The ICH E9(R1) addendum defines five strategies for intercurrent events. Each ma
 | ICH E9(R1) Strategy | Description | Survival TMLE Implementation |
 |-------------------:|-------------|---------------------|
 | **Treatment policy** | Outcome observed regardless of intercurrent event | No censoring at intercurrent event; analyze all observed outcomes. This is the survival analogue of "intent-to-treat" |
-| **Composite** | Intercurrent event becomes part of the outcome | Redefine the event indicator to include the intercurrent event (e.g., PFS = min(progression, death)) |
+| **Composite** | Intercurrent event becomes part of the outcome | Redefine the event indicator to include the intercurrent event (e.g., PFS (progression-free survival) = min(progression, death)) |
 | **Hypothetical** | Outcome in a world where the intercurrent event could not occur | Censor at intercurrent event and use IPCW to adjust for informative censoring. Alternatively, estimate via continuous-time TMLE with the censoring mechanism modeled |
 | **While on treatment** | Outcome while receiving assigned treatment | Censor at treatment discontinuation; model the censoring mechanism. Estimand differs from hypothetical: targets risk *while on treatment* rather than risk *in absence of intercurrent event* |
 | **Principal stratum** | Effect among those who would not experience the intercurrent event under either treatment | Requires principal stratification methods; not handled by standard survival TMLE |
@@ -276,7 +276,7 @@ we are asking what the risk would be in a world where the competing event had be
 
 ### Separable effects
 
-If the underlying scientific question is really *pathway-based* ("What part of the treatment effect on relapse operates through mortality, and what part does not?"), the modern answer is separable effects rather than ad hoc censoring. Conceptually, treatment $A$ splits into two components $A_Y$ (acting on the event of interest) and $A_D$ (acting on the competing event). Identification then rests on a treatment-decomposition assumption: that one can intervene on the components separately. This is a far cleaner pathway estimand than "censor the competing event," but only when the decomposition is scientifically meaningful, for instance separating an antineoplastic effect from a cardiotoxic one.
+If the underlying scientific question is really *pathway-based* ("What part of the treatment effect on relapse operates through mortality, and what part does not?"), the modern answer is separable effects [@stensrud2022separable] rather than ad hoc censoring. Conceptually, treatment $A$ splits into two components $A_Y$ (acting on the event of interest) and $A_D$ (acting on the competing event). Identification then rests on a treatment-decomposition assumption: that one can intervene on the components separately. This is a far cleaner pathway estimand than "censor the competing event," but only when the decomposition is scientifically meaningful, for instance separating an antineoplastic effect from a cardiotoxic one.
 
 ::: {.callout-important}
 ## Identifiability summary
@@ -384,7 +384,7 @@ When the target is an adjusted absolute risk at one or more clinically meaningfu
 3. It supports data-adaptive nuisance estimation (e.g., Super Learner) without sacrificing valid inference.
 4. It yields influence-function-based standard errors, which extend naturally to risk differences, risk ratios, and simultaneous bands over multiple horizons.
 
-Two discrete-time formulations are common in practice: a cause-specific hazard TMLE and an **iterated-conditional-mean** TMLE. The R package `survtmle` exposes both. Recent work extends TMLE to continuous time and to simultaneous inference over absolute-risk curves through one-step targeting, implemented in R `concrete` [@rytgaard2021continuous].
+Two discrete-time formulations are common in practice: a cause-specific hazard TMLE and an **iterated-conditional-mean** TMLE. The R package `survtmle` exposes both [@benkeser2017survtmle]. Recent work extends TMLE to continuous time and to simultaneous inference over absolute-risk curves through one-step targeting, implemented in R `concrete` [@rytgaard2021continuous].
 
 ### Target parameter and identification
 
@@ -766,7 +766,7 @@ The unadjusted Kaplan-Meier ignores confounding by indication (sicker patients, 
 
 ```{r}
 #| label: fig-km-naive
-#| fig-cap: "Naive Kaplan-Meier survival curves by HAART initiation. The crossing or convergence of curves reflects confounding by indication, not the causal effect of treatment."
+#| fig-cap: "Naive Kaplan-Meier survival curves by HAART initiation. Any crossing or convergence of curves reflects confounding by indication rather than a causal effect of treatment."
 #| code-fold: show
 
 km_fit <- survfit(Surv(time, died) ~ A, data = haart_surv)
@@ -1441,7 +1441,7 @@ If any answer is "no," do not censor the competing event. Target the total effec
 
 ## Glossary {#sec-cr-glossary}
 
-**Aalen-Johansen (AJ) estimator.** Nonparametric estimator of cumulative incidence in competing-risks settings. Uses all-cause survival as the carrier, so subjects experiencing competing events drop out of future eligibility for the event of interest.
+**Aalen-Johansen (AJ) estimator.** Nonparametric estimator of cumulative incidence in competing-risks settings [@aalen1978]. Uses all-cause survival as the carrier, so subjects experiencing competing events drop out of future eligibility for the event of interest.
 
 **Cause-specific hazard.** Instantaneous occurrence rate of a specific cause among individuals still alive and event-free.
 
@@ -1457,7 +1457,7 @@ If any answer is "no," do not censor the competing event. Target the total effec
 
 **Estimand.** The precise quantity to be estimated. Distinct from the estimator and the estimate. Under ICH E9(R1), specified by population, treatment conditions, endpoint, summary, and intercurrent-event handling.
 
-**Fine-Gray model.** Proportional subdistribution hazards regression. Coefficients are tied algebraically to cumulative incidence.
+**Fine-Gray model.** Proportional subdistribution hazards regression [@finegray1999]. Coefficients are tied algebraically to cumulative incidence.
 
 **Intercurrent event.** Under ICH E9(R1), an event after treatment initiation that affects either the interpretation or the existence of the endpoint. Competing events are intercurrent events.
 
@@ -1485,6 +1485,6 @@ If any answer is "no," do not censor the competing event. Target the total effec
 - van der Laan and Rose (2011, 2018): Targeted Learning; foundational theory for TMLE
 - @young2020failure: A causal framework for competing-events estimands
 - Stensrud et al. (2022): Separable effects for competing events
-- Putter, Fiocco, and Geskus (2007): Competing risks and multi-state models tutorial
+- @putter2007competing: Competing risks and multi-state models tutorial
 - Fine and Gray (1999): Subdistribution hazards regression
 - ICH E9(R1) addendum (2019): Estimands and sensitivity analysis in clinical trials

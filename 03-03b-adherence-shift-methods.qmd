@@ -22,14 +22,14 @@ library(tidyverse)
 
 # What this chapter is about
 
-Earlier chapters introduced longitudinal TMLE for static interventions ("always maintain high adherence") and LMTP for modified treatment policies. Here we bring those tools to bear on a clinically important question: how do two antiretroviral drugs compare once we account for realistic adherence patterns? The focus is the adherence- and forgiveness-specific shift methods. For the full end-to-end LMTP workflow on a dynamic treatment rule, from question to estimate, see @sec-applied-lmtp.
+Earlier chapters introduced longitudinal TMLE for static interventions ("always maintain high adherence") and LMTP (longitudinal modified treatment policy) for modified treatment policies. Here we bring those tools to bear on a clinically important question: how do two antiretroviral drugs compare once we account for realistic adherence patterns? The focus is the adherence- and forgiveness-specific shift methods. For the full end-to-end LMTP workflow on a dynamic treatment rule, from question to estimate, see @sec-applied-lmtp.
 
 The key concept is **regimen forgiveness**. A drug is forgiving if patients can miss some doses without a large increase in treatment failure. A flat adherence-response curve means a forgiving drug; a steep curve means an unforgiving one. Forgiveness is a causal quantity rather than an observable property of the data, because the adherence-response relationship is confounded by time-varying health status.
 
 Our data are a simulated two-drug HIV cohort built to capture the features that make the adherence problem hard: treatment-confounder feedback between adherence and health, differential forgiveness across drugs, and the positivity strain that arises when targeting extreme adherence levels. The simulation is calibrated to real pharmacoepidemiologic settings and measures adherence as continuous proportion of days covered (PDC).
 
 
-The figure below previews the quantity we are after. A **forgiveness curve** plots the counterfactual risk of virologic failure against the adherence level a patient sustains, one curve per drug. The vertical distance between the two curves is the **forgiveness gap**: how much more a missed-dose pattern costs on the less forgiving regimen. The curve is a causal object. It is the risk we *would* see if adherence were set to each level, which is not the risk we observe among patients who happen to adhere at that level. Those two can diverge sharply, and most of this chapter is about why they do and how to estimate the causal version.
+@fig-forgiveness-motivation previews the quantity we are after. A **forgiveness curve** plots the counterfactual risk of virologic failure against the adherence level a patient sustains, one curve per drug. The vertical distance between the two curves is the **forgiveness gap**: how much more a missed-dose pattern costs on the less forgiving regimen. The curve is a causal object. It is the risk we *would* see if adherence were set to each level, which is not the risk we observe among patients who happen to adhere at that level. Those two can diverge sharply, and most of this chapter is about why they do and how to estimate the causal version.
 
 ```{r}
 #| label: fig-forgiveness-motivation
@@ -78,11 +78,11 @@ Each component calls for longitudinal causal methods, because adherence and heal
 
 # Why this needs a causal method
 
-Adherence is measured after treatment starts, changes over time, and sits in a feedback loop with health [@rosenblum2009virologic]. Worse health lowers adherence through side effects and complications. Lower adherence worsens virologic control. Worse control feeds back into health, which shapes the next period's adherence. So the variable that confounds the adherence-to-failure relationship, current health status $L_t$, is at the same time a *consequence* of past adherence.
+Adherence is measured after treatment starts, changes over time, and sits in a feedback loop with health [@rosenblum2009virologic]. Worse health lowers adherence through side effects and complications. Lower adherence worsens virologic control. Worse control feeds back into health, which shapes the next period's adherence. So the variable that confounds the adherence-to-failure relationship, current health status $L_t$, is at the same time a *consequence* of past adherence (@fig-adherence-dag).
 
 ```{mermaid}
 %%| label: fig-adherence-dag
-%%| fig-cap: "Three blocks of the adherence process (K = 3). Baseline severity W0 channels the drug choice A0 (confounding by indication, the arrow W0 to A0). Health status L at each block confounds the adherence-to-failure relationship and is itself moved by prior adherence (the feedback arrows PDC1 to L2 and PDC2 to L3); this is treatment-confounder feedback. The drug A0 modifies the adherence-to-failure relationship at every block (forgiveness). A regression that conditions on L removes the confounding but also blocks the pathway through which past adherence acts; a regression that omits L leaves the confounding in place."
+%%| fig-cap: "Three blocks of the adherence process (K = 3). Baseline severity W0 channels the drug choice A0 (confounding by indication, the arrow W0 to A0). Health status L at each block confounds the adherence-to-failure relationship and is itself moved by prior adherence (the feedback arrows PDC1 to L2 and PDC2 to L3); this is treatment-confounder feedback. The drug A0 also lowers adherence at every block (the arrows A0 to PDC1, PDC2, and PDC3). The drug's forgiveness, its modification of how adherence maps to failure, is not a drawable edge but a feature of the structural failure model. A regression that conditions on L removes the confounding but also blocks the pathway through which past adherence acts; a regression that omits L leaves the confounding in place."
 flowchart LR
   W0["W0<br/>baseline severity"] --> A0["A0<br/>drug"]
   W0 --> L1["L1<br/>health"]
@@ -94,11 +94,13 @@ flowchart LR
   P1 --> L2["L2<br/>health"]
   W0 --> L2
   L2 --> P2["PDC2<br/>adherence"]
+  A0 --> P2
   P2 --> Y
   L2 --> Y
   P2 --> L3["L3<br/>health"]
   W0 --> L3
   L3 --> P3["PDC3<br/>adherence"]
+  A0 --> P3
   P3 --> Y
   L3 --> Y
 ```
@@ -234,7 +236,7 @@ dat |>
   as.data.frame()
 ```
 
-Read this table as a description of the observed cohort, not as a forgiveness estimate. Taken at face value, Drug B looks like the better regimen: its patients have higher mean adherence and a lower crude failure percentage than Drug A's. That ranking is misleading, and it actually inverts the underlying pharmacology, since Drug A is the more forgiving drug by construction (the `gammaAP = -1.20` interaction). The culprit is confounding by indication. Sicker patients (higher `W0`) are channeled toward Drug A, so the Drug A column is enriched for patients who were always at higher risk and who adhere less well, for reasons that have nothing to do with the drug itself. The two drug groups are not exchangeable, so any crude difference in adherence or failure between the columns mixes the drugs' pharmacology with the difference in who received each drug. The crude cross-drug comparison is confounded and is not the forgiveness estimand. Recovering forgiveness, and watching Drug A's advantage emerge, takes the causal machinery developed below.
+Read this table as a description of the observed cohort, not as a forgiveness estimate. Taken at face value, Drug B looks like the better regimen: its patients have higher mean adherence and a lower crude failure percentage than Drug A's. That ranking is misleading, and it actually inverts the underlying pharmacology, since Drug A is the more forgiving drug by construction (the `gammaAP = -1.20` interaction). The culprit is confounding by indication. Sicker patients (higher `W0`) are channeled toward Drug A, so the Drug A column is enriched for patients who were always at higher risk and who adhere less well, partly for reasons unrelated to the drug's forgiveness (sicker patients) and partly because Drug A itself modestly lowers adherence (`alphaA`). The two drug groups are not exchangeable, so any crude difference in adherence or failure between the columns mixes the drugs' pharmacology with the difference in who received each drug. The crude cross-drug comparison is confounded and is not the forgiveness estimand. Recovering forgiveness, and watching Drug A's advantage emerge, takes the causal machinery developed below.
 
 # Why naive adherence analysis is biased
 
@@ -242,9 +244,9 @@ Forgiveness is an **intervention-based estimand**, not a within-stratum associat
 
 That distinction is what defeats ordinary regression here, thanks to treatment-confounder feedback. Conditioning on observed adherence does remove the health confounding, but it also blocks the *mediated* part of the adherence effect, the part that runs through interim health $L_t$, so the within-stratum comparison answers a different question than the one we asked. Omit interim health instead and the confounding stays in place. No single regression escapes the bind: adjust for $L_t$ and you block the pathway, drop it and you reintroduce the confounding.
 
-The longitudinal g-formula, realized here as a modified treatment policy (MTP), is built for exactly this setting. It intervenes on the adherence sequence and propagates the consequences forward through the health process, so the mediated effect survives while the confounding stays controlled. The practical lesson: name the estimand before choosing the adjustment.
+The longitudinal g-formula, realized here as a modified treatment policy (MTP) that shifts the adherence distribution rather than fixing it to a constant [@diaz2020lmtp], is built for exactly this setting. It intervenes on the adherence sequence and propagates the consequences forward through the health process, so the mediated effect survives while the confounding stays controlled. The practical lesson: name the estimand before choosing the adjustment.
 
-We can make the bias visible because the data come from a known simulation. The causal (oracle) forgiveness curve comes from re-running the failure process with adherence held fixed at each level and health allowed to respond. The crude curve is the observed failure rate among patients binned by their actual average adherence. Overlaying the two shows the gap.
+We can make the bias visible because the data come from a known simulation. The causal (oracle) forgiveness curve comes from re-running the failure process with adherence held fixed at each level and health allowed to respond. The crude curve is the observed failure rate among patients binned by their actual average adherence. Overlaying the two, as in @fig-oracle-vs-crude, shows the gap.
 
 ```{r}
 #| label: fig-oracle-vs-crude
@@ -326,7 +328,7 @@ The solid lines are the causal forgiveness curves: the failure risk that would o
 
 The forgiveness question can be made precise in two ways, and they call for different estimators.
 
-The first is a **static adherence regime**: what would the failure risk be if every patient *sustained* a fixed adherence level, say low, medium, or high, across all K = 3 blocks? This estimand traces the forgiveness curve at fixed points, and the longitudinal TMLE of @sec-illustrated-ltmle estimates it. Its weakness is positivity, and that weakness sharpens with the horizon. Requiring a patient to sit in an extreme adherence band at *every* block is a conjunction over blocks, so the support for "low every block" or "near-perfect every block" thins as K grows. The ends of the curve are where the data are thinnest.
+The first is a **static adherence regime**: what would the failure risk be if every patient *sustained* a fixed adherence level, say low, medium, or high, across all K = 3 blocks? This estimand traces the forgiveness curve at fixed points, and the longitudinal TMLE of @sec-illustrated-ltmle estimates it through the survival g-formula [@young2020failure]. Its weakness is positivity, and that weakness sharpens with the horizon. Requiring a patient to sit in an extreme adherence band at *every* block is a conjunction over blocks, so the support for "low every block" or "near-perfect every block" thins as K grows. The ends of the curve are where the data are thinnest.
 
 The second is a **feasible shift**: what would happen if every patient's adherence were nudged up by a realistic amount, say 5 percentage points, from wherever it currently sits? This is a modified treatment policy [@haneuse2013mtp; @diaz2021lmtp], and LMTP estimates it. Because the shifted adherence stays close to what each patient already does, it respects the support of the data and answers a question an adherence-support program could act on.
 
@@ -545,10 +547,10 @@ Informally, the quantile shift separates a real-world-effectiveness comparison (
 The forgiveness curve maps sustained adherence level to counterfactual failure risk for each drug:
 
 $$
-r_d(a) = P\big(Y = 1 \mid \text{do}(\bar{A} = a), D = d\big)
+r_d(a) = E\big[Y^{\overline{\text{PDC}} = a} \mid A_0 = d\big]
 $$
 
-A flat curve means the drug is forgiving (patients can miss doses without large increases in failure risk). A steep curve means small adherence drops produce large outcome differences.
+Here $Y^{\overline{\text{PDC}} = a}$ is the failure outcome under an intervention that sets adherence to $a$ at every block, and conditioning on $A_0 = d$ restricts to the patients on drug $d$. So $r_d(a)$ is a within-drug subgroup counterfactual, the risk that drug $d$'s patients would face if their adherence were held at $a$, not a comparison across drugs. A flat curve means the drug is forgiving (patients can miss doses without large increases in failure risk). A steep curve means small adherence drops produce large outcome differences.
 
 Static-regime L-TMLE traces this curve by estimating the failure risk at a grid of fixed PDC thresholds. The LMTP shift approach gives a complementary view. It estimates the marginal benefit of a small adherence improvement, integrated over the observed adherence distribution. The two approaches are different summaries of the same counterfactual risk surface.
 

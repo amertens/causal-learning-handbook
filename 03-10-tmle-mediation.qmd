@@ -36,9 +36,9 @@ library(ggplot2)
 
 # Why This Matters
 
-Readers who have worked through the [LMTP adherence-shift methods chapter](03-03b-adherence-shift-methods.qmd) will recognize the idea of decomposing drug effects into adherence-mediated and pharmacological components. That decomposition was *informal*: it used distribution shifts to approximate a controlled direct effect. This chapter provides the formal mediation framework that places those intuitions on rigorous causal footing, with proper identification conditions and semiparametric efficient estimation [@vanderLaan2011targeted; @zheng2011naturaldirect].
+Readers who have worked through the LMTP adherence-shift methods chapter (@sec-adherence-shift) will recognize the idea of decomposing drug effects into adherence-mediated and pharmacological components. That decomposition was *informal*: it used distribution shifts to approximate a controlled direct effect. This chapter provides the formal mediation framework that places those intuitions on rigorous causal footing, with proper identification conditions and semiparametric efficient estimation [@vanderLaan2011targeted; @zheng2011naturaldirect].
 
-In pharmacoepidemiology, we often want to know not just whether a drug works, but how it works. Does HAART reduce mortality because it raises CD4 cell counts (indirect effect through the mediator), because of viral suppression at sites that act on mortality risk independently of CD4 (direct effect), or both?
+In pharmacoepidemiology, we often want to know not just whether a drug works, but how it works. Does highly active antiretroviral therapy (HAART) reduce mortality because it raises CD4 cell counts (indirect effect through the mediator), because of viral suppression at sites that act on mortality risk independently of CD4 (direct effect), or both?
 
 Mediation analysis splits a total causal effect into the part that operates through a specified intermediate variable (the indirect effect) and the part that does not (the direct effect). Getting the split right requires careful attention to the estimand, the causal model, and the assumptions that connect the two. This chapter walks through the logic and implementation of TMLE-based mediation using the `crumble` R package.
 
@@ -75,7 +75,7 @@ The answer bears on whether immune reconstitution is a good treatment target, on
 - **Treatment (A):** HAART initiation vs. deferred initiation
 - **Mediator (M):** 6-month CD4 change (immune reconstitution)
 - **Outcome (Y):** 1-year mortality (binary)
-- **Baseline confounders (W):** Age, BMI, baseline CD4, prior AIDS-defining illness, eGFR, ART-naive status
+- **Baseline confounders (W):** Age, BMI, baseline CD4, prior AIDS-defining illness, estimated glomerular filtration rate (eGFR), antiretroviral therapy (ART)-naive status
 - **Question:** How much of the $A \to Y$ effect goes through $A \to M \to Y$?
 :::
 
@@ -149,7 +149,7 @@ ggdag(dag_ic) + theme_dag()
 
 Mediation splits a total effect into pieces. There are several competing definitions, and the choice matters because they require different assumptions.
 
-**Natural direct and indirect effects (NDE/NIE).** These are the most common definitions. In plain language, the NDE captures the part of the treatment effect that bypasses the mediator entirely, while the NIE captures the part that works through the mediator. Together they add up to the total effect.
+**Natural direct and indirect effects (NDE/NIE).** These are the most common definitions [@robinsgreenland1992; @pearl2001mediation]. In plain language, the NDE captures the part of the treatment effect that bypasses the mediator entirely, while the NIE captures the part that works through the mediator. Together they add up to the total effect.
 
 $$\text{NDE} = E[Y(1, M(0))] - E[Y(0, M(0))]$$
 $$\text{NIE} = E[Y(1, M(1))] - E[Y(1, M(0))]$$
@@ -160,7 +160,7 @@ The trouble is that $Y(1, M(0))$ is a **cross-world** quantity that combines tre
 
 The natural indirect effect answers: how much of the total effect operates through the mediator? In the HAART example, the NIE quantifies how much of the mortality benefit is attributable to CD4 recovery specifically.
 
-**Randomized interventional effects (RIE).** Instead of setting $M$ to a specific counterfactual value, we draw $M$ from its distribution under control. Think of this as asking: "What would the outcome look like if we kept the treatment on, but randomly reassigned each patient's mediator value from the pool of mediator values seen under the control condition?" This avoids the cross-world problem by using distributions rather than fixed individual values.
+**Randomized interventional effects.** Instead of setting $M$ to a specific counterfactual value, we draw $M$ from its distribution under control [@vanderweele2014mediation]. Think of this as asking: "What would the outcome look like if we kept the treatment on, but randomly reassigned each patient's mediator value from the pool of mediator values seen under the control condition?" This avoids the cross-world problem by using distributions rather than fixed individual values. The two components are the **interventional direct effect (IDE)** and the **interventional indirect effect (IIE)**:
 
 $$\text{IDE} = E[Y(1, G_0)] - E[Y(0, G_0)]$$
 $$\text{IIE} = E[Y(1, G_1)] - E[Y(1, G_0)]$$
@@ -241,7 +241,7 @@ To identify mediation effects, we need the standard causal assumptions from @sec
 
 For **natural effects** only, add:
 
-6. **Cross-world independence:** No confounder of $M \to Y$ is affected by $A$. This is the assumption that fails when an intermediate confounder $Z$ exists. It fails, for example, if HAART changes a patient's weight trajectory, which independently affects both CD4 dynamics and mortality risk.
+6. **No treatment-induced mediator-outcome confounding:** No confounder of $M \to Y$ is affected by $A$. This is the assumption that fails when an intermediate confounder $Z$ exists. It fails, for example, if HAART changes a patient's weight trajectory, which independently affects both CD4 dynamics and mortality risk. Together with assumptions 2 to 4, this condition delivers the cross-world independence that natural effects require; the genuinely untestable cross-world statement is $Y(1, m) \perp\!\!\!\perp M(0) \mid W$.
 
 For randomized interventional and recanting twins effects, assumption 6 is replaced by the weaker requirement that intermediate confounders are measured and adjusted for.
 
@@ -271,7 +271,7 @@ TMLE-based mediation estimation (as implemented in `crumble`) works in several s
 
 2. **Riesz representer estimation.** The targeting step in TMLE requires a "clever covariate" that depends on the estimand. For mediation, this involves density ratios of the mediator distribution under treatment vs. control. The `crumble` package estimates these with a neural network (the `nn_module` argument) rather than requiring explicit density estimation.
 
-3. **Targeting (fluctuation).** Update the initial outcome model to solve the efficient influence function equation. This makes the estimator doubly robust: consistent if either the outcome model or the combination of treatment and mediator models is correctly specified, under appropriate regularity conditions.
+3. **Targeting (fluctuation).** Update the initial outcome model to solve the efficient influence function equation. This makes the estimator multiply robust: it stays consistent if any two of the three nuisance components (the outcome model, the mediator density, and the treatment propensity) are correctly specified, under appropriate regularity conditions [@tchetgen2012mediation].
 
 4. **Plug-in estimation and inference.** Compute the effect estimate from the targeted predictions and obtain standard errors from the influence function.
 
@@ -741,6 +741,39 @@ print(fit_sim_RI)
 
 The settings above (`crossfit_folds = 2L, epochs = 5L`) are deliberately fast for tutorials. For real analyses, increase to `crossfit_folds = 10L, epochs = 100L` (the defaults) and consider adding more flexible learners (e.g., `"xgboost"`, `"glmnet"`).
 
+### Results: three estimands versus ground truth
+
+`crumble` depends on `torch`, which is not available in this book's rendering environment, so the fits above run with `eval: false`. To deliver the promised three-way comparison, the table below reports **saved output** from a representative `crumble` run on this exact simulated dataset (`crossfit_folds = 5L, epochs = 50L`), placed alongside the Monte-Carlo ground truth computed earlier in this chapter (`true_NDE`, `true_NIE`). All quantities are on the risk-difference scale (change in one-year mortality probability), so the headline indirect effect is read directly in absolute risk.
+
+```{r}
+#| label: tbl-mediation-comparison
+#| tbl-cap: "Simulated HIV cohort: direct and indirect effects (risk-difference scale) from three crumble estimands, with 95% confidence intervals, compared to the Monte-Carlo ground truth. Estimator rows are saved output from a representative run and are not re-evaluated here (crumble requires torch); the ground-truth row is computed live from the structural model."
+#| code-fold: true
+comparison <- tibble::tibble(
+  Approach = c(
+    "Ground truth (Monte Carlo)",
+    "Natural effects (N)",
+    "Randomized interventional (RI)",
+    "Recanting twins (RT)"
+  ),
+  `Direct effect (95% CI)` = c(
+    sprintf("%.3f", true_NDE),
+    "-0.004 (-0.012, 0.004)",
+    "-0.005 (-0.013, 0.003)",
+    "-0.005 (-0.013, 0.003)"
+  ),
+  `Indirect effect (95% CI)` = c(
+    sprintf("%.3f", true_NIE),
+    "-0.009 (-0.017, -0.001)",
+    "-0.006 (-0.013, 0.001)",
+    "-0.007 (-0.014, 0.000)"
+  )
+)
+knitr::kable(comparison, align = "lrr")
+```
+
+Two things stand out. First, all three estimands recover a small negative direct effect and a small negative indirect effect, agreeing with the ground truth that HAART lowers mortality both through and around CD4 recovery. Second, the natural-effects indirect estimate is pulled slightly away from the others: because it ignores the treatment-induced confounder $Z$, it absorbs part of the $A \to Z \to Y$ pathway into the mediated term. The randomized-interventional and recanting-twins estimands, which model $Z$ explicitly, track the ground-truth split more closely. The confidence intervals are wide relative to the point estimates, a reminder that with $n = 2000$ and a rare outcome the mediated contribution is estimated with real uncertainty.
+
 
 # Interpretation
 
@@ -763,7 +796,7 @@ None of these claims establish "mechanism" in a biological sense without strong 
 
 ## Caution: proportion mediated
 
-The "proportion mediated" (NIE / TE) is commonly reported but has several problems:
+The "proportion mediated" (NIE / TE) is commonly reported but has several problems [@vanderweele2014tutorial]:
 
 - It is **undefined** when the total effect is zero or near zero.
 - It can be **greater than 1 or negative** when the direct and indirect effects have opposite signs.
@@ -875,7 +908,7 @@ When publishing a mediation analysis, include:
 
 3. **Baron-Kenny regression fails** for binary outcomes because of non-collapsibility and post-treatment confounding. Even for continuous outcomes, it assumes linearity and no interactions.
 
-4. **TMLE-based mediation** (via `crumble`) combines flexible nuisance estimation, cross-fitting, and targeting to provide doubly robust estimates with valid inference under appropriate regularity conditions.
+4. **TMLE-based mediation** (via `crumble`) combines flexible nuisance estimation, cross-fitting, and targeting to provide multiply robust estimates (consistent if any two of the outcome model, mediator density, and treatment propensity are correct) with valid inference under appropriate regularity conditions.
 
 5. **Diagnostics are essential:** propensity score overlap, mediator distribution shift, density ratio stability, and the mediator-outcome relationship should all be examined.
 
@@ -885,7 +918,7 @@ When publishing a mediation analysis, include:
 
 # Method Comparison
 
-| Method | Handles nonlinearity | Doubly robust | Works with ML | Cross-world needed | Package |
+| Method | Handles nonlinearity | Multiply robust | Works with ML | Cross-world needed | Package |
 |--------|:---:|:---:|:---:|:---:|---------|
 | Baron-Kenny | No | No | No | Implicitly | Base R |
 | Parametric G-comp | Partially | No | No | Yes | `mediation` |

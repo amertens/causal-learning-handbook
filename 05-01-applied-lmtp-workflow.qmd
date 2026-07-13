@@ -20,7 +20,7 @@ knitr::opts_chunk$set(
 
 By this point the moving parts of a longitudinal targeted-learning analysis are already in hand. We have the backwards sequential-regression logic of longitudinal TMLE (@sec-illustrated-ltmle), the shift-function and `lmtp_tmle` workflow for modified treatment policies (@sec-adherence-shift), and the positivity diagnostics that decide whether any of it can be trusted (@sec-positivity-overlap). This chapter does not re-teach that machinery. It spends its length on the one thing the method chapters leave out: a single analysis carried from a clinical question to a defended estimate, with every decision in view.
 
-The thread is a dynamic treatment rule, initiate HAART when CD4 falls below a clinically meaningful threshold, estimated with the `lmtp` package [@diaz2021lmtp; @williams2025lmtp]. A dynamic rule is a sharper question than the adherence-distribution shift of @sec-adherence-shift or the static "treat everyone" contrast of the earlier chapters, and it is the kind of question clinical guidelines actually pose.
+The thread is a dynamic treatment rule, initiate highly active antiretroviral therapy (HAART) when CD4 falls below a clinically meaningful threshold, estimated with the `lmtp` package for longitudinal modified treatment policies (LMTP) [@diaz2021lmtp; @williams2025lmtp]. A dynamic rule is a sharper question than the adherence-distribution shift of @sec-adherence-shift or the static "treat everyone" contrast of the earlier chapters, and it is the kind of question clinical guidelines actually pose.
 
 
 ## The causal question
@@ -31,12 +31,14 @@ This is a dynamic treatment rule. The intervention depends on the patient's evol
 
 The estimand is the risk difference in mortality under the two regimes, marginalized over the study population. In the language of modified treatment policies [@haneuse2013mtp; @diaz2021lmtp], we are shifting the treatment process so that HAART is initiated at any visit where CD4 falls below the threshold, for patients who were not already on treatment.
 
+A precise word on the estimand: the CD4 < 350 rule is a deterministic dynamic treatment regime, an assignment that is a function of the patient's covariate history rather than of the treatment a clinician would otherwise have chosen [@young2020failure]. A modified treatment policy is the broader class of interventions whose assigned value depends on the natural (observed) treatment value [@haneuse2013mtp]. The LMTP framework of [@diaz2021lmtp] estimates both, which is why the same `lmtp_tmle` workflow applies to this dynamic rule.
+
 
 ## Why a simpler analysis would be inadequate
 
 A static point-treatment comparison (ever-treated vs. never-treated) ignores the timing and clinical context of treatment initiation. Two patients who both "ever started HAART" may have initiated at quite different times and for quite different reasons, and their prognoses at initiation may have been nothing alike. The static comparison conflates the effect of early initiation in healthier patients with late initiation in sicker patients.
 
-A dynamic-rule analysis asks instead what would happen if initiation followed one clinical rule applied consistently to everyone, which is closer to what guideline developers need. Because CD4 both responds to past treatment and drives future treatment, this is the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it needs the longitudinal g-methods developed there and in @sec-illustrated-ltmle. The identification assumptions are their longitudinal versions: sequential exchangeability, positivity at each visit, and consistency of the dynamic rule. Informative censoring, when sicker patients drop out, is handled by the same machinery.
+A dynamic-rule analysis asks instead what would happen if initiation followed one clinical rule applied consistently to everyone, which is closer to what guideline developers need. Because CD4 both responds to past treatment and drives future treatment, this is the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it needs the longitudinal g-methods developed there and in @sec-illustrated-ltmle. The identification assumptions are their longitudinal versions: sequential exchangeability, positivity at each visit, and consistency of the dynamic rule. Informative censoring, when sicker patients drop out, is handled by the same machinery: `lmtp_tmle` models the censoring process alongside treatment and covariates whenever a censoring node is supplied. The simulated cohort used below has complete follow-up, so no censoring node is passed here; with dropout one would add per-visit censoring indicators through the `cens` argument, as in `lmtp_tmle(..., cens = c("C1", "C2"))`.
 
 
 ## Data setup
@@ -110,7 +112,7 @@ shift_cd4_rule <- function(data, trt) {
 }
 ```
 
-This function has the `(data, trt)` signature that `lmtp` expects. Because it modifies the treatment value based on the patient's evolving CD4 (rather than a fixed assignment), it defines a *modified treatment policy* rather than a static intervention, which is why we pass `mtp = TRUE` below.
+This function has the `(data, trt)` signature that `lmtp` expects. Because the shifted value depends on the patient's evolving CD4 and on the natural treatment value (through the absorbing `data[[trt]] == 1` term) rather than on a fixed assignment, we pass `mtp = TRUE` below so that `lmtp` applies the density-ratio machinery used for interventions that reference the observed treatment.
 
 
 ### Specifying the LMTP node structure
@@ -159,7 +161,7 @@ fit_natural <- lmtp_tmle(
   baseline = baseline,
   time_vary = time_vary,
   shift = NULL,                 # natural course: no intervention
-  mtp = TRUE,
+  # mtp not needed here: shift = NULL is the observed (natural) course
   outcome_type = "binomial",
   learners_outcome = c("SL.glm", "SL.mean"),
   learners_trt = c("SL.glm", "SL.mean"),
@@ -170,7 +172,7 @@ fit_rule
 fit_natural
 ```
 
-The call pattern is the one from @sec-adherence-shift. `lmtp_tmle()` fits a sequentially doubly robust estimator with cross-fitting [@vanderLaan2007superlearner], and it calls the shift function at each visit to set the counterfactual treatment, with `mtp = TRUE` because the shifted value depends on the natural one. What is new here is only the rule that shift function encodes.
+The call pattern is the one from @sec-adherence-shift. `lmtp_tmle()` fits a sequentially doubly robust estimator with cross-fitting [@diaz2021lmtp], and it calls the shift function at each visit to set the counterfactual treatment, with `mtp = TRUE` because the shifted value depends on the natural one. What is new here is only the rule that shift function encodes.
 
 The contrast turns the two intervention-specific risks into the policy-relevant risk difference:
 
@@ -322,13 +324,13 @@ library(ggplot2)
 ggplot(threshold_results, aes(factor(threshold), risk_diff)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray60") +
   geom_pointrange(aes(ymin = conf_low, ymax = conf_high)) +
-  labs(x = "CD4 initiation threshold (cells/mm³)",
+  labs(x = "CD4 initiation threshold (cells/µL)",
        y = "Risk difference vs. natural course",
        title = "Dose-response across CD4 initiation thresholds") +
   theme_minimal()
 ```
 
-If the estimated benefit increases smoothly with earlier initiation, that supports the clinical intuition. If the estimate becomes unstable or reverses at very early thresholds, that likely reflects positivity violations rather than a genuine clinical effect reversal.
+@fig-threshold-doseresponse plots the risk difference at each threshold against the natural course. If the estimated benefit increases smoothly with earlier initiation, that supports the clinical intuition. If the estimate becomes unstable or reverses at very early thresholds, that likely reflects positivity violations rather than a genuine clinical effect reversal.
 
 ### Nuisance model sensitivity
 

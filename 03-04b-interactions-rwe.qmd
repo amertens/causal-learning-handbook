@@ -8,7 +8,7 @@ format: html
 
 ::: {.callout-tip}
 ## If you only read one thing
-A causal interaction is about a joint intervention on two exposures, summarized by the additive interaction contrast $\psi_{\text{add}} = p_{11} - p_{10} - p_{01} + p_{00}$, the extra events per patient beyond what the two effects would produce separately. Estimate it with TMLE across the four joint-exposure cells, and check joint positivity first: those four cells are smaller than the margins, so overlap fails for an interaction long before it fails for a single exposure.
+A causal interaction is about a joint intervention on two exposures, summarized by the additive interaction contrast $\psi_{\text{add}} = p_{11} - p_{10} - p_{01} + p_{00}$, the extra events per patient beyond what the two effects would produce separately. Estimate it with targeted maximum likelihood estimation (TMLE) across the four joint-exposure cells, and check joint positivity first: those four cells are smaller than the margins, so overlap fails for an interaction long before it fails for a single exposure.
 :::
 
 ## Abstract
@@ -30,8 +30,8 @@ influence-function inference of TMLE [@vanderLaan2006tmle], is
 particularly well suited to this task.
 The chapter walks through a binary point-treatment example with TMLE and
 Super Learner, scaffolds a collaborative TMLE sensitivity analysis,
-sketches a longitudinal extension using LTMLE and TMLE for marginal
-structural models, and closes with a reporting checklist that aligns
+sketches a longitudinal extension using longitudinal TMLE (LTMLE) and
+TMLE for marginal structural models, and closes with a reporting checklist that aligns
 with current best-practice recommendations
 [@talbot2025tmle; @vanderweele2014tutorial; @basten2025additive].
 
@@ -46,16 +46,17 @@ with current best-practice recommendations
   matches your decision question.
 - A regression product term is rarely the scientific target. Define
   **subgroup-specific risks** and contrast them.
-- Begin every RWE interaction analysis by writing the **target trial
-  protocol** [@hernan2016target]: time zero, eligibility, treatment
+- Begin every real-world evidence (RWE) interaction analysis by writing
+  the **target trial protocol** [@hernan2016target]: time zero, eligibility, treatment
   strategies, follow-up, outcome, censoring.
 - **Positivity is harder inside subgroups** than overall. Diagnose overlap
   within each modifier stratum.
 - **Targeted learning** (Super Learner + TMLE) supports flexible nuisance
   estimation, doubly robust point estimation, and influence-function-based
   uncertainty for the contrasts you actually want to report.
-- **CTMLE** is best framed as a sensitivity analysis around fragile
-  propensity-score models, not as the introductory teaching vehicle.
+- **Collaborative TMLE (CTMLE)** is best framed as a sensitivity analysis
+  around fragile propensity-score models, not as the introductory teaching
+  vehicle.
 - Pre-specify a small number of clinically motivated effect modifiers,
   separate confirmatory from exploratory work, and report **both scales**
   with cell-specific risks and a common reference category
@@ -75,7 +76,7 @@ knitr::opts_chunk$set(
 
 ---
 
-## 1. Why interaction matters in epidemiology and real-world evidence
+## 1. Why interaction matters in epidemiology and real-world evidence {#sec-rwe-why-interaction}
 
 A single average treatment effect is rarely the end of a clinically useful
 analysis. Two follow-up questions almost always arise. *Does the effect
@@ -111,7 +112,8 @@ manipulable exposures, and the contrast of subgroup-specific effects when
 that contrast is itself the scientific target. The companion chapter,
 [Effect Modification and Heterogeneous Treatment Effects](03-04-effect-modification.qmd),
 covers the closely related but distinct question of how the effect of a
-single treatment varies across baseline covariates (the CATE), with tools
+single treatment varies across baseline covariates (the conditional average
+treatment effect, or CATE), with tools
 including TMLE for prespecified subgroups, causal forests, and treatment-effect
 variable importance.
 
@@ -119,21 +121,22 @@ The two chapters are designed to be read together. Effect modification
 asks *who benefits more from one treatment*; interaction asks *how two
 exposures combine*.
 
-**Single time-point analyses** occupy Sections 1 through 10. **Time-varying
-treatment, longitudinal interactions, and marginal structural models** are
-concentrated in Section 11, and should be read after the single time-point
-material is comfortable. Section 12 closes the chapter.
+**Single time-point analyses** occupy @sec-rwe-why-interaction through
+@sec-rwe-checklist. **Time-varying treatment, longitudinal interactions,
+and marginal structural models** are concentrated in @sec-rwe-longitudinal,
+and should be read after the single time-point material is comfortable.
+@sec-rwe-conclusion closes the chapter.
 :::
 
 Several closely related ideas are routinely conflated in published work.
 Disentangling them is the first task of any chapter on interactions.
 
 - **Effect modification** describes how the causal effect of a *single*
-  treatment $A$ varies across levels of a baseline characteristic $V$
+  treatment $A$ varies across levels of a baseline characteristic $M$
   [@vanderweele2009distinction].
   The target is a contrast of subgroup-specific causal effects, for example
-  the risk difference if treated minus untreated within $V=1$ versus within
-  $V=0$.
+  the risk difference if treated minus untreated within $M=1$ versus within
+  $M=0$.
 - **Interaction**, in the strict sense used by VanderWeele and Knol
   [-@vanderweele2014tutorial], refers to the *joint* causal effect of two
   exposures $A$ and $B$. Both are conceptually manipulable and the question
@@ -179,8 +182,9 @@ epidemiology and clinical practice.
 - **Treatment targeting.** When the absolute benefit of a treatment is
   much larger in one subgroup than another, fixed budgets and finite
   clinic time turn subgroup-aware deployment into a matter of
-  efficiency. HAART offered preferentially to patients with the lowest
-  baseline CD4 prevents more deaths per regimen-month than the same
+  efficiency. Highly active antiretroviral therapy (HAART) offered
+  preferentially to patients with the lowest baseline CD4 prevents more
+  deaths per regimen-month than the same
   drug offered uniformly. Interaction estimates are what turn "treatment
   works on average" into "treat these patients first."
 - **Policy heterogeneity.** Public-health interventions rarely have
@@ -208,7 +212,7 @@ epidemiology and clinical practice.
   cardiometabolic risk, the interaction question is whether their
   effects on the outcome compound beyond what either alone predicts.
   These analyses typically need the modified-treatment-policy
-  framework introduced in Section 11 rather than binary-cell
+  framework introduced in @sec-rwe-longitudinal rather than binary-cell
   contrasts.
 
 The common thread is that interaction estimates inform decisions and
@@ -222,9 +226,12 @@ Because these two ideas are conflated so often, it is worth restating the
 distinction in operational terms:
 
 - **Effect modification** is *heterogeneity in conditional effects*. The
-  modifier $V$ need not be a manipulable exposure; it might be sex, a
+  modifier $M$ need not be a manipulable exposure; it might be sex, a
   genotype, or a baseline biomarker. The estimand is the contrast of
-  conditional treatment effects across levels of $V$.
+  conditional treatment effects across levels of $M$. When only one
+  exposure is a manipulable treatment and the second variable is a
+  baseline characteristic such as age, sex, frailty, or chronic kidney
+  disease, this is usually the target.
 - **Interaction** is a *contrast of joint interventions*. It requires that
   *both* $A$ and a second variable $E$ be conceptually amenable to
   intervention, and the estimand involves four counterfactual worlds in
@@ -233,28 +240,14 @@ distinction in operational terms:
 The implication is methodological: a regression "interaction term" between
 $A$ and $E$ does not estimate a causal interaction. It estimates a
 parameter of a parametric model whose mapping to a causal contrast holds
-only under strong assumptions. Many applied analyses report the
-coefficient and call it interaction; this chapter argues that the causal
-interaction parameter should be defined and estimated directly.
-
-### Effect modification is not the same as causal interaction
-
-Throughout this chapter, treat these as different scientific questions.
-If only one exposure is interpreted as a manipulable treatment and the
-second variable is a baseline characteristic such as age, sex, frailty,
-or chronic kidney disease, the target is usually effect modification:
-how much the treatment effect differs across levels of that
-characteristic. If both variables are treated as interventions or
-exposures whose joint effect is of interest, the target is causal
-interaction. In that second case, the estimand is built from four
-counterfactual mean outcomes under the joint exposure conditions
-$(0,0)$, $(1,0)$, $(0,1)$, and $(1,1)$. This distinction matters
-because identification assumptions, interpretation, and recommended
-software all differ [@hernan2025whatif; @knol2012recommendations].
-
-If the second variable is not itself assigned or conceptualised as an
-intervention, avoid calling the estimand a causal interaction unless
-that stronger interpretation is justified.
+only under strong assumptions, and many applied analyses report the
+coefficient and call it interaction. This chapter argues that the causal
+interaction parameter should be defined and estimated directly. The two
+cases also differ in identification assumptions, interpretation, and
+recommended software [@hernan2025whatif; @knol2012recommendations]. If the
+second variable is not itself assigned or conceptualised as an
+intervention, avoid calling the estimand a causal interaction unless that
+stronger interpretation is justified.
 
 Before you write a single line of code, decide which of the four
 ideas (effect modification, two-exposure interaction, additive
@@ -267,7 +260,7 @@ stratifier.
 
 ---
 
-## 2. From scientific question to causal estimand
+## 2. From scientific question to causal estimand {#sec-rwe-estimand}
 
 The most common mistake in interaction analysis is to start with a model.
 The right starting point is to write down the quantity you want to
@@ -327,9 +320,15 @@ $\text{RERI} = 0$ corresponds to no additive interaction; positive
 values indicate that the joint exposure produces more risk than the
 sum of the two individual excess risks
 [@vanderweele2014tutorial; @knol2012recommendations]. Two derived
-summaries that appear regularly in the epidemiologic literature are
-the **attributable proportion due to interaction**, $\text{AP} = \text{RERI}/RR_{11}$,
-and the **synergy index**, $S = (RR_{11} - 1)/[(RR_{10} - 1) + (RR_{01} - 1)]$.
+summaries that appear regularly in the epidemiologic literature, both
+introduced in Rothman's early work on biologic synergy
+[@rothman1976synergy], are the **attributable proportion due to
+interaction**, $\text{AP} = \text{RERI}/RR_{11}$, and the **synergy
+index**, $S = (RR_{11} - 1)/[(RR_{10} - 1) + (RR_{01} - 1)]$. Both AP and
+$S$ are interpretable only when both exposures are risk-increasing
+($RR_{10} > 1$ and $RR_{01} > 1$); if either exposure is preventive,
+recode so the lowest-risk stratum is the reference before computing them
+(see @sec-rwe-scales).
 
 ### D. Multiplicative interaction as a secondary scale
 
@@ -345,7 +344,8 @@ useful complement to the additive summaries when the scientific
 question is itself ratio-based or when the result has to sit alongside
 other ratio-scale literature. It is rarely the right starting point
 for decision-making, where the additive scale answers "how many
-additional events?" directly.
+additional events?" directly; @sec-rwe-scales develops why the additive
+scale is the recommended default for RWE decision questions.
 
 ### E. Subgroup-specific treatment effects when the second variable is a non-manipulable modifier
 
@@ -376,11 +376,11 @@ foregrounds.
 
 | Question | Estimand | Formula | Plain-English interpretation | Preferred use |
 |---|---|---|---|---|
-| Does treatment benefit differ across subgroups defined by $V$? | Subgroup-specific risk difference / CATE contrast | $RD(v) = E[Y^1 - Y^0 \mid V=v]$, contrasted across $v$ | "Treatment prevents $RD(v)$ more events per 100 patients in subgroup $V=v$" | Treatment allocation, subgroup targeting |
+| Does treatment benefit differ across subgroups defined by $M$? | Subgroup-specific risk difference / CATE contrast | $RD(m) = E[Y^1 - Y^0 \mid M=m]$, contrasted across $m$ | "Treatment prevents $RD(m)$ more events per 100 patients in subgroup $M=m$" | Treatment allocation, subgroup targeting |
 | Do two joint interventions combine super-additively on the risk scale? | Additive interaction contrast | $\psi_{\text{add}} = p_{11} - p_{10} - p_{01} + p_{00}$ | "Joint exposure produces $\psi_{\text{add}}$ additional events per person beyond what the two effects would predict separately" | Public-health decision-making, RWE targeting |
 | Do two joint interventions combine super-additively on the relative-risk scale? | RERI | $\text{RERI} = RR_{11} - RR_{10} - RR_{01} + 1$ | "Excess risk above 1.0 once the two single-exposure RRs are subtracted" | Epidemiologic synthesis when risks are not directly modelled |
 | Do two joint interventions combine multiplicatively? | Multiplicative interaction | $\psi_{\text{mult}} = RR_{11} / (RR_{10} \cdot RR_{01})$ | "Joint RR is $\psi_{\text{mult}}$ times the product of the marginals" | Secondary summary when a ratio-scale question is explicit |
-: Table 1. Core interaction estimands and their plain-English readings. {.striped}
+: Core interaction estimands and their plain-English readings. {#tbl-estimands .striped}
 
 ::: {.callout-note}
 ## A toy example: computing interaction by hand
@@ -435,8 +435,9 @@ product-term coefficient from a logistic regression? Three reasons.
    meaningfully. A causal estimand defined directly from potential outcomes
    does not depend on whether you used a polynomial or a spline for $W_1$.
 
-Table 2 contrasts the two scales explicitly, and Table 3 maps each
-question type to a recommended estimator family.
+@tbl-add-vs-mult contrasts the two scales explicitly, and
+@tbl-estimator-map maps each question type to a recommended estimator
+family.
 
 | Feature | Additive interaction | Multiplicative interaction |
 |---|---|---|
@@ -446,7 +447,7 @@ question type to a recommended estimator family.
 | Default model | None; estimate by standardisation or TMLE | Logistic, log-binomial, Cox product term |
 | Coding sensitivity | Highly sensitive when one exposure is preventive; lowest-risk stratum should be reference | Less sensitive but still requires explicit reference |
 | Decision relevance | Direct: tells you absolute benefit by subgroup | Indirect: needs baseline risk to translate into absolute benefit |
-: Table 2. Additive versus multiplicative interaction at a glance. {.striped}
+: Additive versus multiplicative interaction at a glance. {#tbl-add-vs-mult .striped}
 
 | Scientific aim | Preferred estimand | Recommended estimator |
 |---|---|---|
@@ -455,7 +456,7 @@ question type to a recommended estimator family.
 | Joint effect of two binary exposures | $p_{ae}$, $\psi_{\text{add}}$, RERI | TMLE for each joint regime mean, with post-estimation contrasts |
 | Time-varying treatment with subgroup contrast | Counterfactual mean / survival under dynamic strategy by subgroup | LTMLE [@vanderLaan2012ltmle] or TMLE for marginal structural models |
 | Many candidate modifiers, exploratory discovery | Conditional average treatment effect surface | Causal forest or simultaneous one-step TMLE with multiplicity control [@wei2023simultaneous] |
-: Table 3. Causal estimands for interaction questions and recommended estimators. {.striped}
+: Causal estimands for interaction questions and recommended estimators. {#tbl-estimator-map .striped}
 
 Write the estimand on a sticky note before you write the model. If you
 cannot describe what you are estimating in one sentence using potential
@@ -463,7 +464,7 @@ outcomes, you are not yet ready to estimate it.
 
 ---
 
-## 3. Interaction-specific design and identification
+## 3. Interaction-specific design and identification {#sec-rwe-design}
 
 Interaction analyses inherit the standard causal assumptions covered in
 detail in @sec-roadmap: consistency,
@@ -506,7 +507,7 @@ extension. Decide the following before building the analysis.
   anchoring time zero to one drug and treating the other as a baseline
   or time-varying covariate. That choice determines which counterfactual
   the estimand corresponds to and therefore which of the estimands in
-  Section 2 is actually targeted.
+  @sec-rwe-estimand is actually targeted.
 - **Immortal time bias from co-initiation requirements.** If eligibility
   requires that both drugs be initiated within a short window, any
   outcome-free interval before the second drug is dispensed is immortal:
@@ -518,7 +519,7 @@ extension. Decide the following before building the analysis.
 - **Estimand coherence and the definition of "jointly exposed."**
   Simultaneous-initiation and overlap-window definitions both index a
   joint intervention on $(A, E)$ and map to the four-counterfactual
-  interaction estimand of Section 2. A design that fixes $E$ at baseline
+  interaction estimand of @sec-rwe-estimand. A design that fixes $E$ at baseline
   and varies only $A$ corresponds to effect modification, not causal
   interaction. Using an overlap-window definition while calling the
   result a "causal interaction" conflates these two scientific questions,
@@ -569,7 +570,7 @@ parameter, for three reasons.
 The remedy is to estimate the interaction parameter directly on the
 full cohort, with a single adjustment specification (regression,
 Super Learner, or a TMLE plug-in) that targets all four counterfactual
-means jointly. Section 6 implements exactly this workflow. When
+means jointly. @sec-rwe-worked-example implements exactly this workflow. When
 inverse-probability weights or matching are used as part of the
 adjustment, they should be constructed on the full cohort with treatment
 defined as the *joint* exposure $(A, E)$, not on each subgroup
@@ -684,7 +685,7 @@ Two recurring failure modes follow:
 
 This is why propensity-score diagnostics should be reported *within
 each joint exposure cell or modifier subgroup*, not only overall, and
-why collaborative TMLE (Section 7) was developed as a sensitivity
+why collaborative TMLE (@sec-rwe-ctmle) was developed as a sensitivity
 strategy for fragile propensity-score estimation.
 
 ### Interaction through the Targeted Learning roadmap
@@ -743,7 +744,7 @@ manufacture identifiability that the data do not support.
 
 ---
 
-## 4. Estimand-first targeted learning for interaction
+## 4. Estimand-first targeted learning for interaction {#sec-rwe-targeted-learning}
 
 Super Learner [@vanderLaan2007superlearner] and TMLE
 [@vanderLaan2006tmle] are introduced in @sec-doubly-robust-tmle
@@ -758,7 +759,7 @@ parameter is an interaction.
 For interaction estimation, TMLE does not begin with a product term.
 It begins with the four mean counterfactual outcomes
 $p_{00}, p_{10}, p_{01}, p_{11}$ under the joint exposure conditions
-defined in Section 2. The additive interaction estimand
+defined in @sec-rwe-estimand. The additive interaction estimand
 $\psi_{\text{add}} = p_{11} - p_{10} - p_{01} + p_{00}$ is then a
 contrast of those four means. TMLE improves a plug-in estimator of
 those means by incorporating the treatment mechanism and updating the
@@ -815,14 +816,15 @@ targeting step also improves efficiency relative to plug-in
 g-computation, which matters when the joint cell is small and every bit
 of information has to be used.
 
-### From estimand to estimator: practical workflow
+### From estimand to estimator: practical workflow {#sec-estimand-to-estimator}
 
 The slogan "estimand first, then estimator" is easier to repeat than to
 operationalize. The five steps below make the mapping concrete for an
 interaction analysis with a binary treatment $A$ and a binary second
-exposure $E$ (or modifier $M$). **At its heart, the procedure estimates
-four counterfactual means and combines them into the contrast you
-specified in Section 2.**
+exposure $E$ (or modifier $M$). This canonical mapping is the one the
+worked example in @sec-rwe-worked-example implements step by step. **At
+its heart, the procedure estimates four counterfactual means and combines
+them into the contrast you specified in @sec-rwe-estimand.**
 
 **Step 1. Estimate the outcome regression** $Q(A, E, W) = E[Y \mid A, E, W]$
 with Super Learner. This is a single model that uses the *observed* data
@@ -850,11 +852,11 @@ then form a Wald confidence interval from its empirical variance. The
 same machinery yields valid CIs for any smooth contrast of the four
 counterfactual means.
 
-Section 6 implements Steps 1 to 3 directly with `sl3` and Steps 4 to 5
-via `tmle3` (or stratified `tmle` plus bootstrap as a transparent
-alternative). The point of the boxed mapping is that every line of code
-in Section 6 corresponds to one of these five steps; if you can say which
-step a line belongs to, the workflow is well-specified.
+@sec-rwe-worked-example implements Steps 1 to 3 directly with `sl3` and
+Steps 4 to 5 via `tmle3` (or stratified `tmle` plus bootstrap as a
+transparent alternative). The point of the boxed mapping is that every
+line of code in that section corresponds to one of these five steps; if
+you can say which step a line belongs to, the workflow is well-specified.
 
 ### Recent literature
 
@@ -876,7 +878,7 @@ exposure cells are large enough to support data splitting (see
 
 ---
 
-## 5. Additive and multiplicative interaction in practice
+## 5. Additive and multiplicative interaction in practice {#sec-rwe-scales}
 
 The most important recommendation in the VanderWeele and Knol tutorial
 [-@vanderweele2014tutorial] is to report both scales whenever the
@@ -1023,7 +1025,7 @@ an interaction parameter on the cumulative-risk scale at a clinically
 meaningful time horizon $t^*$**, not on the hazard scale. Useful
 risk-scale estimands include:
 
-- **Cumulative incidence at $t^*$**: $F^{a,e}(t^*) = P(T^{a,e} \le t^*)$. The four counterfactual cumulative incidences populate exactly the same 2$\times$2 table as the binary-outcome example in Section 2, and RERI / AP / $S$ are computed directly from them.
+- **Cumulative incidence at $t^*$**: $F^{a,e}(t^*) = P(T^{a,e} \le t^*)$. The four counterfactual cumulative incidences populate exactly the same 2$\times$2 table as the binary-outcome example in @sec-rwe-estimand, and RERI / AP / $S$ are computed directly from them.
 - **Restricted mean survival time (RMST) at $t^*$**: $\mu^{a,e}(t^*) = E[\min(T^{a,e}, t^*)]$. RMST contrasts have a natural decision-theoretic interpretation (expected event-free time gained) and an additive scale that is straightforward to interpret.
 - **Risk difference at $t^*$**: $F^{1,1}(t^*) - F^{0,0}(t^*)$ and the corresponding interaction contrast $F^{1,1}(t^*) - F^{0,1}(t^*) - F^{1,0}(t^*) + F^{0,0}(t^*)$.
 
@@ -1033,7 +1035,7 @@ using `survtmle`, `concrete`, `ltmle`, or `lmtp` (with survival outcome
 nodes). The point-treatment chapter on time-to-event outcomes
 (@sec-tte-competing) walks through
 the survival-TMLE machinery. Combining it with the joint-intervention
-workflow of Section 6 (by replacing $Q(A, E, W) = E[Y \mid A, E, W]$
+workflow of @sec-rwe-worked-example (by replacing $Q(A, E, W) = E[Y \mid A, E, W]$
 with $\hat F^{a,e}(t^*; W)$ and contrasting four counterfactual
 cumulative incidences) yields an interaction estimate that is free of
 hazard-scale interpretive problems.
@@ -1143,7 +1145,7 @@ sensitivity test.
 
 ---
 
-## 6. Point-treatment worked example with TMLE and Super Learner
+## 6. Point-treatment worked example with TMLE and Super Learner {#sec-rwe-worked-example}
 
 This section demonstrates the workflow on a simulated cohort with a
 binary treatment $A$, a binary second exposure $E$ (here playing the
@@ -1166,13 +1168,15 @@ two-step implementation). Layers 1 and 2 target the same estimand;
 Layer 2 supplies the targeting and inference machinery that the
 plug-in version skips.
 
-A minimal implementation has five steps:
-
-1. **Estimate the outcome regression** $Q(A, E, W) = E[Y \mid A, E, W]$ with Super Learner.
-2. **Predict outcomes under the four joint exposure states** $(A, E) \in \{(0,0), (1,0), (0,1), (1,1)\}$.
-3. **Average each set of predictions over the target population** to get four marginal counterfactual risks.
-4. **Combine the four marginal risks into the additive or multiplicative interaction parameter** ($\psi_{\text{add}}$ or $\psi_{\text{mult}}$, plus RERI, AP, and $S$ if useful).
-5. **Use a TMLE update and the efficient influence curve for inference** when using a targeted estimator. The plug-in version is a g-computation step; the TMLE update adds robustness when the outcome regression is misspecified but the treatment mechanism is consistent.
+A minimal implementation follows the five-step estimand-to-estimator
+mapping laid out in @sec-estimand-to-estimator: fit $Q(A, E, W)$ with
+Super Learner, predict outcomes under the four joint exposure states,
+average each set of predictions to four marginal counterfactual risks,
+combine them into the interaction parameter ($\psi_{\text{add}}$ or
+$\psi_{\text{mult}}$, plus RERI, AP, and $S$ if useful), and add the TMLE
+update and influence-curve inference. The two layers below walk through
+that mapping: Layer 1 covers the plug-in Steps 1 to 3, and Layer 2 the
+targeting and inference of Steps 4 to 5.
 
 ### Simulated data
 
@@ -1208,7 +1212,8 @@ dat <- data.frame(Y, A, E, W1, W2, W3)
 ### Layer 1: transparent plug-in g-computation
 
 The data structure is $O = (W, A, E, Y)$. The plug-in workflow is the
-first three steps of the estimand-to-estimator mapping from Section 4:
+first three steps of the estimand-to-estimator mapping from
+@sec-estimand-to-estimator:
 
 1. **Estimate the outcome regression** $Q(A, E, W) = E[Y \mid A, E, W]$
    with Super Learner.
@@ -1321,7 +1326,7 @@ and the bootstrapped CI from those.
 
 The block below implements path (ii): estimate $g(A, E \mid W)$ with
 `sl3`, construct the per-regime clever covariates to show the targeting
-direction, run `ltmle` with `Anodes = c("A", "E")` for each of the four
+direction, run `ltmle` with `Anodes = c("E", "A")` for each of the four
 joint regimes, and combine the regime-specific influence curves for a
 Wald CI on $\widehat\psi_{\text{add}}$.
 
@@ -1453,6 +1458,7 @@ populate a 2×2 cell-specific risk table. Numbers are illustrative.
 |---|---:|---:|
 | **$A = 0$** (risk if untreated) | 0.10 | 0.12 |
 | **$A = 1$** (risk if treated)   | 0.15 | 0.28 |
+: Illustrative joint-intervention counterfactual risks from TMLE. {#tbl-cell-risks .striped}
 
 From these four numbers the analyst reads off both interaction
 parameters directly:
@@ -1498,7 +1504,7 @@ contrasts follow.
 
 ---
 
-## 7. CTMLE as a sensitivity analysis
+## 7. CTMLE as a sensitivity analysis {#sec-rwe-ctmle}
 
 Collaborative TMLE (CTMLE) is covered in detail in
 @sec-advanced-tmle. This section explains only when
@@ -1535,7 +1541,7 @@ exposure $(A, E)$ rather than over $A$ alone.
 
 ---
 
-## 8. Multiplicity, reporting, and interpretation
+## 8. Multiplicity, reporting, and interpretation {#sec-rwe-reporting}
 
 Interaction analyses are uniquely vulnerable to multiplicity. The risk
 is not theoretical: many published claims of subgroup heterogeneity have
@@ -1553,7 +1559,7 @@ Before unblinding to the outcome, write down:
   hypothesis-generating.
 
 The PATH statement and methodological work on heterogeneity of treatment
-effects converge on this distinction. Recent simultaneous-inference
+effects converge on this distinction [@kent2020path]. Recent simultaneous-inference
 methods for multiple subgroup TMLEs make confirmatory analysis with
 several modifiers tractable [@wei2023simultaneous].
 
@@ -1690,7 +1696,7 @@ confirmatory interaction analysis:
 - **Vary the adjustment set.** Re-run with a minimal sufficient
   adjustment set and with a richer one. Large changes suggest residual
   confounding or model dependence.
-- **Run a CTMLE sensitivity analysis** (Section 7) to check whether
+- **Run a CTMLE sensitivity analysis** (@sec-rwe-ctmle) to check whether
   collaborative propensity-score selection moves the estimate.
 - **Quantify unmeasured confounding tolerance** using a causal-gap or
   E-value-style framework: how strong would an unmeasured confounder
@@ -1708,7 +1714,7 @@ rather than as an afterthought.
 
 ---
 
-## 9. Software for interaction analyses
+## 9. Software for interaction analyses {#sec-rwe-software}
 
 The core R targeted-learning stack is introduced in
 @sec-doubly-robust-tmle,
@@ -1724,12 +1730,12 @@ epidemiology-oriented options outside the tlverse and one Python entry.
 | `ltmle` | R | Time-varying interactions; can also handle two intervention nodes ($A$ and $E$) at the same time point and return the four targeted regime means | Mature; supports censoring and dynamic regimes | Wide-format data layout takes practice |
 | `SuperLearner` | R | Nuisance estimation for $Q$ and $g$ in any of the above | Curated learner library, well documented | Requires user choice of learners |
 | `drtmle` | R | Robustness check when learners are aggressive or joint cells are sparse; returns DR, TMLE, and AIPW for comparison | Doubly robust asymptotic normality | Less interaction-specific tooling |
-| `ctmle` | R | Sensitivity analysis when the propensity model is fragile (Section 7) | Collaborative variable selection for $g$ | Older API; less actively developed |
+| `ctmle` | R | Sensitivity analysis when the propensity model is fragile (@sec-rwe-ctmle) | Collaborative variable selection for $g$ | Older API; less actively developed |
 | `interactionR` | R | Compute and recode RERI / AP / synergy index from estimated risks or model output, with automatic preventive-exposure handling | Implements the Knol and VanderWeele recoding rule; useful even when nuisance estimation is done elsewhere | Reporting-focused, not an estimator on its own |
 | `grf` | R | Exploratory CATE / heterogeneity surface; orienting tool before a confirmatory interaction analysis | Honest sample splitting, individual-level CATE estimates | Not doubly robust; should not be the primary interaction estimator |
 | `zEpid` | Python | Epidemiology-oriented TMLE / AIPW / IPTW with explicit cross-fitting; useful when the team is Python-first | Cross-fitting available; epi-friendly API | Smaller learner ecosystem than R |
 | `PyTMLE` | Python | Targeted estimation outside the R ecosystem | Active development | Less interaction-specific tooling than the R stack |
-: Table 4. Core R and Python packages for interaction analyses. {.striped}
+: Core R and Python packages for interaction analyses. {#tbl-software .striped}
 
 ### Emerging methods for mixed-exposure interaction discovery
 
@@ -1753,7 +1759,7 @@ discovery process itself.
   and exposure-covariate combinations driving outcomes under
   stochastic intervention.
 
-Use these as advanced complements to the workflow in Section 6, not as
+Use these as advanced complements to the workflow in @sec-rwe-worked-example, not as
 the main starting point for a beginner. Their additional flexibility
 also means more decisions about library composition, cross-fitting,
 and exposure-shift definitions.
@@ -1764,7 +1770,7 @@ every other chapter of this handbook.
 
 ---
 
-## 10. Practical checklist for analysts
+## 10. Practical checklist for analysts {#sec-rwe-checklist}
 
 The checklist below summarizes the chapter into a single artifact. It can
 be copied into a project's pre-analysis plan or a reviewer's referee
@@ -1784,13 +1790,14 @@ form.
 | Multiplicity | Confirmatory vs. exploratory split; simultaneous CIs or FDR for many modifiers | Many unadjusted subgroup tests |
 | Reporting | Cell-specific risks; both scales; common reference category; coding decisions; sensitivity analyses | Only a p-value for the product term |
 | Interpretation | Lead with absolute risks; sense-check against background incidence | Headline-only relative-risk language |
-: Table 5. Practical checklist for interaction analyses in RWE. {.striped}
+: Practical checklist for interaction analyses in RWE. {#tbl-checklist .striped}
 
 ---
 
-## 11. Time-varying interactions and marginal structural models
+## 11. Time-varying interactions and marginal structural models {#sec-rwe-longitudinal}
 
-Sections 1 through 10 dealt with single time-point analyses: a baseline
+@sec-rwe-why-interaction through @sec-rwe-checklist dealt with single
+time-point analyses: a baseline
 treatment, a baseline modifier or second exposure, a single outcome
 measurement. Many real-world questions involve treatment regimens that
 evolve over time, with intermediate covariates that are at once
@@ -1860,7 +1867,7 @@ each step for what has already changed.
 
 ### Survival-outcome interaction at a single follow-up horizon
 
-The two-Anode pattern from Section 6 extends directly to time-to-event
+The two-Anode pattern from @sec-rwe-worked-example extends directly to time-to-event
 outcomes. When the target is a cumulative incidence
 $F^{a,e}(t^*) = P(T^{a,e} \le t^*)$ at a prespecified horizon $t^*$,
 both exposures remain fixed at baseline and `ltmle` handles
@@ -1899,7 +1906,7 @@ your dataset.
 #
 # Column order in surv_dat must follow: W nodes, A nodes, then (C, Y) pairs.
 # For a single horizon, with C already built as a BinaryToCensoring factor:
-#   surv_dat <- dat[, c("W1","W2","W3","A","E","C","Y")]
+#   surv_dat <- dat[, c("W1","W2","W3","E","A","C","Y")]
 # -----------------------------------------------------------------------
 
 library(ltmle)
@@ -1907,10 +1914,10 @@ library(ltmle)
 run_surv_regime <- function(a_val, e_val) {
   ltmle(
     data       = surv_dat,
-    Anodes     = c("A", "E"),
+    Anodes     = c("E", "A"),
     Cnodes     = "C",           # use c("C1","C2","C3") for multiple time points
     Ynodes     = "Y",           # use c("Y1","Y2","Y3") for multiple time points
-    abar       = c(a_val, e_val),
+    abar       = c(e_val, a_val),   # order matches Anodes = c("E", "A")
     SL.library = c("SL.mean", "SL.glm", "SL.ranger"),
     estimate.time = FALSE
   )
@@ -1968,7 +1975,7 @@ support this workflow.
 In an MSM-based interaction analysis the analyst should be explicit
 about: which regimes the MSM indexes, whether $M$ is baseline or
 time-varying, and how the MSM is parameterised on the additive or
-multiplicative scale. The same scale considerations from Section 5
+multiplicative scale. The same scale considerations from @sec-rwe-scales
 apply: pre-specify the scale, use a common reference, and report the
 cell-specific counterfactual means whenever possible.
 
@@ -1981,7 +1988,7 @@ across treatment histories, not only at baseline.
 
 ### Flexible estimands beyond binary exposures
 
-The estimands defined in Section 2 assume binary exposures. In
+The estimands defined in @sec-rwe-estimand assume binary exposures. In
 real-world evidence, exposures are often continuous (dose, duration,
 intensity), and joint positivity for any single value of a continuous
 exposure is typically zero. The remedy is to redefine the estimand in
@@ -2062,7 +2069,7 @@ and $p$-value for each pair.
 
 ### Discovery: which exposures interact?
 
-The single-time-point worked example in Section 6 assumes the analyst
+The single-time-point worked example in @sec-rwe-worked-example assumes the analyst
 already knows which two exposures to interrogate. When the candidate
 pool is larger (a typical mixture has 5 to 20 exposures), the
 question shifts to *which pairs interact at all*, with valid inference
@@ -2093,7 +2100,7 @@ follow-up study before being treated as confirmatory.
 
 ---
 
-## 12. Conclusion
+## 12. Conclusion {#sec-rwe-conclusion}
 
 Interaction analyses in real-world evidence research are easy to do
 poorly and demanding to do well. The fix is not a single new estimator
@@ -2226,7 +2233,7 @@ rule with quantifiable expected value.
 ## Appendix A: Full R code
 
 The block below collects the joint-intervention worked example from
-Section 6 into a single runnable script.
+@sec-rwe-worked-example into a single runnable script.
 
 ```{r}
 #| label: appendix-a-full
@@ -2313,7 +2320,7 @@ list(psi_add = psi_add, psi_mult = psi_mult)
 # Layer 2 implementation is in the "layer2-tmle-full" code block in
 # Section 6: estimate g(A, E | W) factored as P(A|E,W)*P(E|W) with sl3,
 # construct per-regime clever covariates H_ae, run ltmle with
-# Anodes = c("A","E") for each of the four joint regimes, and combine
+# Anodes = c("E","A") for each of the four joint regimes, and combine
 # the regime-specific influence curves for a Wald CI on psi_add.
 # For survival and longitudinal extensions see the Section 11 sketch.
 ```

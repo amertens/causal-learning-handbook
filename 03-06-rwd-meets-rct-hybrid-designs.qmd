@@ -33,7 +33,7 @@ After completing this chapter, you will be able to:
 
 ## Why Combine RCT and RWD? {#sec-why-combine}
 
-No single data source is perfect. RCTs buy us internal validity, but they are often too small, too narrow, or too slow. RWD brings scale and diversity but lacks randomization. Hybrid designs try to get the best of both. Three reasons drive the effort to combine them.
+No single data source is perfect. RCTs buy us internal validity, but they are often too small, too narrow, or too slow. RWD brings scale and diversity but lacks randomization. Hybrid designs try to get the best of both, and a growing literature formalizes how to combine randomized and observational evidence [@colnet2024combining]. Three reasons drive the effort to combine them.
 
 ### Precision
 
@@ -101,7 +101,7 @@ This is generally safer than a pure external control design, because the concurr
 
 ### Transportability and Generalizability
 
-A third strategy, transporting or generalizing trial results to a broader population, is discussed in detail in the next section (@sec-transportability). To transport a trial result is to take the causal effect estimated in the trial's selected population and ask what that effect would be in a different, broader population. The techniques include inverse odds of sampling weights (IOSW), transport and generalizability TMLE, and doubly robust methods that combine outcome and sampling models [@hernan2025whatif; @petersen2014causal].
+A third strategy, transporting or generalizing trial results to a broader population, is discussed in detail in the next section (@sec-transportability). To transport a trial result is to take the causal effect estimated in the trial's selected population and ask what that effect would be in a different, broader population. The techniques include inverse odds of sampling weights (IOSW), transport and generalizability TMLE [@rudolph2017transport], and doubly robust methods that combine outcome and sampling models [@hernan2025whatif; @dahabreh2020transport].
 
 ---
 
@@ -127,7 +127,7 @@ The positivity assumption (@sec-roadmap) extends across data sources: the covari
 Beyond the standard consistency assumption, hybrid designs require that outcome definitions, medical coding, and measurement schemes are compatible across sources. For example, "progression-free survival" measured by central radiology review in a trial is not the same as "progression-free survival" inferred from claims data or chart review. If definitions differ, the hybrid estimator conflates incompatible quantities.
 :::
 
-For data fusion specifically, the formal requirements are:
+For data fusion specifically, in the sense of combining causal knowledge across heterogeneous data sources [@bareinboim2016fusion], the formal requirements are:
 
 1. **Mean exchangeability in the trial**: $E(Y_a \mid S = 1, W, A = a) = E(Y_a \mid S = 1, W)$. This holds by randomization.
 
@@ -135,7 +135,7 @@ For data fusion specifically, the formal requirements are:
 
 3. **Positivity of treatment in the trial**: $0 < P(A = 1 \mid S = 1, W) < 1$. This holds by randomization design.
 
-4. **Mean exchangeability across studies** (the critical assumption): $E(Y_a \mid S = 1, W) = E(Y_a \mid W)$. The treatment effect conditional on covariates is the same in the trial and the real-world population. This fails when unmeasured confounders in the RWD affect outcomes differently than in the trial. Suppose trial patients receive more intensive monitoring that independently reduces MACE risk. Then the outcome model differs between the trial and real-world settings even after conditioning on measured covariates.
+4. **Mean exchangeability across studies** (the critical assumption): $E(Y_a \mid S = 1, W) = E(Y_a \mid W)$. The conditional mean outcome under each treatment is the same in the trial and the target population. This fails when unmeasured confounders in the RWD affect outcomes differently than in the trial. Suppose trial patients receive more intensive monitoring that independently reduces the risk of major adverse cardiovascular events (MACE). Then the outcome model differs between the trial and real-world settings even after conditioning on measured covariates.
 
 Assumption 4 is the one that makes data fusion dangerous. ES-CV-TMLE and A-TMLE (discussed in @sec-escvtmle and @sec-atmle) are built to be robust when it fails. They either detect the violation and fall back to the RCT-only estimate, or they estimate and correct the resulting bias.
 
@@ -282,7 +282,7 @@ Before transporting trial results, assess how different the trial and target pop
 
 #### Propensity for Study Membership
 
-Fit a model for $P(S = 1 \mid W)$ and examine the distribution:
+Fit a model for $P(S = 1 \mid W)$ and examine the distribution (@fig-study-membership):
 
 ```{r}
 #| label: fig-study-membership
@@ -349,7 +349,7 @@ cat(sprintf("Effective sample size: %.0f / %d (%.0f%%)\n",
 
 #### Standardized Mean Differences
 
-Compare covariate distributions before and after reweighting:
+Compare covariate distributions before and after reweighting (@fig-smd-transport):
 
 ```{r}
 #| label: fig-smd-transport
@@ -457,12 +457,12 @@ Here the treatment effect increases with age. Because the target population is o
 
 ### Connection to ES-CV-TMLE and A-TMLE
 
-The transportability framework connects to the adaptive methods described in @sec-escvtmle and @sec-atmle:
+The adaptive methods described in @sec-escvtmle and @sec-atmle address a related but distinct problem. Rather than reweighting a trial to a new target population, they borrow external data to sharpen estimation of the effect in the trial-eligible population:
 
-- **ES-CV-TMLE** [@dang2022escvtmle] uses cross-validation to select the best combination of trial and external data for estimating the PATE, downweighting external data that introduces bias.
+- **ES-CV-TMLE** [@dang2022escvtmle] uses cross-validation to decide how much external data to borrow when estimating the trial-population ATE, downweighting external data that introduces bias.
 - **A-TMLE** [@vanderlaan2024atmle] adapts to how similar the trial and external populations are. It gains efficiency when they resemble each other and guards against bias when they do not.
 
-Both can be read as *adaptive transportability* estimators. They solve the transportability problem while staying robust to violations of the transportability assumption.
+Both are best read as *adaptive data-fusion* (borrowing) estimators for the trial-population ATE, not transportability estimators: they do not target the PATE in a new population. Transportability, the reweighting of a trial result to a different target population, remains a separate goal, addressed by the IOSW and doubly robust methods above.
 
 ---
 
@@ -470,7 +470,7 @@ Both can be read as *adaptive transportability* estimators. They solve the trans
 
 ### A Motivating Scenario
 
-Suppose you have a small RCT of 400 patients comparing a new diabetes drug to standard of care, with a composite cardiovascular event (MACE) as the primary endpoint. The RCT alone yields a risk difference of $-0.7\%$ with a wide 95% CI of $[-2.0\%, 0.5\%]$, not statistically significant.
+Suppose you have a small RCT of 400 patients comparing a new diabetes drug to standard of care, with MACE as the primary endpoint. The RCT alone yields a risk difference of $-0.7\%$ with a wide 95% CI of $[-2.0\%, 0.5\%]$, not statistically significant.
 
 You also have access to a large claims database (Optum, say) with 14,000 patients on the same two treatments. Naive pooling, which simply combines the datasets and runs TMLE on the merged data, might yield a tighter CI. But the claims data carry unmeasured confounders. Patients who received the new drug may have been healthier, more adherent, or under closer monitoring. If those unmeasured factors differ between treatment groups, the observational treatment effect is biased.
 
@@ -523,7 +523,7 @@ The key idea: **external data help you train better prediction models, but the R
 2. Using **cross-validation on the RCT** to evaluate each model's performance (e.g., via log-likelihood loss).
 3. Choosing the best-performing nuisance model (or an ensemble of them) for TMLE.
 
-External data act as supervisors, not deciders. Even when the RWD is confounded, the procedure can only help, or at worst do no harm, relative to using the RCT alone.
+External data act as supervisors, not deciders. Even when the RWD is confounded, the procedure is asymptotically no worse than using the RCT alone.
 
 ### Algorithm Step by Step
 
@@ -660,26 +660,17 @@ The output includes:
 
 ### The Core Insight
 
-Think of A-TMLE as a meta-analysis machine that does not merely combine study results but adaptively learns the best way to blend multiple estimators from different data sources. Where ES-CV-TMLE selects among candidate prediction models, a step inside the estimator, A-TMLE works one level up. It selects among or blends entire estimators, each of which may draw on different data sources or modeling strategies. A cross-validated selection criterion decides how much to trust each source.
+Think of A-TMLE as a machine that pools all of the data and then learns, data-adaptively, how much that pooling biases the trial-population effect, so it can subtract the bias back out. Where ES-CV-TMLE selects among candidate prediction models and, in effect, decides whether to admit the external data at all, A-TMLE works differently: it always pools, but it estimates the pooling-induced bias with a flexible working model and corrects for it.
 
-**Adaptive TMLE (A-TMLE)** [@vanderLaan2025atmle] takes a different tack from ES-CV-TMLE. Rather than deciding whether to pool, it always pools but adaptively estimates and corrects the bias. Its key move is that efficiency gains depend on the **complexity** of the bias, not just its magnitude.
+**Adaptive TMLE (A-TMLE)** [@vanderlaan2024atmle] takes a different tack from ES-CV-TMLE. Rather than deciding whether to pool, it always pools but adaptively estimates and corrects the bias. Its key move is that efficiency gains depend on the **complexity** of the bias, not just its magnitude.
 
-Instead of combining candidate nuisance models, A-TMLE combines candidate **estimators** (e.g., separate hybrid analyses):
-
-- TMLE using RCT only
-- TMLE using RWD only (carefully adjusted)
-- TMLE using both RCT + RWD in a joint model
-- Other candidate estimators
-
-It then takes a SuperLearner-style convex combination of these estimators to minimize cross-validated risk, which yields an adaptive, doubly robust final estimate.
-
-Let $\hat\Psi_1, \dots, \hat\Psi_K$ be candidate estimators of the same target parameter $\Psi$. A-TMLE constructs:
+Recall the two estimands from @sec-naive-pooling: the pooled-ATE $\tilde{\Psi}(P_0)$, whose outcome regression is fit on the combined data, and the RCT-ATE $\Psi(P_0)$, the target parameter. Their difference is the bias $\Psi^{\#}(P_0) = \tilde{\Psi}(P_0) - \Psi(P_0)$. A-TMLE estimates both pieces and recovers the target by subtraction:
 
 $$
-\hat\Psi_{\text{A-TMLE}} = \sum_{k=1}^K \alpha_k \hat\Psi_k
+\hat\Psi_{\text{A-TMLE}} = \hat{\tilde{\Psi}} - \hat\Psi^{\#}
 $$
 
-with $\alpha_k \ge 0$ and $\sum_k \alpha_k = 1$. Weights $\alpha$ are chosen to minimize cross-validated loss (e.g., squared error of influence curves), and may be constrained (e.g., RCT estimator always included) or hierarchically specified (e.g., more weight on RCT when conflict arises).
+The bias term $\Psi^{\#}$ is learned rather than assumed. A-TMLE fits it with a flexible working model, the highly adaptive lasso, so the correction adapts to how complex the discrepancy between the trial and external outcome models really is. When the bias is simple or absent, little is subtracted and the estimator inherits the precision of pooling; when the bias is large, $\hat\Psi^{\#}$ captures it and the estimator falls back toward the RCT-only effect.
 
 ### Algorithm Step by Step
 
@@ -1097,7 +1088,7 @@ In those cases, a pure RCT analysis with careful interpretation may be preferabl
 Regulatory reviewers and journal referees evaluating external control or data-augmentation analyses tend to press on a few concerns:
 
 - **Comparability**: Are the RCT and RWD populations comparable on measured confounders? Are inclusion and exclusion criteria aligned? Show standardized differences and overlap diagnostics.
-- **Audit trails**: Can the analysis be reproduced from the archived code, data snapshot, and SAP? Are variable definitions, cohort selection rules, and model specifications documented before data access?
+- **Audit trails**: Can the analysis be reproduced from the archived code, data snapshot, and statistical analysis plan (SAP)? Are variable definitions, cohort selection rules, and model specifications documented before data access?
 - **Cohort alignment**: Are index dates, follow-up windows, and outcome definitions harmonized across data sources? Time-zero misalignment is a common source of immortal time bias [@hernan2016target].
 - **Sensitivity analyses**: Report results under multiple analysis choices (with and without external data, varying matching thresholds, different learner libraries) to demonstrate robustness.
 - **Transparency about the RCT-only estimate**: Under randomization, the RCT-only estimate is consistent for the *trial-sample* treatment effect. Augmentation with RWD may improve precision for this estimand or enable estimation of the *target-population* effect, but the RCT-only estimate should always be reported as a benchmark. See @sec-transportability for the distinction between trial-sample and target-population effects.
