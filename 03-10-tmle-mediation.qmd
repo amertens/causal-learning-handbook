@@ -362,8 +362,10 @@ M <- rnorm(n,
 
 Higher CD4 change reduces mortality (negative coefficient on `M`). HAART reduces mortality directly and via CD4. Larger weight loss (negative `Z`) increases mortality.
 
+The intercept is set so that one-year mortality is about 12%. That is high for a modern HAART cohort, but a mediation analysis estimates several nuisance functions per pathway and at $n = 2000$ a 2% outcome (40 deaths) leaves the estimators with almost nothing to learn from.
+
 ```{r}
-lp_out <- -3.5 +
+lp_out <- -1.6 +
   -0.25 * A +
   -0.004 * M +                   # CD4 increase reduces mortality
   -0.05 * Z +                    # weight gain reduces mortality
@@ -436,7 +438,7 @@ Z_mean_A0 <- 1.5 * 0 + 0.05 * (bmi - 24) - 0.02 * (age - 38)
 Z_mean_A1 <- 1.5 * 1 + 0.05 * (bmi - 24) - 0.02 * (age - 38)
 
 compute_EY <- function(a_val, m_vals, z_vals, idx) {
-  lp <- -3.5 +
+  lp <- -1.6 +
     -0.25 * a_val +
     -0.004 * m_vals +
     -0.05 * z_vals +
@@ -533,17 +535,26 @@ These problems produce qualitatively misleading answers. A proper mediation anal
 
 The `crumble` package (Williams & Díaz, 2024) implements TMLE-based mediation analysis with cross-fitting, flexible machine-learning nuisance estimation, and neural-network Riesz representer estimation. It supports natural effects, randomized interventional effects, organic effects, and recanting twins.
 
+::: {.callout-important}
+## Pinned versions
+`crumble` is a GitHub package that sits on top of `torch`, `mlr3superlearner`, and `mlr3extralearners`, and its behaviour changes with each of them. The fits in this chapter were run with `crumble` 0.1.2 (commit `81ec5b9`), `torch` 0.16.1 with the libtorch backend installed, `mlr3superlearner` 0.1.2 (commit `e56a4cb`), `mlr3extralearners` 1.2.0-9000 (commit `f6852c0`), `mlr3` 1.2.0, `earth` 5.3.4, and `ranger` 0.17.0. Install the same combination with:
+
 ```{r}
 #| eval: false
-# Install crumble (if not already installed):
-# remotes::install_github("nt-williams/crumble")
-# Also needs: torch (with the libtorch backend installed), mlr3superlearner,
-# mlr3extralearners (required for the earth and ranger learners), earth, ranger
+install.packages(c("torch", "mlr3", "mlr3learners", "earth", "ranger"))
+torch::install_torch()                         # downloads the libtorch backend once
+remotes::install_github("mlr-org/mlr3extralearners@f6852c0")
+remotes::install_github("nt-williams/mlr3superlearner@e56a4cb")
+remotes::install_github("nt-williams/crumble@81ec5b9")
+library(mlr3extralearners)   # required for the earth and ranger learners
 ```
+
+Two practical requirements are easy to miss. `crumble()` needs a plain `data.frame` (a tibble fails at the first column lookup), and the neural network that estimates the Riesz representer does not standardize its inputs, so continuous covariates and mediators on wide scales (CD4 counts in the hundreds, for instance) must be centred and scaled first. Without that step the network barely trains, the influence function collapses to the plug-in term, and the standard errors come out near zero.
+:::
 
 ### Example 1: `weight_behavior` Dataset
 
-We start with the example dataset from `mma::weight_behavior`, which is used in the `crumble` README and is known to work.
+We start with the example dataset from `mma::weight_behavior`, which is used in the `crumble` README. These three fits are shown but not executed in the build (each takes about two minutes); the simulated-cohort example that follows is executed.
 
 ```{r}
 #| eval: false
@@ -640,16 +651,21 @@ print(fit_rt)
 
 ### Example 2: Simulated HIV Cohort Data
 
-Now we use the simulated dataset from this chapter. We need to convert treatment to a factor so that `d0` and `d1` return the correct type.
+Now we use the simulated dataset from this chapter. Three preparation steps matter: treatment must be a factor so that `d0` and `d1` return the right type, the data must be a plain `data.frame`, and the continuous covariates, the intermediate confounder, and the mediator are standardized so the Riesz-representer network can train (see the pinned-versions box above). Standardizing changes nothing about the estimands, which are defined on the outcome scale.
 
 ```{r}
-#| eval: false
 #| code-fold: true
 library(crumble)
+library(mlr3extralearners)
 
-# Prepare data: treatment must be a factor
-sim_dat <- dat |>
-  mutate(A = factor(A, levels = c("0", "1")))
+# Prepare data: plain data.frame, treatment as a factor, continuous
+# inputs centred and scaled for the neural-network Riesz representer
+z <- function(x) as.numeric(scale(x))
+sim_dat <- data.frame(
+  age = z(age), bmi = z(bmi), cd4_bl = z(cd4_bl), egfr = z(egfr),
+  prior_aids = prior_aids, art_naive = art_naive,
+  A = factor(A, levels = c("0", "1")),
+  Z = z(Z), M = z(M), Y = Y)
 
 # Define intervention functions
 d0_fn <- \(data, trt) factor(rep("0", nrow(data)), levels = c("0", "1"))
@@ -662,7 +678,7 @@ covar_names <- c("age", "bmi", "cd4_bl", "prior_aids", "egfr", "art_naive")
 #### Natural effects (no intermediate confounder adjustment)
 
 ```{r}
-#| eval: false
+#| label: fit-sim-n
 fit_sim_N <- crumble(
   data      = sim_dat,
   trt       = "A",
@@ -674,14 +690,13 @@ fit_sim_N <- crumble(
   effect    = "N",     # <2>
   learners  = c("mean", "glm", "earth", "ranger"),
   nn_module = sequential_module(),
-  control   = crumble_control(crossfit_folds = 2L, epochs = 5L)
+  control   = crumble_control(crossfit_folds = 2L, epochs = 20L)
 )
 ```
 1. `d0_fn` and `d1_fn` were defined above as lambda functions that set treatment to `"0"` (control) or `"1"` (treated) for all observations; treatment must be a factor for `crumble`; the levels define what `d0` and `d1` can return
 2. `effect = "N"` fits natural effects, valid here only if the DGP's intermediate confounder $Z$ can be ignored or is absent; since our DGP includes $Z$, this estimate will be biased relative to the true NDE/NIE (compare to `fit_sim_RT`)
 
 ```{r}
-#| eval: false
 print(fit_sim_N)
 ```
 
@@ -690,7 +705,7 @@ print(fit_sim_N)
 Because our DGP includes $Z$ (6-week weight change) as a treatment-induced confounder of $M \to Y$, recanting twins is the more appropriate estimand.
 
 ```{r}
-#| eval: false
+#| label: fit-sim-rt
 fit_sim_RT <- crumble(
   data      = sim_dat,
   trt       = "A",
@@ -703,21 +718,20 @@ fit_sim_RT <- crumble(
   effect    = "RT",    # <2>
   learners  = c("mean", "glm", "earth", "ranger"),
   nn_module = sequential_module(),
-  control   = crumble_control(crossfit_folds = 2L, epochs = 5L)
+  control   = crumble_control(crossfit_folds = 2L, epochs = 20L)
 )
 ```
 1. `moc = "Z"`: specifies the measured intermediate confounder (6-week weight change in the HIV framing), the variable affected by treatment $A$ that confounds the $M \to Y$ path; `crumble` now models $P(Z \mid A, W)$ and uses it in the recanting-twins identification formula
 2. `effect = "RT"` (recanting twins) is the appropriate estimand when `moc` is present: it correctly handles the $A \to Z \to M$ and $Z \to Y$ paths, producing valid path-specific effect decompositions that the natural effects estimator cannot identify when $Z$ exists
 
 ```{r}
-#| eval: false
 print(fit_sim_RT)
 ```
 
 #### Randomized interventional effects (with Z)
 
 ```{r}
-#| eval: false
+#| label: fit-sim-ri
 fit_sim_RI <- crumble(
   data      = sim_dat,
   trt       = "A",
@@ -730,50 +744,60 @@ fit_sim_RI <- crumble(
   effect    = "RI",    # <1>
   learners  = c("mean", "glm", "earth", "ranger"),
   nn_module = sequential_module(),
-  control   = crumble_control(crossfit_folds = 2L, epochs = 5L)
+  control   = crumble_control(crossfit_folds = 2L, epochs = 20L)
 )
 ```
 1. `effect = "RI"` (**randomized interventional effects**) with `moc` specified: instead of the recanting-twins cross-world structure, the indirect effect is defined by randomly drawing $M$ from $P(M \mid A=d_0, Z, W)$; this is a stochastic intervention on the mediator that avoids both the cross-world assumption and the need to model the full $Z$ pathway explicitly
 
 ```{r}
-#| eval: false
 print(fit_sim_RI)
 ```
 
-The settings above (`crossfit_folds = 2L, epochs = 5L`) are deliberately fast for tutorials. For real analyses, increase to `crossfit_folds = 10L, epochs = 100L` (the defaults) and consider adding more flexible learners (e.g., `"xgboost"`, `"glmnet"`).
+The settings above (`crossfit_folds = 2L, epochs = 20L`) are deliberately light so the chapter builds in a few minutes per fit. For real analyses, increase to `crossfit_folds = 10L, epochs = 100L` (the defaults) and consider adding more flexible learners (e.g., `"xgboost"`, `"glmnet"`). Fewer epochs than about 20 is a false economy: the Riesz-representer network stops short of a useful fit, the influence function loses its residual term, and the reported standard errors shrink toward zero.
 
 #### Results: three estimands versus ground truth
 
-`crumble` depends on `torch`, which is not available in this book's rendering environment, so the fits above run with `eval: false`. To deliver the promised three-way comparison, the table below reports **saved output** from a representative `crumble` run on this exact simulated dataset (`crossfit_folds = 5L, epochs = 50L`), placed alongside the Monte-Carlo ground truth computed earlier in this chapter (`true_NDE`, `true_NIE`). All quantities are on the risk-difference scale (change in one-year mortality probability), so the headline indirect effect is read directly in absolute risk.
+The table below places the three fitted decompositions alongside the Monte-Carlo ground truth computed earlier in this chapter. All quantities are on the risk-difference scale (change in one-year mortality probability). One column is comparable across every row: the total effect, which each decomposition splits in its own way. The ground-truth split holds $M$ and $Z$ at their control values for the direct effect and moves them together for the indirect effect. The natural-effects split is a cross-world quantity that ignores $Z$. The randomized-interventional split draws $M$ from its distribution under control instead of fixing it. And the recanting-twins split groups the four paths as direct $= A \to Y$ plus $A \to Z \to Y$ and indirect $= A \to M \to Y$ plus $A \to Z \to M \to Y$, so its "direct" effect deliberately keeps the path through $Z$ that the ground-truth direct effect excludes.
 
 ```{r}
 #| label: tbl-mediation-comparison
-#| tbl-cap: "Simulated HIV cohort: direct and indirect effects (risk-difference scale) from three crumble estimands, with 95% confidence intervals, compared to the Monte-Carlo ground truth. Estimator rows are saved output from a representative run and are not re-evaluated here (crumble requires torch); the ground-truth row is computed live from the structural model."
+#| tbl-cap: "Simulated HIV cohort: direct, indirect, and total effects (risk-difference scale) from three crumble estimands, with 95% confidence intervals, next to the Monte-Carlo ground truth. The total effects are the same estimand in every row; the direct and indirect columns are each decomposition's own split. The estimator rows are computed live above."
 #| code-fold: true
+fmt_row <- function(td, name) {
+  r <- td[td$estimand == name, ]
+  sprintf("%.3f (%.3f, %.3f)", r$estimate, r$conf.low, r$conf.high)
+}
+td_N  <- tidy(fit_sim_N)
+td_RT <- tidy(fit_sim_RT)
+td_RI <- tidy(fit_sim_RI)
+# The randomized-interventional total is the sum of its two components;
+# adding the influence-function objects carries the uncertainty through.
+ri_total <- ife::tidy(fit_sim_RI$estimates$ride + fit_sim_RI$estimates$riie)
+ri_total$estimand <- "total"
+
 comparison <- tibble::tibble(
-  Approach = c(
-    "Ground truth (Monte Carlo)",
-    "Natural effects (N)",
-    "Randomized interventional (RI)",
-    "Recanting twins (RT)"
-  ),
-  `Direct effect (95% CI)` = c(
-    sprintf("%.3f", true_NDE),
-    "-0.004 (-0.012, 0.004)",
-    "-0.005 (-0.013, 0.003)",
-    "-0.005 (-0.013, 0.003)"
-  ),
-  `Indirect effect (95% CI)` = c(
-    sprintf("%.3f", true_NIE),
-    "-0.009 (-0.017, -0.001)",
-    "-0.006 (-0.013, 0.001)",
-    "-0.007 (-0.014, 0.000)"
-  )
+  Approach = c("Ground truth (Monte Carlo)",
+               "Natural effects (N)",
+               "Randomized interventional (RI)",
+               "Recanting twins (RT)"),
+  `Direct (95% CI)`   = c(sprintf("%.3f", true_NDE),
+                          fmt_row(td_N, "direct"), fmt_row(td_RI, "ride"), fmt_row(td_RT, "direct")),
+  `Indirect (95% CI)` = c(sprintf("%.3f", true_NIE),
+                          fmt_row(td_N, "indirect"), fmt_row(td_RI, "riie"), fmt_row(td_RT, "indirect")),
+  `Total (95% CI)`    = c(sprintf("%.3f", true_TE),
+                          fmt_row(td_N, "ate"), fmt_row(ri_total, "total"), fmt_row(td_RT, "ate"))
 )
-knitr::kable(comparison, align = "lrr")
+knitr::kable(comparison, align = "lrrr")
+
+covers <- function(td, name, truth) {
+  r <- td[td$estimand == name, ]
+  ifelse(r$conf.low <= truth & truth <= r$conf.high, "covers", "does not cover")
+}
 ```
 
-Two things stand out. First, all three estimands recover a small negative direct effect and a small negative indirect effect, agreeing with the ground truth that HAART lowers mortality both through and around CD4 recovery. Second, the natural-effects indirect estimate is pulled slightly away from the others: because it ignores the treatment-induced confounder $Z$, it absorbs part of the $A \to Z \to Y$ pathway into the mediated term. The randomized-interventional and recanting-twins estimands, which model $Z$ explicitly, track the ground-truth split more closely. The confidence intervals are wide relative to the point estimates, a reminder that with $n = 2000$ and a rare outcome the mediated contribution is estimated with real uncertainty.
+Start with the column that is comparable everywhere. The true total effect is `r sprintf("%.3f", true_TE)`: the natural-effects total `r covers(td_N, "ate", true_TE)` it, the randomized-interventional total `r covers(ri_total, "total", true_TE)` it, and the recanting-twins total `r covers(td_RT, "ate", true_TE)` it. Agreement on the total is the check that the nuisance fits and the targeting are behaving; the three estimators share that machinery and differ only in how they split the total.
+
+The splits are then read as answers to different questions. The recanting-twins indirect effect, `r fmt_row(td_RT, "indirect")`, is the mediator-specific quantity, the part of the mortality benefit that runs through CD4 recovery (with or without the weight change on the way), and it is identified even though $Z$ is affected by treatment; its direct effect keeps the $A \to Z \to Y$ path, which is why it need not equal the ground-truth direct effect of `r sprintf("%.3f", true_NDE)`. The natural-effects split is the one to be wary of: with $Z$ present its cross-world assumption fails, so its direct and indirect terms are not identified quantities here even when the numbers look reasonable. The randomized-interventional split is identified, and answers the stochastic-intervention question described earlier in the chapter. The intervals are wide relative to the point estimates, a reminder that with $n = 2000$, two cross-fitting folds, and light neural-network training the mediated contribution is estimated with real uncertainty; the full-strength settings narrow them.
 
 
 ## Interpretation
