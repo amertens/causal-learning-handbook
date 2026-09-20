@@ -8,7 +8,7 @@ format: html
 
 *G-computation as a foundation for causal estimation*
 
-Outcome modeling and standardization, usually called **g-computation**, is one of the oldest and most intuitive approaches to causal inference [@robins1994estimation; @petersen2014causal].
+Outcome modeling and standardization, usually called **g-computation**, is one of the oldest and most intuitive approaches to causal inference [@robins1986gformula; @petersen2014causal].
 
 ---
 
@@ -113,7 +113,7 @@ tibble::tibble(
 
 **How to interpret these results:** In @tbl-gcomp-riskdiff, `ate` is the standardized (marginal) risk difference, and it is the causal number, not either regression coefficient. @fig-gcomp-counterfactual plots the full counterfactual risk distributions behind those numbers, with the dashed lines marking `risk1` and `risk0` and the gap between them showing the ATE. Read the estimate as follows. If the entire population had initiated HAART rather than not, the estimated mortality risk would change by `ate` (about `r round(ate * 100, 1)` percentage points), with the measured confounders' distribution held fixed. `risk1` and `risk0` are the standardized risks under universal treatment and under no treatment, and the contrast between them is what a well-randomized trial would have estimated.
 
-#### Beyond the Risk Difference: Relative Risk and Population Attributable Fraction
+#### Beyond the Risk Difference: Relative Risk and Prevented Fraction
 
 One strength of g-computation is that once you have the counterfactual predictions `p1` and `p0`, you can compute *any* contrast, not just the risk difference. A single regression coefficient does not give you that.
 
@@ -125,13 +125,11 @@ One strength of g-computation is that once you have the counterfactual predictio
 # Relative risk (risk ratio)
 rr <- risk1 / risk0
 
-# Causal prevented (excess) fraction, relative to a "no one treated" world:
-# (P(Y=1) - P(Y(0)=1)) / P(Y=1)
-# For a PROTECTIVE exposure (risk0 > overall_risk) this comes out NEGATIVE,
-# meaning the current treatment distribution PREVENTS that fraction of deaths
-# relative to no one being treated.
+# Causal prevented fraction, relative to a "no one treated" world:
+# (P(Y(0)=1) - P(Y=1)) / P(Y(0)=1), the share of the deaths that would occur
+# if no one initiated HAART that the current treatment distribution prevents.
 overall_risk <- mean(dat$died)
-prevented_frac <- (overall_risk - risk0) / overall_risk
+prevented_frac <- (risk0 - overall_risk) / risk0
 
 knitr::kable(data.frame(
   Measure = c("Risk difference (ATE)", "Relative risk", "Prevented fraction (vs no one treated)"),
@@ -139,12 +137,12 @@ knitr::kable(data.frame(
 ))
 ```
 
-@tbl-gcomp-contrasts collects three contrasts computed from the same `p1` and `p0`. The **relative risk** is the ratio of the two standardized risks, `risk1 / risk0`. A value above 1 means the outcome is more common under treatment; a value below 1, as here (about `r round(rr, 2)`), means the mortality risk under universal HAART is that fraction of the risk under no HAART. The **prevented fraction** compares the observed mortality risk to the risk in a counterfactual world where *no one* initiated HAART. None of these is available from a single logistic regression coefficient; you would have to exponentiate and back-transform under strong scale assumptions, whereas g-computation reads them straight off the predicted counterfactual risks.
+@tbl-gcomp-contrasts collects three contrasts computed from the same `p1` and `p0`. The **relative risk** is the ratio of the two standardized risks, `risk1 / risk0`. A value above 1 means the outcome is more common under treatment; a value below 1, as here (about `r round(rr, 2)`), means the mortality risk under universal HAART is that fraction of the risk under no HAART. The **prevented fraction** compares the risk in a counterfactual world where *no one* initiated HAART with the observed mortality risk: the share of those no-treatment deaths that the current pattern of HAART use prevents. None of these is available from a single logistic regression coefficient; you would have to exponentiate and back-transform under strong scale assumptions, whereas g-computation reads them straight off the predicted counterfactual risks.
 
 :::{.callout-warning}
-## Watch the sign of the prevented fraction
+## Prevented fraction or attributable fraction: match the formula to the direction of the effect
 
-The prevented fraction is $(P(Y=1) - P(Y(0)=1)) / P(Y=1)$. The familiar "population attributable fraction" reading, the share of cases *eliminated* by removing exposure, assumes a *harmful* exposure. HAART is protective, so $\text{risk0} > \text{overall risk}$ and the quantity comes out **negative**: the current treatment distribution *prevents* that fraction of deaths, and moving everyone to no-HAART would *add* deaths rather than eliminate them. Under the identification assumptions above this contrast is causal; the traditional epidemiologic PAF formula, built from observed prevalence, is not.
+The prevented fraction is $(P(Y(0)=1) - P(Y=1)) / P(Y(0)=1)$, the share of the deaths that would occur under no treatment that the current treatment distribution prevents. It is the protective-exposure counterpart of the population attributable fraction, $(P(Y=1) - P(Y(0)=1)) / P(Y=1)$, which is the share of observed cases that removing a *harmful* exposure would eliminate. Use the attributable fraction for a harmful exposure and the prevented fraction for a protective one. Applying the attributable-fraction formula to a protective exposure such as HAART produces a negative number that is easy to misread. Under the identification assumptions above either contrast is causal; the traditional epidemiologic formulas built from observed prevalence are not.
 :::
 
 
@@ -184,37 +182,37 @@ G-computation rests entirely on the outcome model $E[Y \mid A, W]$. If that mode
 
 ### Watch it fail: a misspecified model biases the estimate
 
-The warning above is easy to state and easy to ignore, so here it is as a number. We simulate a world where the truth is nonlinear [@sofrygin2017simcausal], then estimate the effect two ways: with a main-terms logistic regression that misses the nonlinearity, and with a model that includes it. The risk difference is known by construction, so we can measure exactly how far the misspecified model lands from the truth.
+The warning above is easy to state and easy to ignore, so here it is as a number. We simulate a world in which treatment is concentrated among older patients but its benefit is concentrated among younger ones [@sofrygin2017simcausal], then estimate the effect two ways: with a main-terms logistic regression that has no way to represent that age-specific effect, and with a model that includes it. The risk difference is known by construction, so we can measure exactly how far the misspecified model lands from the truth.
 
 ```{r}
 #| code-fold: show
 set.seed(2024)
-n   <- 4000
+n   <- 20000
 age <- runif(n, 30, 80)
-A   <- rbinom(n, 1, plogis(-2 + 0.04 * age))             # older patients treated more often
+A   <- rbinom(n, 1, plogis(-12 + 0.2 * age))            # treatment mostly among older patients
 
-# True risk: curved in age, and the treatment effect is larger above age 65
-true_risk <- function(a, w) plogis(-1 + 0.8 * a - 0.0009 * (w - 55)^2 + 0.6 * a * (w > 65))
+# True risk: treatment helps only patients aged 60 or younger
+true_risk <- function(a, w) plogis(-2 + 0.02 * (w - 55) + 2 * a * (w <= 60))
 Y <- rbinom(n, 1, true_risk(A, age))
 d <- data.frame(Y, A, age)
 
 # Truth: population risk difference under the known model
 true_ate <- mean(true_risk(1, age) - true_risk(0, age))
 
-# Misspecified g-computation: main terms only (no curvature, no interaction)
+# Misspecified g-computation: main terms only (one treatment effect for all ages)
 m_wrong   <- glm(Y ~ A + age, family = binomial, data = d)
 ate_wrong <- mean(predict(m_wrong, transform(d, A = 1), type = "response") -
                   predict(m_wrong, transform(d, A = 0), type = "response"))
 
-# Correctly flexible g-computation: include the curvature and interaction
-m_flex   <- glm(Y ~ A * age + I((age - 55)^2) + A:I(age > 65), family = binomial, data = d)
+# Correctly specified g-computation: include the age-specific treatment effect
+m_flex   <- glm(Y ~ A * I(age <= 60) + age, family = binomial, data = d)
 ate_flex <- mean(predict(m_flex, transform(d, A = 1), type = "response") -
                  predict(m_flex, transform(d, A = 0), type = "response"))
 
 round(c(truth = true_ate, main_terms = ate_wrong, flexible = ate_flex), 3)
 ```
 
-The main-terms estimate misses the true risk difference because it cannot represent the curvature or the above-65 interaction. The flexible model, which happens to include exactly those terms, recovers the truth. The catch in real data is that no one tells you which terms to add. That is the problem Super Learner (@sec-superlearner) solves: instead of guessing the functional form, it lets a library of algorithms and cross-validation choose it [@vanderLaan2007superlearner]. That is why the next chapters build g-computation and targeted maximum likelihood estimation (TMLE) on top of machine learning rather than a single hand-specified regression.
+The main-terms estimate falls short of the true risk difference by about `r round(100 * (true_ate - ate_wrong) / true_ate)`%. Almost all treated patients are older, and in that group treatment does little, so a model with a single treatment coefficient learns a small effect and then extrapolates it to the younger patients who would have benefited most. The correctly specified model recovers the truth to within sampling error. The bias here is moderate rather than dramatic, which is typical: a misspecified outcome model in g-computation is most dangerous when the treated and untreated differ strongly on the covariates where the model is wrong, so that the counterfactual predictions rest on extrapolation. The catch in real data is that no one tells you which terms to add. That is the problem Super Learner (@sec-superlearner) solves: instead of guessing the functional form, it lets a library of algorithms and cross-validation choose it [@vanderLaan2007superlearner]. That is why the next chapters build g-computation and targeted maximum likelihood estimation (TMLE) on top of machine learning rather than a single hand-specified regression.
 
 ---
 
