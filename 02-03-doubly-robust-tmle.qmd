@@ -12,7 +12,7 @@ In previous chapters, you learned:
 - **G-computation** depends on correctly modeling the *outcome*
 - **IPTW** depends on correctly modeling the *treatment mechanism*
 
-Each of those methods stakes everything on one model: g-computation on the outcome model, IPTW on the treatment model. AIPW (augmented inverse probability weighting) and TMLE (targeted maximum likelihood estimation) draw on both, and stay consistent if **either** model is correctly specified.
+Each of those methods stakes everything on one model: g-computation on the outcome model, IPTW on the treatment model. AIPW (augmented inverse probability weighting) and TMLE (targeted maximum likelihood estimation) draw on both, and stay consistent if **either** model is correctly specified. (Consistent, here and throughout the chapter, is the statistical sense of the word: the estimate converges to the true effect as the sample grows. It is unrelated to the consistency assumption of @sec-roadmap.)
 
 ---
 
@@ -24,7 +24,7 @@ A doubly robust estimator stays consistent if **either** the treatment model or 
 
 ## Two Roads to the Same Destination: AIPW and TMLE
 
-AIPW [@robins1994estimation; @bang2005doubly] and TMLE [@vanderLaan2006tmle] are not competing methods aimed at different problems. They are **two strategies for solving the same problem**: producing an estimator of the ATE (average treatment effect) that is doubly robust, semiparametrically efficient, and uses both the outcome model $Q(A, W) = E[Y \mid A, W]$ and the propensity score $g(W) = P(A=1 \mid W)$. Both are derived from the **[efficient influence function](notation.qmd) (EIF)** for the ATE, and under regularity conditions both reach the same asymptotic distribution and the same semiparametric efficiency bound.
+AIPW [@robins1994estimation; @bang2005doubly] and TMLE [@vanderLaan2006tmle] are **two strategies for solving the same problem**: producing an estimator of the ATE (average treatment effect) that is doubly robust, semiparametrically efficient (it reaches the smallest variance any estimator can achieve without assuming a parametric model), and uses both the outcome model $Q(A, W) = E[Y \mid A, W]$ and the propensity score $g(W) = P(A=1 \mid W)$. Together, $Q$ and $g$ are called the **nuisance functions**: we have to estimate them on the way to the ATE, but they are not themselves the quantity we care about. Both estimators are derived from the **[efficient influence function](notation.qmd) (EIF)** for the ATE, and under regularity conditions (technical requirements on how well the nuisance estimates behave, spelled out later in the chapter) both reach the same asymptotic distribution and the same semiparametric efficiency bound. The EIF is also called the efficient influence *curve* (EIC). The two names mean the same thing; EIF is the more common one in the literature, and the code in this book uses `EIC` as the variable name.
 
 What separates them is **how** they put the EIF to work:
 
@@ -50,7 +50,7 @@ On large samples with good overlap the three agree. The differences surface in f
 
 Almost any estimator in this book can be rewritten, to a close approximation, as a simple average of one number per patient. That per-patient number is the patient's value of the **influence function**: it says how far, and in which direction, that single patient pulls the final estimate. An applied reader needs only two consequences of this. First, the spread of those per-patient pulls is what sets the standard error: take their standard deviation and divide by the square root of the sample size. Second, an estimator reaches the smallest possible standard error when its influence function is the *efficient* one. TMLE nudges the fitted models until the pulls average to zero, which is what makes it consistent and doubly robust, and because the pulls it zeroes out are the *efficient* influence function specifically, the estimator also attains the efficiency bound.
 
-Every patient casts a vote on the final estimate. Most votes are quiet, but a few loud ones set the margin of error. A two-patient picture makes it concrete. Suppose the estimate is a risk difference and we have computed each patient's influence value. An ordinary patient, well matched on covariates with a predictable outcome, might have an influence value near $0$, so dropping them barely moves the estimate. A high-leverage patient, say a treated patient whose propensity score was only $0.03$ (very unlikely to be treated) and who then had the outcome, might have an influence value of $+18$. That one patient hauls the estimate upward, and a handful like them widen the confidence interval. The standard error is just the standard deviation of these per-patient values over the square root of $n$, so a few large values inflate it. The inference code later in this chapter computes exactly these per-patient numbers.
+Every patient casts a vote on the final estimate. Most votes are quiet, but a few loud ones set the margin of error. Two patients show the range. Suppose the estimate is a risk difference and we have computed each patient's influence value. An ordinary patient, well matched on covariates with a predictable outcome, might have an influence value near $0$, so dropping them barely moves the estimate. A high-leverage patient, say a treated patient with a propensity score of only $0.03$ (treatment was very unlikely for someone with their covariates) who then died, might have an influence value of $+18$. That one patient hauls the estimate upward, and a handful like them widen the confidence interval. The standard error is just the standard deviation of these per-patient values over the square root of $n$, so a few large values inflate it. The inference code later in this chapter computes exactly these per-patient numbers.
 :::
 
 ---
@@ -64,9 +64,9 @@ AIPW augments the G-computation estimator with an inverse-probability-weighted r
 
 - If the **treatment model** is correctly specified (and positivity holds), the IPW correction yields a consistent estimate of the causal effect even when the outcome model is wrong
 - If the **outcome model** is correctly specified, the correction term has mean zero and the G-computation component carries the estimate
-- If **both** are correctly specified (and nuisances converge fast enough), the estimator hits the **semiparametric efficiency bound** [@hahn1998efficiency], the smallest asymptotic variance available among regular asymptotically linear estimators
+- If **both** are correctly specified (and the nuisance estimates converge fast enough), the estimator hits the **semiparametric efficiency bound** [@hahn1998efficiency], the smallest asymptotic variance available among regular asymptotically linear estimators
 
-This is the *one-step* idea from semiparametric theory: take a plug-in estimator, add the empirical mean of the EIF correction, and the result is a $\sqrt{n}$-consistent estimator that solves the EIF estimating equation [@robins1994estimation; @bang2005doubly].
+This is the *one-step* idea from semiparametric theory: take a plug-in estimator, add the empirical mean of the EIF correction, and the result is a $\sqrt{n}$-consistent estimator that solves the EIF estimating equation [@robins1994estimation; @bang2005doubly]. ($\sqrt{n}$-consistent means the estimation error shrinks at the rate $1/\sqrt{n}$, the same rate as a sample mean. That rate is what lets a normal approximation deliver confidence intervals and hypothesis tests.)
 
 Keep in mind that "doubly robust" is a *consistency* property. It guarantees the estimator converges to the truth as $n \to \infty$ under the stated conditions, not that it is unbiased in finite samples.
 :::
@@ -160,12 +160,12 @@ This substitution structure has three practical consequences:
 
 ## TMLE Step-by-Step
 
-**Step 1: Fit the initial outcome model (Q).** Fit a model for $E[Y \mid A, W]$ and generate initial predictions under both treatment values for each individual: $Q_n^0(1, W_i)$ (predicted outcome if treated) and $Q_n^0(0, W_i)$ (predicted outcome if untreated). These predictions are "initial" because they have not yet been targeted toward the causal parameter of interest.
+**Step 1: Fit the initial outcome model (Q).** Fit a model for $E[Y \mid A, W]$. We did this above as `Qmod`, a logistic regression of `died` on `ever_haart`, `age`, `sex`, and `cd4_sqrt_baseline`. From it we need three sets of predictions for each individual: one at the treatment the patient actually received (`Qinit` below, used to fit the fluctuation in Step 4), and two counterfactual ones with treatment set to each value, $Q_n^0(1, W_i)$ (predicted outcome if treated) and $Q_n^0(0, W_i)$ (predicted outcome if untreated), which we already stored above as `Q1` and `Q0`. These predictions are "initial" because they have not yet been targeted toward the causal parameter of interest.
 
 ```{r}
 #| interactive: true
-logit <- function(p) log(p/(1-p))
-expit <- function(x) 1/(1+exp(-x))
+logit <- function(p) log(p/(1-p))    # same as base R's qlogis()
+expit <- function(x) 1/(1+exp(-x))   # inverse logit, same as base R's plogis()
 
 # Step 1: Initial Q predictions at observed A
 Qinit <- predict(Qmod, type="response")
@@ -196,6 +196,8 @@ For computing the counterfactual means, we also need the treatment-specific comp
 Think of it as a nudge that pushes hardest exactly where the outcome model is most vulnerable: the patients who got a treatment almost no one like them received. More precisely, the clever covariate is large when the received treatment was unlikely given the covariates, meaning a small $g(W)$ for a treated patient or a small $1 - g(W)$ for an untreated one. Those are the patients where the outcome model is most likely to be wrong, since few similar patients received the same treatment, so the update leans hardest on them. That is how the clever covariate directs the fluctuation to reduce bias for the specific estimand we care about, the ATE.
 :::
 
+**Step 3: Compute the clever covariate at each patient's observed treatment.** Recall the two patients from the influence-function box. The treated patient with $g(W) = 0.03$ gets $H = 1/0.03 \approx 33$; multiply that by a residual $Y - Q^*$ of roughly $0.55$ and you get the influence value of about $+18$ quoted there. A well-matched patient with $g(W)$ near $0.5$ gets $|H| = 2$ and, with a small residual, an influence value near zero.
+
 ```{r}
 #| interactive: true
 # Step 3: Clever covariate at observed treatment
@@ -205,15 +207,15 @@ H <- with(dat, ever_haart/ps - (1-ever_haart)/(1-ps))  # <1>
 
 **Step 4: Fit the fluctuation model and update predictions.** This is the critical "targeting" step, and it is where TMLE structurally parts ways with AIPW. Instead of *adding* the EIF correction to the G-computation estimate (the AIPW recipe), we use the propensity score (via the clever covariate) to *update Q* until the correction term vanishes inside the substitution estimator.
 
-We fit a logistic regression of $Y$ on $H$ with the initial logit-predictions as an offset:
+The whole point of this step is to estimate one number, $\epsilon$. We fit a logistic regression of $Y$ on $H$ with the initial logit-predictions as an offset:
 
 $$
 \text{logit}(E[Y \mid A, W]) = \text{logit}(Q_n^0(A, W)) + \epsilon \cdot H(A, W)
 $$
 
-The estimated $\hat{\epsilon}$ then **updates** (fluctuates) the initial predictions. This fluctuation must be applied to the counterfactual predictions $Q_n^0(1, W)$ and $Q_n^0(0, W)$ using their respective clever covariates $H_1$ and $H_0$. The step ensures the final estimates solve the efficient influence function equation, which is what gives TMLE its optimal statistical properties.
+The offset holds the Step 1 predictions fixed: no coefficient is estimated for them, and they enter as a known, patient-specific intercept. The clever covariate is the only predictor with a free coefficient, and that coefficient is $\epsilon$. The estimated $\hat{\epsilon}$ then **updates** (fluctuates) the initial predictions. This fluctuation must be applied to the counterfactual predictions $Q_n^0(1, W)$ and $Q_n^0(0, W)$ using their respective clever covariates $H_1$ and $H_0$. The step ensures the final estimates solve the efficient influence function equation, which is what gives TMLE its optimal statistical properties.
 
-The targeting step is not trying to improve prediction in general. It adjusts the initial outcome predictions specifically to reduce bias for the ATE. A well-calibrated prediction model might predict individual outcomes accurately yet still produce a biased ATE once predictions are averaged. The fluctuation step corrects exactly this discrepancy by pulling in information from the propensity score.
+The targeting step does not try to improve prediction in general; it adjusts the initial outcome predictions specifically to reduce bias for the ATE. A well-calibrated prediction model might predict individual outcomes accurately yet still produce a biased ATE once predictions are averaged. The fluctuation step corrects exactly this discrepancy by pulling in information from the propensity score.
 
 ```{r}
 #| interactive: true
@@ -224,9 +226,7 @@ epsilon <- glm(dat$died ~ -1 + offset(logit(Qinit)) + H,  # <1>
 1. The `-1` suppresses the intercept; `offset(logit(Qinit))` fixes the initial Q predictions on the logit scale so only the coefficient on `H` (the fluctuation parameter ε) is estimated
 2. Logistic family keeps the update on the probability scale; `.coef` extracts the single ε; a small number close to zero means the initial Q needed little correction
 
----
-
-## Counterfactual Predictions for TMLE
+**Step 5: Apply the fluctuation to the counterfactual predictions and average.** Make two copies of the data. In the first, set everyone's treatment to "treated" and predict each patient's outcome; in the second, set everyone to "control" and predict again. These are the counterfactual predictions: each patient's estimated outcome in a world where they were treated and in a world where they were not. The targeting step then nudges both, using the arm-specific clever covariates, and the TMLE estimate is the difference of the two averages.
 
 ```{r}
 #| interactive: true
@@ -239,15 +239,15 @@ H1 <- 1 / ps          # <1>
 H0 <- -1 / (1 - ps)   # <1>
 
 # Apply the fluctuation to counterfactual predictions
-Q1_star <- plogis(logit(Q1_init) + epsilon * H1)  # <2>
-Q0_star <- plogis(logit(Q0_init) + epsilon * H0)  # <2>
+Q1_star <- expit(logit(Q1_init) + epsilon * H1)  # <2>
+Q0_star <- expit(logit(Q0_init) + epsilon * H0)  # <2>
 
 # TMLE ATE estimate
 tmle_ate <- mean(Q1_star) - mean(Q0_star)  # <3>
 tmle_ate
 ```
 1. Treatment-arm-specific clever covariates: $H_1(W) = 1/g(W)$ targets the treated potential outcome; $H_0(W) = -1/(1-g(W))$ targets the control potential outcome. These must be evaluated at the *counterfactual* treatment value, not the observed one.
-2. Apply the fluctuation on the logit scale, then `plogis()` maps back to probability; guaranteeing all targeted predictions stay in $[0,1]$, unlike AIPW which can violate these bounds
+2. Apply the fluctuation on the logit scale, then `expit()` (the inverse logit, identical to base R's `plogis()`) maps back to probability, guaranteeing all targeted predictions stay in $[0,1]$, unlike AIPW which can violate these bounds
 3. The TMLE **substitution estimator**: simply take the sample mean of each arm's targeted predictions. No explicit weighting needed; the clever covariate already incorporated the propensity score.
 
 The initial outcome and propensity score models need not be simple GLMs. They can be estimated with Super Learner [@vanderLaan2007superlearner], an ensemble machine learning approach covered in the next chapter that reduces sensitivity to model misspecification. In plain terms, Super Learner uses cross-validation to combine many candidate models into a single prediction. It is formally introduced in @sec-superlearner, and for now the `Q.SL.library` and `g.SL.library` arguments below can be read as a flexible stand-in for the single GLM nuisance fits.
@@ -275,7 +275,7 @@ The same EIF underlies AIPW's variance estimator, which is the deeper reason bot
 ::: {.callout-important}
 ## When is EIF-based inference valid?
 
-The EIF-based variance estimator and resulting Wald-type confidence intervals are asymptotically valid when (i) at least one nuisance model is consistently estimated, (ii) positivity holds, and (iii) certain regularity/rate conditions are met. When **data-adaptive or machine learning** methods are used for nuisance estimation, these conditions require **cross-fitting** (sample-splitting) or **CV-TMLE** to avoid empirical process conditions (Donsker class membership) that flexible learners typically violate. In the `tmle3` and `drtmle` R packages, cross-fitting is available [@zivich2021crossfit]; the classic `tmle` package [@gruber2012tmlepackage] does not cross-fit by default but remains valid when the Super Learner library is not too aggressive (e.g., excludes highly adaptive learners like HAL without cross-fitting). See @zheng2011crossvalidated for the theoretical foundations.
+The EIF-based variance estimator and resulting Wald-type confidence intervals are asymptotically valid when (i) at least one nuisance model is consistently estimated, (ii) positivity holds, and (iii) certain regularity/rate conditions are met. When **data-adaptive or machine learning** methods are used for nuisance estimation, these conditions require **cross-fitting** (sample-splitting) or **CV-TMLE** to avoid empirical process conditions (Donsker class membership, a limit on how flexible the nuisance estimators may be) that flexible learners typically violate. In the `tmle3` and `drtmle` R packages, cross-fitting is available [@zivich2021crossfit]; the classic `tmle` package [@gruber2012tmlepackage] does not cross-fit by default but remains valid when the Super Learner library is not too aggressive (e.g., excludes highly adaptive learners like HAL without cross-fitting). See @zheng2011crossvalidated for the theoretical foundations.
 :::
 
 ```{r}
@@ -439,21 +439,21 @@ sessionInfo()
 <details>
 <summary><strong>Q1. What does "doubly robust" mean in practice? Does it mean you can ignore model specification entirely?</strong></summary>
 
-No. "Doubly robust" means the estimator is consistent if *either* the treatment model or the outcome model is correctly specified. It says nothing about the case where both are wrong. It does not give you license to ignore model specification: if both nuisance models are badly misspecified, the estimator can be biased. You should still specify both models as carefully as you can. Double robustness is an insurance policy, not a substitute for thoughtful modeling.
+No. "Doubly robust" means the estimator is consistent if *either* the treatment model or the outcome model is correctly specified. It says nothing about the case where both are wrong. It does not give you license to ignore model specification: if both nuisance models are badly misspecified, the estimator can be biased. You should still specify both models as carefully as you can.
 
 </details>
 
 <details>
 <summary><strong>Q2. Why does TMLE use a "clever covariate" derived from the propensity score, and what happens if propensity scores are extreme?</strong></summary>
 
-The clever covariate $H(A, W) = A / g(W) - (1 - A) / (1 - g(W))$ is derived from the efficient influence function for the ATE. It directs the fluctuation of the initial outcome model toward the specific causal parameter of interest, ensuring that the final estimate solves the EIF estimating equation. If propensity scores are extreme (near 0 or 1), the clever covariate becomes very large, which can destabilize the fluctuation step. This is why practical positivity (adequate overlap in propensity score distributions) is important for TMLE just as it is for IPTW.
+The clever covariate $H(A, W) = A / g(W) - (1 - A) / (1 - g(W))$ is derived from the efficient influence function for the ATE. It directs the fluctuation of the initial outcome model toward the specific causal parameter of interest, so that the final estimate solves the EIF estimating equation. If propensity scores are extreme (near 0 or 1), the clever covariate becomes very large, which can destabilize the fluctuation step. This is why practical positivity (adequate overlap in propensity score distributions) is important for TMLE just as it is for IPTW.
 
 </details>
 
 <details>
 <summary><strong>Q3. Your TMLE estimate of a risk probability is 0.85. Could AIPW have produced an estimate above 1.0 for the same data?</strong></summary>
 
-Yes, and this is the *structural* reason TMLE is usually preferred for bounded outcomes, not merely a numerical curiosity. AIPW is a sum: the G-computation plug-in plus an unbounded IPW-weighted residual correction. When propensity scores are extreme, that correction can be large enough to push the sum outside the parameter space. TMLE absorbs the same correction into $Q$ on the logit scale, so the substitution estimator is a mean of valid probabilities and stays in $[0, 1]$ by construction. Both estimators target the same EIF; they differ in *how* they keep the result inside the parameter space.
+Yes, and this is the *structural* reason TMLE is usually preferred for bounded outcomes. AIPW is a sum: the G-computation plug-in plus an unbounded IPW-weighted residual correction. When propensity scores are extreme, that correction can be large enough to push the sum outside the parameter space. TMLE absorbs the same correction into $Q$ on the logit scale, so the substitution estimator is a mean of valid probabilities and stays in $[0, 1]$ by construction. Both estimators target the same EIF; they differ in *how* they keep the result inside the parameter space.
 
 </details>
 
@@ -511,12 +511,11 @@ if (requireNamespace("tmle", quietly = TRUE)) {
   message("Install the 'tmle' package:  install.packages('tmle')")
 }
 ```
-1. `tmle()` from the `tmle` package automates all four TMLE steps; `W` must be a `data.frame` (not a matrix or bare vector)
+1. `tmle()` from the `tmle` package automates all of the TMLE steps above; `W` must be a `data.frame` (not a matrix or bare vector)
 2. `Q.SL.library`: the Super Learner library for the outcome model $E[Y \mid A, W]$; `SL.earth` adds MARS splines to capture nonlinearity in the outcome
 3. `g.SL.library = "SL.mean"`: deliberately misspecified propensity score using only an intercept-only model (predicts the marginal mean treatment probability for everyone); this tests whether TMLE remains consistent when Q is correct but g is wrong
 4. `Q.SL.library = "SL.mean"`: deliberately misspecified outcome model; tests whether TMLE remains consistent when g is correct but Q is wrong; both Scenarios A and B should give estimates close to the true ATE = 0.5
 
-<!-- editor note: per the editorial spec, the "Software Implementation (R)" section was moved to immediately before "What comes next" so the chapter ends on the forward pointer. The code is unchanged. -->
 
 ---
 

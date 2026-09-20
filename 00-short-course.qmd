@@ -27,7 +27,7 @@ knitr::opts_chunk$set(
 
 This chapter is a self-contained workshop, a condensed tour of the full handbook run on the single running case study: the HIV antiretroviral therapy (`haartdat`) cohort. Every method estimates the same effect on the same patients. Each module opens with a short "why this method exists" lead-in, then gives you runnable code, an interpretation of the number in mortality terms, and an exercise with a collapsible worked solution. The full handbook chapters develop each topic in more depth, and cross-references point you there.
 
-### Prerequisites and setup
+## Prerequisites and setup
 
 This workshop assumes **R 4.2 or later**. The code uses the following packages: `tidyverse` (data handling and plotting), `ipw` (the cohort), `SuperLearner` and `tmle` (targeted learning), `lmtp` (modified treatment policies), `ggdag` and `dagitty` (DAGs), and `broom` (tidy model output). The setup chunk below loads them, installing any that are missing, and then loads the shared cohort.
 
@@ -135,7 +135,7 @@ ggdag(simple_dag, text = FALSE, use_labels = "label") +
 
 ### Identification: three assumptions
 
-Identification (Step 4) is the argument that, under stated assumptions, the unobservable causal effect equals a quantity we can compute from data. Three assumptions do the work. None can be tested from the data alone, so each has to be argued from subject-matter knowledge.
+Identification (Step 4) is the argument that, under stated assumptions, the unobservable causal effect equals a quantity we can compute from data. In the notation from the box above, $A$ is the treatment (HAART initiation), $W$ is the set of measured baseline covariates (age, sex, baseline CD4), and $Y$ is the outcome (death). Three assumptions do the work. None can be tested from the data alone, so each has to be argued from subject-matter knowledge.
 
 - **Consistency.** The observed outcome $Y$ equals the potential outcome $Y(a)$ under the treatment $A = a$ actually received. This requires treatment to be **well-defined**. "Initiate HAART at this visit" is reasonably well-defined; a vague exposure like "good adherence" is not, because it would come in many versions with different effects.
 - **Exchangeability.** Conditional on the measured covariates $W$, treatment $A$ is independent of the potential outcomes, meaning there are no unmeasured confounders. In HAART terms, this is the claim that *after adjusting for age, sex, and baseline CD4, who started HAART is as good as random*. It is the hardest assumption to defend, because physicians initiate therapy in response to clinical signals, and any such signal not in $W$ (frailty, viral load, physician judgment) breaks it.
@@ -198,7 +198,7 @@ cat("G-computation ATE (risk difference):", round(gcomp_ate, 4), "\n")
 
 ### IPTW: the treatment-model counterpart
 
-**Why it exists.** Instead of modeling the outcome, IPTW models *who got treated* and reweights the sample so that, in the weighted pseudo-population, treatment looks as if it were randomized given $W$ [@robins2000msm]. It depends on the propensity score $g(W)$ rather than the outcome model, so it fails and succeeds under different conditions than g-computation does. That contrast is what motivates combining the two.
+**Why it exists.** Instead of modeling the outcome, IPTW models *who got treated* and reweights the sample so that, in the weighted pseudo-population, treatment looks as if it were randomized given $W$ [@robins2000msm]. It depends on the propensity score $g(W) = P(A = 1 \mid W)$, each patient's probability of being treated given their covariates, rather than on the outcome model, so it fails and succeeds under different conditions than g-computation does. That contrast is what motivates combining the two.
 
 ```{r}
 #| label: m2-iptw
@@ -388,7 +388,7 @@ ggdag(long_dag, text = FALSE, use_labels = "label") +
   labs(title = "Longitudinal DAG with treatment-confounder feedback")
 ```
 
-Here is the conceptual crux. To estimate the effect of treatment at the **second** visit, we *must* condition on CD4 measured before it: CD4 there is a confounder of the second treatment decision, and conditioning on it deconfounds that decision. But CD4 at that visit is itself a **consequence** of treatment at the **first** visit. So if we also condition on it when estimating the effect of the *first* treatment, we block the very pathway (HAART raises CD4, higher CD4 lowers death) through which the first treatment helps, throwing away part of the effect we are trying to measure. A single pooled regression has to make one choice for CD4 and apply it everywhere, so it cannot both deconfound the later decision and preserve the earlier mediated effect. Adjust for time-varying CD4 and you block the mediated benefit; leave it out and you keep the confounding. Neither is right, which is why feedback requires g-methods rather than one regression.
+To estimate the effect of treatment at the **second** visit, we *must* condition on CD4 measured before it: CD4 there is a confounder of the second treatment decision, and conditioning on it deconfounds that decision. But CD4 at that visit is itself a **consequence** of treatment at the **first** visit. So if we also condition on it when estimating the effect of the *first* treatment, we block the very pathway (HAART raises CD4, higher CD4 lowers death) through which the first treatment helps, throwing away part of the effect we are trying to measure. A single pooled regression has to make one choice for CD4 and apply it everywhere, so it cannot both deconfound the later decision and preserve the earlier mediated effect. Adjust for time-varying CD4 and you block the mediated benefit; leave it out and you keep the confounding. Neither is right, which is why feedback requires g-methods rather than one regression.
 
 ### Longitudinal g-computation by hand
 
@@ -570,7 +570,7 @@ cat("Propensity score range: [", round(min(ps), 3), ",", round(max(ps), 3), "]\n
 
 **How to read it:** the scores sit away from the 0 and 1 boundaries, with no spike against either edge, so there are both treated and untreated patients across the covariate range, and positivity is reasonable for this cohort. If you saw a pile-up against a dashed line, the fixes are weight truncation, restricting to the overlap region, or a support-respecting intervention like the shift policy above. Positivity has a dedicated chapter, @sec-positivity-overlap.
 
-**Other diagnostics, briefly.** Check **model fit**: which learners Super Learner is weighting, calibration of the outcome and treatment models, whether the TMLE $\hat{\epsilon}$ is unusually large. Assess **sensitivity to unmeasured confounding** with E-values [@vanderweele2017evalue] (how strong a hidden confounder would have to be to explain away the result) and negative-control outcomes (does the pipeline return null where it should). And vary your **analytic choices**, such as the Super Learner library, truncation threshold, or number of time points, reporting a range if the estimate moves. @sec-advanced-diagnostics develops these tools.
+**Other diagnostics, briefly.** Check model fit: which learners Super Learner is weighting, calibration of the outcome and treatment models, whether the TMLE $\hat{\epsilon}$ is unusually large. Assess sensitivity to unmeasured confounding with E-values [@vanderweele2017evalue] (how strong a hidden confounder would have to be to explain away the result) and negative-control outcomes (does the pipeline return null where it should). Vary your analytic choices too, such as the Super Learner library, truncation threshold, or number of time points, and report a range if the estimate moves. @sec-advanced-diagnostics develops these tools.
 
 :::{.callout-note}
 ## Exercise 4.1: change the shift magnitude
