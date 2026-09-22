@@ -66,7 +66,7 @@ Every chapter in **Part II: Core Estimators** (g-computation, IPTW, doubly robus
 
 ### 4. The reading path breaks 19 times
 
-Only 9 of 28 chapters end with a "what comes next". A reader who finishes positivity, or L-TMLE concepts, or the adherence chapter, or the applied LMTP workflow, reaches the bottom of the page with no idea where to go. The sidebar is the only navigation, and the sidebar is a flat list of 32 items.
+Only 9 of 28 chapters end with a "what comes next" (a further chapter had one under a different capitalization, and 7 of the files without one are the index and appendices, which do not need it). A reader who finishes L-TMLE concepts, or the adherence chapter, or the applied LMTP workflow, reaches the bottom of the page with no idea where to go. The sidebar is the only navigation, and the sidebar is a flat list of 32 items.
 
 ### 5. The densest maths in the book sits in the main flow
 
@@ -152,17 +152,26 @@ From the earlier scoping review, still open after the four new chapters: **SUTVA
 
 # Priority list
 
-| # | Action | Serves | Effort |
+| # | Action | Serves | Status |
 |---|---|---|---|
-| 1 | Rebuild the WebR workshop site and add it to the release routine | Student | Minutes |
-| 2 | Appendix deriving the EIF and the von Mises expansion once | Expert | ~2,500 words |
-| 3 | Learning objectives for the four Part II chapters | Student | Half a day |
-| 4 | "What comes next" in the 19 chapters missing it | Student | Half a day |
-| 5 | Coverage-over-replications figure for the headline estimators | Expert | Half a day |
-| 6 | Spread `interactive: true` beyond Part II | Student | A day |
-| 7 | Split 03-05 into diagnostics and sensitivity analysis | Both | A day |
-| 8 | Move the "In development" warning off the four mature Part VI chapters | Both | Minutes |
-| 9 | Expand the synthesis chapter into a real capstone with an estimate table | Both | A day |
-| 10 | Turn on the executable examples in 03-06; expand or split 03-14 | Expert | A day |
-| 11 | Visual map of the book on the landing page | Student | Half a day |
-| 12 | A section on SUTVA and interference | Expert | ~1,500 words |
+| 1 | Rebuild the WebR workshop site and add it to the release routine | Student | **Done.** Build script rewritten as a self-contained project; it also converted 3 cells that the old script silently skipped |
+| 2 | Point at the semiparametric theory rather than deriving it | Expert | **Done.** Bickel et al., Tsiatis, van der Vaart, Chernozhukov et al., Hines et al., Kennedy added at the places the EIF and the regularity conditions are invoked |
+| 3 | Learning objectives for the four Part II chapters | Student | **Done**, plus six other chapters that lacked them (26 of 28 chapters now have them) |
+| 4 | "What comes next" in the chapters missing it | Student | **Done.** 12 substantive chapters gained one; the other 7 without one are the index and appendices |
+| 5 | Coverage-over-replications figure for the headline estimators | Expert | **Done.** 500 replications in 02-03: g-computation 0% coverage, IPTW 98%, AIPW 97%, TMLE 96% |
+| 6 | Spread `interactive: true` beyond Part II | Student | **Done.** 4 chapters to 9; the new cells are self-contained and use only packages WebR can load |
+| 7 | Split 03-05 into diagnostics and sensitivity analysis | Both | Open. Still 12,690 words |
+| 8 | Move the "In development" warning off the four mature Part VI chapters | Both | Open |
+| 9 | Expand the synthesis chapter into a real capstone with an estimate table | Both | Open. It now has learning objectives and a forward pointer, but is still 931 words |
+| 10 | Turn on the executable examples that can run | Expert | **Partly done.** 03-06 from 53% to 35% dead, 03-05 from 65% to 59%, book from 16% to 14%. The rest need `moments` or are template snippets referencing undefined objects |
+| 11 | Visual map of the book on the landing page | Student | **Done.** `fig-book-map` |
+| 12 | A section on SUTVA and interference | Expert | Open |
+| 13 | Expand or split 03-14 (1,560 words for IV, negative controls, and proximal) | Expert | Open |
+
+## What changed on 2026-09-22, after this review
+
+The student-facing items and the citation-only version of item 2 were done the same day. Three things surfaced while doing them:
+
+- **The workshop build was broken in two ways, not one.** Besides being three months stale, `_build-workshop.R` only looked at the first option line of each chunk, so any chunk whose `interactive: true` sat below a `label:` or `fig-cap:` was silently left static. Three cells in Part II were affected. The script is now a self-contained project generator: it writes `_workshop-src/_quarto.yml` from the book's own chapter list, so the interactive site cannot drift from the book again.
+- **The coverage simulation changed what it demonstrates.** The first version showed every estimator as nearly unbiased, because a quadratic term omitted from the outcome model does not bias the marginal effect much when treatment depends only linearly on the covariate. Making treatment depend on the squared term too produced the intended result: g-computation overstates the effect by 84% and its intervals never cover.
+- **Most of 03-05's non-executing code cannot be revived.** Of its 33 dead chunks, 6 run clean in sequence and only 3 of those produce output; the rest need the uninstalled `moments` package or are template snippets that reference objects the chapter never creates. Splitting the chapter (item 7) is the real fix.

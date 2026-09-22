@@ -7,6 +7,15 @@ format: html
 
 *Estimated reading time: 50 minutes*
 
+::: {.callout-note}
+## Learning objectives
+- Say what doubly robust protects against, and what it does not
+- Describe the efficient influence function in words, and the three ways this book uses it
+- Compute the AIPW one-step estimator from an outcome model and a propensity model
+- Run the TMLE targeting step and say why TMLE stays inside the bounds of the outcome scale
+- Read influence-function standard errors and recognize when they cannot be trusted
+:::
+
 In previous chapters, you learned:
 
 - **G-computation** depends on correctly modeling the *outcome*
@@ -48,7 +57,7 @@ On large samples with good overlap the three agree. The differences surface in f
 ::: {.callout-note}
 ## What is an influence function? (plain version)
 
-Almost any estimator in this book can be rewritten, to a close approximation, as a simple average of one number per patient. That per-patient number is the patient's value of the **influence function**: it says how far, and in which direction, that single patient pulls the final estimate. An applied reader needs only two consequences of this. First, the spread of those per-patient pulls is what sets the standard error: take their standard deviation and divide by the square root of the sample size. Second, an estimator reaches the smallest possible standard error when its influence function is the *efficient* one. TMLE nudges the fitted models until the pulls average to zero, which is what makes it consistent and doubly robust, and because the pulls it zeroes out are the *efficient* influence function specifically, the estimator also attains the efficiency bound.
+Almost any estimator in this book can be rewritten, to a close approximation, as a simple average of one number per patient. That per-patient number is the patient's value of the **influence function**: it says how far, and in which direction, that single patient pulls the final estimate. An applied reader needs only two consequences of this. First, the spread of those per-patient pulls is what sets the standard error: take their standard deviation and divide by the square root of the sample size. Second, an estimator reaches the smallest possible standard error when its influence function is the *efficient* one; @bickel1993efficient and @tsiatis2006semiparametric develop that theory in full, and @hines2022demystifying is a shorter applied introduction. TMLE nudges the fitted models until the pulls average to zero, which is what makes it consistent and doubly robust, and because the pulls it zeroes out are the *efficient* influence function specifically, the estimator also attains the efficiency bound.
 
 Every patient casts a vote on the final estimate. Most votes are quiet, but a few loud ones set the margin of error. Two patients show the range. Suppose the estimate is a risk difference and we have computed each patient's influence value. An ordinary patient, well matched on covariates with a predictable outcome, might have an influence value near $0$, so dropping them barely moves the estimate. A high-leverage patient, say a treated patient with a propensity score of only $0.03$ (treatment was very unlikely for someone with their covariates) who then died, might have an influence value of $+18$. That one patient hauls the estimate upward, and a handful like them widen the confidence interval. The standard error is just the standard deviation of these per-patient values over the square root of $n$, so a few large values inflate it. The inference code later in this chapter computes exactly these per-patient numbers.
 :::
@@ -252,6 +261,74 @@ tmle_ate
 
 The initial outcome and propensity score models need not be simple GLMs. They can be estimated with Super Learner [@vanderLaan2007superlearner], an ensemble machine learning approach covered in the next chapter that reduces sensitivity to model misspecification. In plain terms, Super Learner uses cross-validation to combine many candidate models into a single prediction. It is formally introduced in @sec-superlearner, and for now the `Q.SL.library` and `g.SL.library` arguments below can be read as a flexible stand-in for the single GLM nuisance fits.
 
+### Watching the targeting step move the estimate
+
+The fluctuation is easier to believe once you have seen it work. The simulation below builds a dataset where the outcome truly depends on $W$ through a squared term, then fits an outcome model that leaves that term out. The plug-in estimate from that model is badly wrong. Targeting, which uses only the propensity score and the residuals, pulls it most of the way back.
+
+```{r}
+#| label: targeting-demo
+#| message: false
+set.seed(2026)
+n <- 1500
+W <- rnorm(n)
+A <- rbinom(n, 1, plogis(-0.4 + 0.5 * W + 0.8 * W^2))
+Y <- rbinom(n, 1, plogis(-1 + 0.8 * A + 1.0 * W + 1.0 * W^2))
+d <- data.frame(W, A, Y)
+
+# Deliberately too simple: the W^2 term is left out
+qfit <- glm(Y ~ A + W, family = binomial, data = d)
+Q1 <- predict(qfit, transform(d, A = 1), type = "response")
+Q0 <- predict(qfit, transform(d, A = 0), type = "response")
+QA <- predict(qfit, type = "response")
+
+# Correctly specified treatment model
+g  <- predict(glm(A ~ W + I(W^2), family = binomial, data = d), type = "response")
+HA <- ifelse(A == 1, 1 / g, -1 / (1 - g))
+
+psi_plugin <- mean(Q1 - Q0)                       # before targeting
+
+# One-parameter fluctuation on the logit scale
+eps <- coef(glm(Y ~ -1 + HA, family = binomial, offset = qlogis(QA)))
+Q1s <- plogis(qlogis(Q1) + eps / g)
+Q0s <- plogis(qlogis(Q0) - eps / (1 - g))
+psi_tmle <- mean(Q1s - Q0s)                       # after targeting
+
+ic <- HA * (Y - plogis(qlogis(QA) + eps * HA)) + (Q1s - Q0s) - psi_tmle
+se <- sd(ic) / sqrt(n)
+
+truth <- local({
+  set.seed(1); Wt <- rnorm(4e6)
+  mean(plogis(-1 + 0.8 + Wt + Wt^2)) - mean(plogis(-1 + Wt + Wt^2))
+})
+c(epsilon = round(unname(eps), 4), plug_in = round(psi_plugin, 4),
+  tmle = round(psi_tmle, 4), se = round(se, 4), truth = round(truth, 4))
+```
+
+```{r}
+#| label: fig-targeting-step
+#| fig-cap: "One dataset, one targeting step. The outcome model omits a term that matters, so the plug-in estimate more than doubles the true risk difference. The fluctuation uses the propensity score and the outcome residuals to pull the estimate down, and the resulting interval covers the truth. Targeting changed the estimate without touching the outcome model's form."
+#| code-fold: true
+library(ggplot2)
+stages <- data.frame(
+  stage = factor(c("Initial fit\n(plug-in)", "After targeting\n(TMLE)"),
+                 levels = c("Initial fit\n(plug-in)", "After targeting\n(TMLE)")),
+  est = c(psi_plugin, psi_tmle),
+  lo  = c(NA, psi_tmle - 1.96 * se),
+  hi  = c(NA, psi_tmle + 1.96 * se))
+
+ggplot(stages, aes(stage, est)) +
+  geom_hline(yintercept = truth, linetype = "dashed", colour = "#d95f02") +
+  annotate("segment", x = "Initial fit\n(plug-in)", xend = "After targeting\n(TMLE)",
+           y = psi_plugin, yend = psi_tmle, colour = "grey55",
+           arrow = arrow(length = unit(0.18, "cm"))) +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.1, colour = "#2c7fb8", na.rm = TRUE) +
+  geom_point(size = 3.4, colour = c("grey40", "#2c7fb8")) +
+  geom_text(aes(label = sprintf("%.3f", est)), hjust = -0.35, size = 3.3) +
+  labs(x = NULL, y = "Estimated risk difference",
+       subtitle = sprintf("dashed line = true risk difference (%.3f)", truth)) +
+  theme_minimal()
+```
+
 ---
 
 ## TMLE Inference: Standard Errors and Confidence Intervals
@@ -275,7 +352,7 @@ The same EIF underlies AIPW's variance estimator, which is the deeper reason bot
 ::: {.callout-important}
 ## When is EIF-based inference valid?
 
-The EIF-based variance estimator and resulting Wald-type confidence intervals are asymptotically valid when (i) at least one nuisance model is consistently estimated, (ii) positivity holds, and (iii) certain regularity/rate conditions are met. When **data-adaptive or machine learning** methods are used for nuisance estimation, these conditions require **cross-fitting** (sample-splitting) or **CV-TMLE** to avoid empirical process conditions (Donsker class membership, a limit on how flexible the nuisance estimators may be) that flexible learners typically violate. In the `tmle3` and `drtmle` R packages, cross-fitting is available [@zivich2021crossfit]; the classic `tmle` package [@gruber2012tmlepackage] does not cross-fit by default but remains valid when the Super Learner library is not too aggressive (e.g., excludes highly adaptive learners like HAL without cross-fitting). See @zheng2011crossvalidated for the theoretical foundations.
+The EIF-based variance estimator and resulting Wald-type confidence intervals are asymptotically valid when (i) at least one nuisance model is consistently estimated, (ii) positivity holds, and (iii) certain regularity/rate conditions are met. When **data-adaptive or machine learning** methods are used for nuisance estimation, these conditions require **cross-fitting** (sample-splitting) or **CV-TMLE** to avoid empirical process conditions (Donsker class membership, a limit on how flexible the nuisance estimators may be) that flexible learners typically violate. In the `tmle3` and `drtmle` R packages, cross-fitting is available [@zivich2021crossfit]; the classic `tmle` package [@gruber2012tmlepackage] does not cross-fit by default but remains valid when the Super Learner library is not too aggressive (e.g., excludes highly adaptive learners like HAL without cross-fitting). See @zheng2011crossvalidated for the theoretical foundations, @vandervaart1998asymptotic for the empirical-process results these conditions rest on, @chernozhukov2018dml for the cross-fitting argument in the double machine learning formulation, and @kennedy2024semiparametric for a recent review aimed at applied statisticians.
 :::
 
 ```{r}
@@ -412,6 +489,90 @@ bind_rows(
 ```
 
 The two estimates and their standard errors should agree to within roughly the third decimal. They are not identical because AIPW uses the initial $Q$ inside the substitution component while TMLE uses the targeted $Q^*$, and the fluctuation step nudges $Q^*$ away from $Q$ by an amount governed by $\hat\epsilon$. When propensity scores are well-behaved (as they are here), $\hat\epsilon$ is small and so is the gap. When some propensity scores are extreme, $\hat\epsilon$ can grow and the two estimators diverge. That divergence is itself a useful signal that the boundedness and stability advantages of TMLE are starting to matter.
+
+---
+
+## Does it work? Bias and coverage over 500 replications
+
+A single dataset cannot tell you whether an estimator is trustworthy. The question a methods reader asks is whether the estimator is unbiased across repeated samples, and whether its 95% interval actually contains the truth 95% of the time. The simulation below answers both for the four estimators in this chapter, on the same data-generating process as above: the outcome model is wrong, the treatment model is right.
+
+```{r}
+#| label: dr-simulation
+#| message: false
+sim_once <- function(n = 1000) {
+  W <- rnorm(n)
+  A <- rbinom(n, 1, plogis(-0.4 + 0.5 * W + 0.8 * W^2))
+  Y <- rbinom(n, 1, plogis(-1 + 0.8 * A + 1.0 * W + 1.0 * W^2))
+  d <- data.frame(W, A, Y)
+
+  qf <- glm(Y ~ A + W, family = binomial, data = d)              # misspecified
+  Q1 <- predict(qf, transform(d, A = 1), type = "response")
+  Q0 <- predict(qf, transform(d, A = 0), type = "response")
+  QA <- predict(qf, type = "response")
+  g  <- predict(glm(A ~ W + I(W^2), family = binomial, data = d), # correct
+                type = "response")
+  g  <- pmin(pmax(g, 0.01), 0.99)
+  HA <- ifelse(A == 1, 1 / g, -1 / (1 - g))
+
+  psi_g <- mean(Q1 - Q0)                                   # g-computation
+  ic_g  <- (Q1 - Q0) - psi_g
+  psi_i <- mean(A * Y / g - (1 - A) * Y / (1 - g))         # IPTW
+  ic_i  <- A * Y / g - (1 - A) * Y / (1 - g) - psi_i
+  psi_a <- mean(HA * (Y - QA) + Q1 - Q0)                   # AIPW
+  ic_a  <- HA * (Y - QA) + (Q1 - Q0) - psi_a
+  eps <- coef(glm(Y ~ -1 + HA, family = binomial, offset = qlogis(QA)))
+  Q1s <- plogis(qlogis(Q1) + eps / g); Q0s <- plogis(qlogis(Q0) - eps / (1 - g))
+  psi_t <- mean(Q1s - Q0s)                                 # TMLE
+  ic_t  <- HA * (Y - plogis(qlogis(QA) + eps * HA)) + (Q1s - Q0s) - psi_t
+
+  c(psi_g, psi_i, psi_a, psi_t,
+    sd(ic_g), sd(ic_i), sd(ic_a), sd(ic_t)) / c(rep(1, 4), rep(sqrt(n), 4))
+}
+
+set.seed(99)
+reps <- t(replicate(500, sim_once()))
+est_names <- c("G-computation", "IPTW", "AIPW", "TMLE")
+performance <- data.frame(
+  Estimator = est_names,
+  Bias = colMeans(reps[, 1:4]) - truth,
+  `SD of estimates` = apply(reps[, 1:4], 2, sd),
+  Coverage = sapply(1:4, function(j)
+    mean(reps[, j] - 1.96 * reps[, j + 4] <= truth &
+         truth <= reps[, j] + 1.96 * reps[, j + 4])),
+  check.names = FALSE)
+knitr::kable(performance, digits = 4)
+```
+
+```{r}
+#| label: fig-dr-coverage
+#| fig-cap: "Bias and 95% interval coverage over 500 replications, with the outcome model misspecified and the treatment model correct. G-computation inherits the outcome model's error, and its intervals never contain the truth. IPTW is nearly unbiased but pays for it in width, so it over-covers. AIPW and TMLE use both models and recover the truth; TMLE's coverage is closest to nominal."
+#| code-fold: true
+long <- rbind(
+  data.frame(Estimator = factor(est_names, levels = est_names),
+             value = performance$Bias, ref = 0,
+             panel = "Bias in the risk difference"),
+  data.frame(Estimator = factor(est_names, levels = est_names),
+             value = performance$Coverage, ref = 0.95,
+             panel = "95% confidence interval coverage"))
+long$panel <- factor(long$panel, levels = c("Bias in the risk difference",
+                                            "95% confidence interval coverage"))
+
+ggplot(long, aes(Estimator, value)) +
+  geom_hline(aes(yintercept = ref), linetype = "dashed", colour = "#d95f02") +
+  geom_col(fill = "#2c7fb8", width = 0.6) +
+  geom_text(aes(label = ifelse(panel == "Bias in the risk difference",
+                               sprintf("%+.3f", value),
+                               sprintf("%.0f%%", 100 * value))),
+            vjust = -0.5, size = 3.1) +
+  facet_wrap(~panel, scales = "free_y") +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.18))) +
+  labs(x = NULL, y = NULL) +
+  theme_minimal()
+```
+
+Read the left panel first. G-computation overstates the risk difference by more than 80% of its true value, because a misspecified outcome model is the only thing it has. IPTW, using the correct treatment model, is close to unbiased. AIPW and TMLE use both and land closest.
+
+The right panel is the part that matters for a reported result. G-computation's interval contains the truth in none of the 500 replications: the point estimate is wrong and the plug-in standard error has no way to know it. IPTW over-covers, because the Horvitz-Thompson influence function ignores that the propensity score was estimated, which makes the interval conservative. TMLE covers at close to the nominal rate. Double robustness bought the point estimate; the efficient influence function bought the interval.
 
 ---
 
