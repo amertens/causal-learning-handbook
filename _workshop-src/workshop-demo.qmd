@@ -1,0 +1,193 @@
+---
+title: "Interactive Workshop Demo"
+subtitle: "Causal inference code cells powered by WebR"
+format: html
+engine: knitr
+filters:
+  - webr
+webr:
+  show-startup-message: false
+  packages:
+    - ggplot2
+    - lmtp
+    - SuperLearner
+  repos:
+    - https://nt-williams.r-universe.dev
+    - https://imbs-hl.r-universe.dev
+---
+
+This is a proof-of-concept demonstrating interactive R code cells in the browser.
+No R installation required — code runs via WebAssembly using [WebR](https://docs.r-wasm.org/webr/latest/).
+
+## Try it: G-Computation Step by Step
+
+### Step 1: Simulate trial data
+
+Edit the code below and click **Run Code** to execute. Try changing the sample size or the treatment effect.
+
+```{webr-r}
+# Simulate a simple RCT-like dataset
+set.seed(2026)
+n <- 500
+
+W1 <- rnorm(n)              # confounder: age (standardized)
+W2 <- rbinom(n, 1, 0.4)     # confounder: sex
+A  <- rbinom(n, 1, plogis(-0.5 + 0.3 * W1 + 0.2 * W2))  # treatment
+Y  <- rbinom(n, 1, plogis(-1.5 + 0.6 * A + 0.8 * W1 + 0.3 * W2))  # outcome
+
+dat <- data.frame(W1, W2, A, Y)
+cat("n =", n, "\n")
+cat("Treated:", sum(A), " Control:", sum(1-A), "\n")
+cat("Outcome rate (treated):", round(mean(Y[A==1]), 3), "\n")
+cat("Outcome rate (control):", round(mean(Y[A==0]), 3), "\n")
+```
+
+### Step 2: Fit the outcome model
+
+```{webr-r}
+# Fit logistic regression for E[Y | A, W]
+mod <- glm(Y ~ A + W1 + W2, family = binomial, data = dat)
+round(coef(mod), 3)
+```
+
+### Step 3: Predict counterfactual outcomes
+
+This is the core of G-computation — predict what would happen to *everyone* under treatment and under control.
+
+```{webr-r}
+# Counterfactual predictions
+dat1 <- dat; dat1$A <- 1  # everyone treated
+dat0 <- dat; dat0$A <- 0  # everyone untreated
+
+p1 <- predict(mod, newdata = dat1, type = "response")
+p0 <- predict(mod, newdata = dat0, type = "response")
+
+risk1 <- mean(p1)
+risk0 <- mean(p0)
+ate   <- risk1 - risk0
+
+cat("E[Y(1)] =", round(risk1, 4), "\n")
+cat("E[Y(0)] =", round(risk0, 4), "\n")
+cat("ATE     =", round(ate, 4), "(risk difference)\n")
+cat("RR      =", round(risk1/risk0, 3), "\n")
+```
+
+### Step 4: Explore — what happens if you change the model?
+
+Try adding an interaction term (`A:W1`) or removing a confounder. How does the ATE change?
+
+```{webr-r}
+# Try a different model specification
+mod2 <- glm(Y ~ A * W1 + W2, family = binomial, data = dat)
+
+p1_v2 <- predict(mod2, newdata = dat1, type = "response")
+p0_v2 <- predict(mod2, newdata = dat0, type = "response")
+
+cat("Original ATE:", round(ate, 4), "\n")
+cat("With interaction ATE:", round(mean(p1_v2) - mean(p0_v2), 4), "\n")
+```
+
+### Step 5: Visualize the propensity score
+
+```{webr-r}
+ps_mod <- glm(A ~ W1 + W2, family = binomial, data = dat)
+dat$ps <- predict(ps_mod, type = "response")
+
+# Simple histogram of propensity scores by treatment group
+par(mfrow = c(1, 2))
+hist(dat$ps[dat$A == 1], breaks = 20, main = "Treated",
+     xlab = "Propensity Score", col = "#228833AA", xlim = c(0, 1))
+hist(dat$ps[dat$A == 0], breaks = 20, main = "Control",
+     xlab = "Propensity Score", col = "#EE6677AA", xlim = c(0, 1))
+```
+
+---
+
+## Beyond G-Computation: LMTP for Modified Treatment Policies
+
+The `lmtp` package is available in WebR via [r-universe](https://nt-williams.r-universe.dev). This means you can run modified treatment policy estimators directly in the browser.
+
+### Define a shift intervention and estimate its effect
+
+```{webr-r}
+library(lmtp)
+
+# Simulate longitudinal data (2 time points)
+set.seed(42)
+n <- 200
+W <- rnorm(n)
+A_1 <- rnorm(n, mean = 2 + 0.3 * W)
+A_2 <- rnorm(n, mean = 2 + 0.3 * W + 0.2 * A_1)
+Y <- rbinom(n, 1, plogis(-2 + 0.5 * A_1 + 0.5 * A_2 + 0.3 * W))
+
+dat_lmtp <- data.frame(W = W, A_1 = A_1, A_2 = A_2, Y = Y)
+
+# Define a shift: decrease treatment by 0.5 at each time point
+shift_down <- function(data, trt) {
+  data[[trt]] - 0.5
+}
+
+# Estimate effect of the shift vs natural value
+fit <- lmtp_tmle(
+  data = dat_lmtp,
+  trt = c("A_1", "A_2"),
+  outcome = "Y",
+  baseline = "W",
+  shift = shift_down,
+  mtp = TRUE,
+  outcome_type = "binomial",
+  learners_outcome = c("SL.glm", "SL.mean"),
+  learners_trt = c("SL.glm", "SL.mean"),
+  folds = 2
+)
+
+fit
+```
+
+### Try different shift magnitudes
+
+Edit the shift function to explore how the effect changes. What happens with a larger shift (e.g., -1.0)?
+
+```{webr-r}
+# Try a different shift magnitude
+shift_large <- function(data, trt) {
+  data[[trt]] - 1.0
+}
+
+fit_large <- lmtp_tmle(
+  data = dat_lmtp,
+  trt = c("A_1", "A_2"),
+  outcome = "Y",
+  baseline = "W",
+  shift = shift_large,
+  mtp = TRUE,
+  outcome_type = "binomial",
+  learners_outcome = c("SL.glm", "SL.mean"),
+  learners_trt = c("SL.glm", "SL.mean"),
+  folds = 2
+)
+
+# Compare
+cat("Small shift (-0.5):", round(fit$theta, 4), "\n")
+cat("Large shift (-1.0):", round(fit_large$theta, 4), "\n")
+```
+
+---
+
+## How this works
+
+- Code runs entirely **in your browser** via WebAssembly (no server needed)
+- You can edit any code cell and re-run it
+- Results update in real time
+- Packages load from [r-universe](https://r-universe.dev) WebAssembly binaries --- including `lmtp`, `SuperLearner`, and the `tlverse` ecosystem
+- For the full static handbook with all chapters and pre-computed results, see the [main site](../index.html)
+
+## Available packages for interactive exercises
+
+| Package | Available | Source |
+|---------|-----------|--------|
+| Base R, ggplot2, dplyr | Yes | Standard WebR repo |
+| `SuperLearner` | Yes | CRAN via WebR |
+| `lmtp` | Yes | `nt-williams.r-universe.dev` |
+| `sl3`, `tmle3`, `hal9001` | Yes | `tlverse.r-universe.dev` |
+| `tmle` (classic) | Yes | CRAN via WebR |

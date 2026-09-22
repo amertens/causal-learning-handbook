@@ -1,0 +1,762 @@
+---
+format: html
+---
+
+# Continuous-Time TMLE for Survival and Competing Risks with `concrete` {#sec-ct-tmle-concrete}
+*Targeting cumulative incidence on the native time scale, with no bins to choose*
+
+*Estimated reading time: ~60 minutes*
+
+::: {.callout-tip}
+## Learning Objectives
+
+After completing this chapter, you will be able to:
+
+1. Say what a discrete-time survival estimator asks you to decide (a bin width, a tie-ordering rule, and how time enters the hazard model) and what a continuous-time estimator does instead.
+2. Read the continuous-time g-formula for a cause-specific cumulative incidence factor by factor, and point to where the competing event enters.
+3. Describe the one-step targeting step: one update direction for every target time and event at once, small multiplicative steps on the hazards, and a stopping rule tied to the standard error.
+4. Fit a competing-risks continuous-time TMLE with `concrete`, read its convergence and positivity diagnostics, and rebuild the plug-in estimate and its standard error from the pieces the fit returns.
+5. State the one coding rule that fixes the estimand in `concrete`: every positive event code is a competing event, and recoding an event to 0 turns it into censoring and changes the question.
+6. Report several horizons, or a whole risk curve, with simultaneous rather than pointwise confidence bands.
+7. Decide when continuous-time TMLE is the right tool and when it is not.
+:::
+
+The previous chapter (@sec-tte-competing) settled the question that matters most in a survival analysis with competing events: which cumulative incidence you are estimating. It then estimated adjusted risks with a discrete-time TMLE, which needs event times sorted into bins. Most event times are not recorded in bins. Hospital admissions, deaths, and disenrollments carry dates, and a continuous-time estimator can use them as they are. This chapter is about that estimator: the one-step continuous-time TMLE of @rytgaard2021onestep and @rytgaard2022tmle, and its R implementation `concrete` [@chen2023concrete]. The estimand is the same cumulative incidence as before. Three things differ. The nuisance parameters are hazard functions estimated at the observed event times rather than per-bin probabilities; the targeting step follows one path for all horizons and events at once; and the analyst no longer chooses a bin width, a time basis, or a tie-breaking convention.
+
+## Where this chapter fits
+
+This is a methods and software chapter. It assumes you have the vocabulary of @sec-tte-competing (cause-specific hazard, cumulative incidence function, the Aalen-Johansen estimator, and the difference between a competing event and censoring) and the targeting logic of @sec-doubly-robust-tmle (clever covariate, fluctuation, influence function). It does not repeat the estimand taxonomy, the ICH E9(R1) mapping, or the case against hazard ratios; when a decision in this chapter depends on the estimand, it says so and points back.
+
+The running example is a simulated new-user cohort, not the HIV cohort used elsewhere in the handbook. A simulation is the only way to put the true counterfactual risks on the same table as the estimates, and for a chapter whose point is that the estimator recovers a known target, that comparison is worth more than continuity.
+
+
+## What discretization asks of you {#sec-ct-discretization}
+
+A discrete-time survival TMLE works on person-period data: one row per patient per interval, an at-risk indicator, and an event indicator for each cause. To get there from dated events you choose a bin width. That one choice pulls three others behind it.
+
+1. **The horizon moves to a bin boundary.** "Risk by day 365" becomes "risk by the end of the bin that contains day 365". With 90-day bins the estimable horizons are days 90, 180, 270, 360, and 450; there is no day 365, and a "12-month" estimate is really a 360-day or a 450-day one.
+2. **Ties need a rule.** Everyone whose event or censoring falls in the same bin now shares a time. Whether patients censored inside a bin count as at risk for that bin's events, or leave the risk set first, changes every risk set, and the two conventions push the estimate in opposite directions.
+3. **Time becomes a covariate in the hazard model.** The per-bin hazard has to be modeled as a function of the bin index. Whether that function is a linear term, a spline, or one indicator per bin is a modeling decision on top of the covariate model, and it interacts with the bin width: fine bins give many hazards to estimate from few events each, coarse bins hide the shape of the hazard inside the bin.
+
+None of this makes discrete-time estimators wrong. Studies that varied the discretization found that it changes estimator performance even without time-varying confounding, and recommended treating the bin width as a tuning parameter [@sofrygin2019daily; @ferreira2020discretization; @sloma2021discrete]. The difficulty is that no discrete-time package tunes it for you, and few applied analyses try. The first two consequences can be seen without any modeling at all, by binning the times and re-running the Aalen-Johansen estimator; the worked example below does this once the cohort is in hand (@sec-ct-binning-demo).
+
+A continuous-time estimator has none of these steps. The grid is the set of observed event times, which is the finest grid the data can support, and the hazards are estimated and updated at those times. There is no rounding beyond what the data already carry.
+
+::: {.callout-note}
+## What "continuous time" does and does not mean
+
+The software does not integrate hazards analytically. The counting processes jump at the recorded times, the hazard estimates are evaluated at those times, and the targeting step updates them there. Data recorded in whole days are continuous-time data to the estimator; so are data recorded in whole months. Coarser recording only produces more tied times, which the Cox-type learners handle with the usual tie approximations. The estimator never asks for a grid other than the data's own.
+:::
+
+
+## The estimand in continuous time {#sec-ct-estimand}
+
+### Observed data and counting processes
+
+Each patient contributes $O = (\tilde T, \tilde\Delta, A, W)$: the follow-up time $\tilde T = \min(T, C)$, where $T$ is the time of the first event of any cause and $C$ the censoring time; the observed status $\tilde\Delta \in \{0, 1, \dots, J\}$, with $0$ for censored and $j \ge 1$ for the $J$ competing event types; the baseline treatment $A$; and the baseline covariates $W$. Two event types, the event of interest ($j = 1$) and one competing event ($j = 2$), are enough for everything in this chapter.
+
+It is convenient to write each patient's history as counting processes,
+
+$$
+N_j(t) = \mathbb{1}(\tilde T \le t,\ \tilde\Delta = j), \qquad j = 0, 1, \dots, J,
+$$
+
+which sit at $0$ until the patient has event $j$ and then jump to $1$. $N_0$ is the censoring process. The at-risk indicator is $\mathbb{1}(\tilde T \ge t)$. This is the language of @andersen1993counting; the only reason to adopt it here is that the influence function and the targeting step are written in it, and reading them is much easier if the notation is already familiar.
+
+### Hazards, survival, and cumulative incidence
+
+The cause-specific hazard of event $j$ given treatment and covariates is
+
+$$
+\lambda_j(t \mid a, w) = \lim_{h \downarrow 0} \frac{1}{h}\, P(\tilde T \le t + h,\ \tilde\Delta = j \mid \tilde T \ge t,\ A = a,\ W = w),
+$$
+
+the same quantity as in @sec-tte-competing, now written as a rate at an instant rather than a probability in a bin. The censoring hazard $\lambda_0$ is defined the same way with $\tilde\Delta = 0$. Event-free survival multiplies the two event hazards away:
+
+$$
+S(t \mid a, w) = \exp\!\left(-\int_0^t \{\lambda_1(s \mid a, w) + \lambda_2(s \mid a, w)\}\, ds\right),
+$$
+
+and the survival of the censoring process, $S_c(t \mid a, w) = \exp(-\int_0^t \lambda_0)$, is the continuous-time version of the cumulative probability of remaining uncensored that IPCW inverts. The conditional cumulative incidence of cause $j$ by time $t$ is
+
+$$
+F_j(t \mid a, w) = \int_0^t \lambda_j(s \mid a, w)\, S(s^- \mid a, w)\, ds.
+$$
+
+Read the integrand as two questions asked at every instant $s$: what is the chance of still being free of *any* event just before $s$, and, given that, at what rate does cause $j$ strike now? Adding the products up to $t$ gives the probability that cause $j$ is the first event and happens by $t$. The competing event is in the formula through $S(s^-)$: the faster cause 2 removes patients, the less cause 1 can accumulate. This is the continuous-time twin of the hand-built Aalen-Johansen recipe in @sec-tte-competing, where $S_{k-1} \cdot h_{\text{hosp},k}$ was summed over months.
+
+### Target parameter
+
+Standardizing over the covariate distribution gives the treatment-specific risk under the static intervention "set $A$ to $a$",
+
+$$
+\Psi_{j,t}(a) = E_W\!\left[ F_j(t \mid a, W) \right],
+$$
+
+which is the continuous-time g-formula [@robins1986gformula] for a cause-specific absolute risk. The contrasts reported later are the risk difference $\Psi_{j,t}(1) - \Psi_{j,t}(0)$ and the risk ratio $\Psi_{j,t}(1) / \Psi_{j,t}(0)$, at one horizon $t$ or jointly at several. `concrete` targets the vector of $\Psi_{j,t}(a)$ over every requested combination of event $j$, time $t$, and intervention $a$; the contrasts are functions of that vector.
+
+Identification is unchanged from the previous chapter: consistency; conditional exchangeability of treatment given $W$; conditional exchangeability of censoring given $(A, W)$, which is where an intercurrent event recoded as censoring has to earn its keep; and positivity for treatment and for remaining uncensored through $t$. Everything here adjusts for baseline covariates only. If censoring or the competing event depends on post-baseline variables that also predict the outcome, the estimand is not identified by anything in this chapter, and the longitudinal estimators of Part III are the right tools.
+
+
+## Inside the targeting step {#sec-ct-targeting}
+
+The discrete-time TMLE of @sec-tte-competing targeted one horizon at a time with a logistic fluctuation of the per-bin hazard. The continuous-time version does the same job with three changes: the residuals are martingale residuals of counting processes, the fluctuation is multiplicative on the hazard, and all target times and events are updated together along one path. This section walks through the pieces; the formulas follow @chen2023concrete, and the theory is in @rytgaard2022tmle and @rytgaard2021onestep.
+
+### The efficient influence function
+
+For the risk of event $j$ at time $t$ under intervention $a$, the efficient influence function (EIF, also called the efficient influence curve) is
+
+$$
+D^*_{a,j,t}(O) = \sum_{l=1}^{J} \int_0^{t} h_{a,j,t,l}(s)\, \Big\{ dN_l(s) - \mathbb{1}(\tilde T \ge s)\, \lambda_l(s \mid A, W)\, ds \Big\} \;+\; F_j(t \mid a, W) - \Psi_{j,t}(a).
+$$
+
+The last two terms are the familiar plug-in part: this patient's conditional risk under intervention $a$, centered at the population target. The integral is the correction part, and it runs over *every* event type $l$, not only the event of interest, because a competing event changes what can happen to cause $j$ afterwards. Inside the braces is a martingale residual: at each instant, "did event $l$ happen to this patient now?" minus "how likely was it, given that they were still at risk?" It is the continuous-time analogue of the residual $N_{1k} - h_1(k, A, W)$ in the discrete-time EIF, integrated over time instead of summed over bins. As in every TMLE in this handbook, the per-patient value of $D^*$ says how hard that patient pulls on the estimate, and its standard deviation over $\sqrt{n}$ is the standard error.
+
+### The clever covariate, factor by factor
+
+The weight on the residual is the clever covariate,
+
+$$
+h_{a,j,t,l}(s) = \frac{\mathbb{1}(A = a)\, \mathbb{1}(s \le t)}{g(a \mid W)\; S_c(s^- \mid A, W)} \left[ \mathbb{1}(l = j) - \frac{F_j(t \mid A, W) - F_j(s \mid A, W)}{S(s \mid A, W)} \right].
+$$
+
+The fraction in front is the part that does not change during targeting: the inverse probability of the treatment received, as in the point-treatment TMLE, times the inverse probability of still being uncensored just before $s$, as in IPCW. Only patients in arm $a$ contribute, and only up to the horizon. The bracket is the part that targeting does change. $\{F_j(t) - F_j(s)\}/S(s)$ is the conditional probability that a patient who is event-free at $s$ will go on to have event $j$ by $t$: their *remaining* risk. If event $l = j$ happens at $s$, the bracket is $1$ minus the remaining risk, which is how much the patient's eventual outcome exceeded what was still expected. If a competing event $l \ne j$ happens at $s$, the bracket is minus the remaining risk: cause $j$ can no longer occur, so the whole remaining risk is lost. The sign is what separates a competing event from a censoring in this formula. A censoring at $s$ contributes nothing to the bracket (it is handled through $S_c$); a competing event removes risk.
+
+### One direction, many targets
+
+With $J$ events, $K$ target times, and $M$ interventions there are $J \times K \times M$ target parameters and as many EIF components. Rather than fluctuate each separately, the one-step TMLE [@vanderlaan2016onestep; @rytgaard2021onestep] stacks them into a vector $D^*$ and moves every hazard along a single path chosen so that the vector of empirical means $P_n D^*$ shrinks as quickly as possible. Starting from the Super Learner fits $\lambda^0_l$, step $b$ updates each event hazard multiplicatively,
+
+$$
+\lambda^{b+1}_l(s) = \lambda^{b}_l(s)\, \exp\!\left( \varepsilon_b\, \frac{\langle P_n D^*(\lambda^b),\; h_{l,s}(\lambda^b) \rangle}{\| P_n D^*(\lambda^b) \|} \right),
+$$
+
+where $h_{l,s}$ collects the clever covariates of all targets for event $l$ at time $s$, and the inner product weights each target's clever covariate by how far that target's mean EIF currently is from zero. Targets whose equation is already solved contribute nothing to the direction. The step size $\varepsilon_b$ starts at `OneStepEps` (default $0.1$) and is halved whenever a step fails to reduce $\| P_n D^* \|$, so progress is monotone. The path stops at the first step $B$ where every component satisfies
+
+$$
+\big| P_n D^*_{a,j,t}(\lambda^B) \big| \;\le\; \frac{\widehat{\mathrm{sd}}\big(D^*_{a,j,t}\big)}{\sqrt{n}\, \log n},
+$$
+
+that is, when the remaining bias in each target is a $\log n$-th of a standard error, or at `MaxUpdateIter` steps (default 500), whichever comes first. The clever covariates are recomputed after each step because $F_j$ and $S$ in the bracket change with the hazards; the propensity and censoring parts do not.
+
+::: {.callout-note}
+## Why one path rather than one fluctuation per target
+
+A logistic fluctuation solves one EIF equation exactly and can disturb the others, so targeting several horizons that way means iterating until all equations hold at once, with no guarantee of monotone progress. The one-step path treats the whole vector as one objective. It also keeps the updated hazards coherent across targets: a single set of hazards produces all reported risks, so the estimated curves are monotone in $t$ and the cause-specific risks and event-free survival still sum to one. Those are properties a substitution estimator should have and a stitched-together set of pointwise estimates need not.
+:::
+
+### Inference
+
+The variance of each targeted risk is the sample variance of its estimated EIF divided by $n$, and contrasts use the EIF of the contrast (the difference of the two arms' EIFs for a risk difference; the delta method for a ratio). For several horizons or events, `concrete` also draws from a multivariate normal with the estimated EIF covariance to find the multiplier that makes all intervals hold simultaneously with the stated confidence; the resulting bands are wider than the pointwise intervals by a factor that grows slowly with the number of targets. Both are asymptotic. Under practical positivity violations the EIF variance can be too small [@tran2018robust], and the diagnostics in @sec-ct-practice are the check.
+
+
+## Worked example: a new-user cohort with a competing event {#sec-ct-example}
+
+### The cohort
+
+We simulate a pharmacoepidemiology cohort of 1,500 older adults with type 2 diabetes who start either a GLP-1 receptor agonist ($A = 1$) or a sulfonylurea ($A = 0$). The event of interest is a first major adverse cardiovascular event (MACE, code 1); the competing event is non-cardiovascular death (code 2); patients can also leave the health plan (informative censoring, code 0) or reach the end of the study window. Times are in days. Four baseline covariates drive treatment choice, both event hazards, and disenrollment: age, a frailty score, prior cardiovascular disease, and kidney function (eGFR). Sex is recorded and included in the adjustment set but affects nothing, as at least one variable in any real adjustment set does.
+
+The confounding is deliberate and realistic. Prescribers channel the newer drug toward patients with prior cardiovascular disease, which pushes treated patients toward *higher* MACE risk, and away from older and frailer patients, which pushes them toward lower risk of everything. The second channel dominates, so an unadjusted comparison will flatter the new drug. The true effect is a 40% reduction in the MACE hazard and no effect at all on the non-CV death hazard.
+
+```{r}
+#| label: setup-ct
+#| code-fold: true
+#| message: false
+#| warning: false
+library(data.table)
+library(survival)
+library(ggplot2)
+library(concrete)
+knitr::opts_chunk$set(fig.align = "center")
+```
+
+```{r}
+#| label: ct-dgp
+#| code-fold: show
+
+## Linear predictors -------------------------------------------------------
+lp_trt   <- function(W)    with(W, -0.3 - 0.05 * (age - 66) - 0.6 * frailty +
+                                    0.3 * prior_cvd + 0.015 * (egfr - 75))
+lp_mace  <- function(W, A) with(W,  0.04 * (age - 66) + 0.7 * prior_cvd +
+                                    0.35 * frailty - 0.012 * (egfr - 75) - 0.40 * A)
+lp_death <- function(W, A) with(W,  0.08 * (age - 66) + 0.60 * frailty -
+                                    0.010 * (egfr - 75) + 0.00 * A)   # no direct effect
+lp_cens  <- function(W, A) with(W, -0.03 * (age - 66) + 0.30 * frailty + 0.25 * A)
+
+## Baseline hazards: Weibull for the two events, exponential for disenrollment
+k_mace <- 1.15; s_mace <- 6500      # shape, scale (days)
+k_dth  <- 1.30; s_dth  <- 7400
+rate_cens <- 1.5e-4
+
+draw_W <- function(n) data.table(
+  age       = rnorm(n, 66, 8),
+  female    = rbinom(n, 1, 0.45),
+  frailty   = rnorm(n),
+  prior_cvd = rbinom(n, 1, 0.40),
+  egfr      = pmin(pmax(rnorm(n, 75, 18), 15), 120)
+)
+## Weibull proportional-hazards time by inversion: Lambda(t) = (t/s)^k exp(lp)
+rweib_ph <- function(n, k, s, lp) s * (-log(runif(n)) / exp(lp))^(1 / k)
+
+sim_cohort <- function(n, seed) {
+  set.seed(seed)
+  W  <- draw_W(n)
+  A  <- rbinom(n, 1, plogis(lp_trt(W)))
+  T1 <- rweib_ph(n, k_mace, s_mace, lp_mace(W, A))       # latent MACE time
+  T2 <- rweib_ph(n, k_dth,  s_dth,  lp_death(W, A))      # latent non-CV death time
+  C  <- pmin(rexp(n, rate_cens * exp(lp_cens(W, A))),    # disenrollment
+             runif(n, 900, 1400))                         # staggered end of study
+  T  <- pmin(T1, T2)
+  J  <- ifelse(T1 <= T2, 1L, 2L)
+  cbind(id = seq_len(n), W, A = A,
+        time   = round(pmin(T, C), 1),
+        status = ifelse(T <= C, J, 0L))                   # 0 censored, 1 MACE, 2 death
+}
+
+cohort <- sim_cohort(1500, seed = 2026)
+cohort[, .(n = .N, MACE = sum(status == 1), nonCV_death = sum(status == 2),
+           censored = sum(status == 0), median_followup_days = median(time)), by = A]
+```
+
+Check the event table before anything else, as the previous chapter advised. Both events are rarer in the treated arm, and the treated arm is censored a little more, which is the disenrollment channel at work.
+
+### The truth
+
+Because the data are simulated we can compute the counterfactual risks $\Psi_{j,t}(a)$ directly: draw a very large population, assign everyone to $a$, and count who has which event first. No censoring is involved, because the estimand is defined in its absence.
+
+```{r}
+#| label: ct-truth
+true_cif <- function(times, N = 2e5, seed = 1) {
+  set.seed(seed)
+  W <- draw_W(N)
+  rbindlist(lapply(0:1, function(a) {
+    T1 <- rweib_ph(N, k_mace, s_mace, lp_mace(W, a))
+    T2 <- rweib_ph(N, k_dth,  s_dth,  lp_death(W, a))
+    T  <- pmin(T1, T2); J <- ifelse(T1 <= T2, 1L, 2L)
+    rbindlist(lapply(times, function(tt)
+      data.table(A = a, Time = tt,
+                 `1` = mean(T <= tt & J == 1),      # MACE
+                 `2` = mean(T <= tt & J == 2))))    # non-CV death
+  }))
+}
+horizons <- c(365, 730, 1095)
+truth <- melt(true_cif(horizons), id.vars = c("A", "Time"),
+              variable.name = "Event", value.name = "Truth")
+truth[, Event := as.integer(as.character(Event))]
+dcast(truth, Time ~ Event + A, value.var = "Truth") |>
+  knitr::kable(digits = 3, col.names = c("Day", "MACE, A=0", "MACE, A=1",
+                                          "Non-CV death, A=0", "Non-CV death, A=1"),
+               caption = "True counterfactual cumulative incidence by horizon and arm")
+```
+
+Two things to notice. The MACE risk difference at three years is about $-0.05$ (a risk ratio near $0.70$). And the non-CV death risk is very slightly *higher* under treatment even though treatment does nothing to the death hazard: fewer patients have a MACE first, so more remain at risk of dying of something else. That is how competing risks work, and an analysis that reported only the MACE curve would miss it.
+
+### Unadjusted Aalen-Johansen
+
+```{r}
+#| label: ct-aj
+aj_fit <- survfit(Surv(time, factor(status, levels = 0:2)) ~ A, data = cohort)
+aj_sum <- summary(aj_fit, times = horizons, extend = TRUE)
+aj <- data.table(A = as.integer(sub("A=", "", aj_sum$strata)), Time = aj_sum$time,
+                 `1` = aj_sum$pstate[, 2], `2` = aj_sum$pstate[, 3]) |>
+  melt(id.vars = c("A", "Time"), variable.name = "Event", value.name = "AJ")
+aj[, Event := as.integer(as.character(Event))]
+merge(aj, truth, by = c("A", "Time", "Event"))[order(Event, Time, A)] |>
+  knitr::kable(digits = 3, caption = "Aalen-Johansen estimates next to the truth")
+```
+
+The unadjusted estimator gets the control arm roughly right and the treated arm wrong in the expected direction: it understates the treated arm's MACE risk and shows a large reduction in non-CV death that does not exist. Healthier patients got the new drug, and the Aalen-Johansen estimator has no way to know that.
+
+### What binning does to the same data {#sec-ct-binning-demo}
+
+Before fitting the continuous-time estimator, here is the discretization point from @sec-ct-discretization in numbers. We round every event and censoring time up to the end of its bin, for a few bin widths, and re-run the Aalen-Johansen estimator for the one-year MACE risk in the control arm at the bin boundary closest to day 365, which is the horizon a discrete-time analysis would report. Nothing else changes.
+
+```{r}
+#| label: ct-binning
+bin_end <- function(t, width) ceiling(t / width) * width
+aj_mace <- function(dt, t0, arm = 0) {
+  f <- survfit(Surv(time, factor(status, levels = 0:2)) ~ 1, data = dt[A == arm])
+  summary(f, times = t0, extend = TRUE)$pstate[, 2]
+}
+rbindlist(lapply(c(30, 90, 180, 365), function(w) {
+  boundary <- round(365 / w) * w                 # estimable horizon closest to day 365
+  binned   <- copy(cohort)[, time := bin_end(time, w)]
+  data.table(
+    bin_width_days         = w,
+    horizon_reported       = boundary,
+    native_risk_at_365     = aj_mace(cohort, 365),
+    native_risk_at_horizon = aj_mace(cohort, boundary),
+    binned_risk_at_horizon = aj_mace(binned, boundary)
+  )
+})) |> knitr::kable(digits = 4, caption = "One-year MACE risk in the control arm, native times versus times rounded up to bin ends")
+```
+
+Two things move. The horizon: for bin widths that do not divide 365, the closest estimable horizon is day 360, and the gap between the native estimates at 360 and 365 is the price of that shift. It happens to be zero here, because no control-arm event fell between day 360 and day 365; on a 90-day grid an 18-month horizon (day 547) would be reported at day 540 or 630, and the gap would not be zero. The risk sets: at the same horizon, the binned estimate is lower than the native one, and the gap grows with the bin width, because every censoring inside a bin now sits at the bin's end, after that bin's events, so censored patients stay in the risk set longer than they were observed. Both effects are modest for a nonparametric estimator at this level of censoring. What the table cannot show is the third consequence, the modeling of time inside the hazard learners, and in one comparison that mattered more than the number of bins: a 100-period discretization with a polynomial in time predicted worse than a 10-period one with an indicator per period [@keogh2025survivalSL]. The continuous-time estimator has none of the three problems.
+
+### Fitting the continuous-time TMLE
+
+`concrete` runs in three calls. `formatArguments()` checks the data and the analysis specification and returns a `ConcreteArgs` object; `doConcrete()` fits the nuisance Super Learners and runs the one-step update; `getOutput()` turns the fit into a table of risks and contrasts.
+
+```{r}
+#| label: ct-args
+#| message: false
+ct_args <- formatArguments(
+  DataTable    = cohort[, .(id, age, female, frailty, prior_cvd, egfr, A, time, status)],
+  EventTime    = "time",
+  EventType    = "status",       # 0 = censored; 1 = MACE; 2 = non-CV death
+  Treatment    = "A",
+  ID           = "id",
+  TargetTime   = horizons,       # days 365, 730, 1095
+  TargetEvent  = 1:2,            # target both cumulative incidences
+  Intervention = 0:1,            # set everyone to A = 0, and everyone to A = 1
+  CVArg        = list(V = 5),    # 5-fold cross-validation for the Super Learners
+  Verbose      = FALSE
+)
+ct_args$Model
+```
+
+Every column of `DataTable` that is not the time, status, treatment, or ID is treated as a baseline covariate, so pass only what belongs in the adjustment set. The `Model` element is the Super Learner specification, filled with defaults: for the treatment, a library of penalized logistic regression and gradient-boosted trees; for the censoring hazard (`"0"`) and each event hazard (`"1"`, `"2"`), two Cox models, treatment-only and main-terms. Each hazard has its own library because each is its own regression. We add a penalized Cox model (`coxnet`) to each hazard library and re-validate:
+
+```{r}
+#| label: ct-args-amend
+for (j in c("0", "1", "2")) ct_args$Model[[j]][["coxnet"]] <- "coxnet"
+ct_args <- formatArguments(ct_args)     # re-check the amended specification
+```
+
+Cox formulas can be added in the same way as strings, for example `"Surv(time, status == 1) ~ A * frailty + ."` to let the treatment effect vary with frailty, and the aliases `"rsf"` (random survival forest) and `"hal"` (highly adaptive lasso) add non-proportional-hazards learners; @sec-ct-practice discusses when to use them. Now the fit:
+
+```{r}
+#| label: ct-fit
+#| cache: true
+#| message: false
+#| warning: false
+set.seed(2027)
+t_start <- Sys.time()
+ct_est  <- doConcrete(ct_args)
+fit_minutes <- round(as.numeric(difftime(Sys.time(), t_start, units = "mins")), 1)
+print(ct_est)
+```
+
+This took about `r fit_minutes` minutes on a laptop. The printed summary is the first diagnostic. Line by line:
+
+- **Convergence.** "TMLE converged at step $B$" means every one of the twelve target components (2 events × 3 times × 2 interventions) met the stopping rule of @sec-ct-targeting within `MaxUpdateIter` steps. If it had not, the components still failing would be listed with the ratio of their mean EIF to the threshold.
+- **Nuisance-weight bounding.** `MinNuisance` (default $5/(\sqrt{n}\log n)$, here about `r round(attr(ct_est, "MinNuisance"), 3)`) is a floor on the product $g(a \mid W)\, S_c(s^- \mid a, W)$ that sits in the clever covariate's denominator. The summary reports how many subjects hit it under each intervention. None did here; when many do, the estimate is being stabilized by truncation and the positivity discussion below applies.
+- **Learner tables.** For the treatment and for each hazard, the cross-validated risk of every candidate and the weight it received. The hazard Super Learners are discrete selectors: one candidate gets weight 1. The propensity Super Learner is a convex combination.
+
+Look at which hazard learner was selected for each event. In this run the selector chose a covariate-adjusted model for the MACE hazard, where there are enough events to reward one, and the treatment-only Cox model for the non-CV death hazard, where there are fewer. Nothing is wrong with that; the cross-validated partial likelihood could not distinguish the candidates for the rarer cause. It does mean that the adjustment for non-CV death rests more on the propensity model than on the outcome model, which is the situation double robustness exists for, and it is a reason to look at the treatment-model fit with the same care as the hazards. The same pattern turned up in the SUSTAIN-6 reanalysis (@sec-ct-practice).
+
+### Results against the truth
+
+```{r}
+#| label: ct-output
+ct_out <- getOutput(ct_est, Estimand = c("Risk", "RD", "RR"),
+                    GComp = TRUE, Simultaneous = TRUE)
+head(ct_out, 8)
+```
+
+`getOutput()` returns one row per estimand, target, and estimator. `tmle` rows carry the targeted estimate, its EIF standard error, a pointwise 95% interval, and a simultaneous interval that covers all twelve targets at once; `gcomp` rows carry the untargeted Super Learner plug-in for comparison, with no inference because the initial fit has none. Putting the targeted risks beside the truth and the unadjusted estimator:
+
+```{r}
+#| label: ct-compare
+risks <- ct_out[Estimand == "Abs Risk" & Estimator == "tmle",
+                .(A = as.integer(sub("A=", "", Intervention)), Time, Event,
+                  TMLE = `Pt Est`, se, lo = `CI Low`, hi = `CI Hi`)]
+cmp <- Reduce(function(x, y) merge(x, y, by = c("A", "Time", "Event")),
+              list(truth, aj, risks))[order(Event, Time, A)]
+cmp[, Event := factor(Event, 1:2, c("MACE", "Non-CV death"))]
+cmp[, .(Event, Day = Time, A, Truth, AJ, TMLE, `TMLE 95% CI` = sprintf("(%.3f, %.3f)", lo, hi))] |>
+  knitr::kable(digits = 3, caption = "Cumulative incidence: truth, unadjusted Aalen-Johansen, and continuous-time TMLE")
+```
+
+```{r}
+#| label: fig-ct-compare
+#| fig-cap: "Cumulative incidence at one, two, and three years by arm and event: the true counterfactual value, the unadjusted Aalen-Johansen estimate, and the continuous-time TMLE with its pointwise 95% interval. The unadjusted estimator understates risk in the treated arm for both events. The TMLE recovers the MACE risks; for the rarer non-CV death it moves the treated arm only part of the way back, and its one-year interval misses."
+#| fig-width: 9
+#| fig-height: 4.5
+#| code-fold: true
+plot_dt <- melt(cmp, id.vars = c("Event", "Time", "A", "lo", "hi"),
+                measure.vars = c("Truth", "AJ", "TMLE"), variable.name = "Source")
+plot_dt[Source != "TMLE", c("lo", "hi") := NA_real_]
+plot_dt[, Arm := factor(A, 0:1, c("Sulfonylurea (A=0)", "GLP-1 RA (A=1)"))]
+dodge <- position_dodge(width = 60)
+ggplot(plot_dt, aes(x = Time, y = value, colour = Source, shape = Source)) +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = 40, na.rm = TRUE, position = dodge) +
+  geom_point(size = 2.4, position = dodge) +
+  facet_grid(Event ~ Arm, scales = "free_y") +
+  scale_colour_manual(values = c(Truth = "black", AJ = "firebrick", TMLE = "steelblue")) +
+  scale_x_continuous(breaks = horizons, labels = c("1 y", "2 y", "3 y")) +
+  labs(x = NULL, y = "Cumulative incidence", colour = NULL, shape = NULL) +
+  theme_minimal() + theme(legend.position = "bottom")
+```
+
+For MACE, the targeted estimates sit on the truth in both arms. The contrasts at three years:
+
+```{r}
+#| label: ct-contrasts
+ct_out[Estimand != "Abs Risk" & Estimator == "tmle" & Time == 1095,
+       .(Event, Estimand, `Pt Est`, se, `CI Low`, `CI Hi`, `SimCI Low`, `SimCI Hi`)]
+```
+
+Compare the MACE risk difference and ratio with the true values ($-0.050$ and $0.70$). The non-CV death contrast is not distinguishable from zero, which is the right answer; the unadjusted curves suggested a reduction of more than a third.
+
+The non-CV death risk under treatment is the weak spot, and it deserves a closer look rather than a caption. The truth at three years is $0.100$; the unadjusted estimate is $0.069$ and the targeted estimate $0.077$, so the update recovered only part of the gap, and at one year the pointwise interval does not reach the true $0.028$. Two things are going on. The treated arm has 39 non-CV deaths in total and six by one year, and the truth asks for the death risk that *frail, older* patients would have had on the new drug, which is the group prescribers steered away from it: the patients who carry that information are few and heavily weighted. On top of that, the hazard learner the selector chose for this cause carries no covariates at all. The next section separates the two.
+
+### When the selector drops the confounders
+
+The learner table above shows the cross-validated partial likelihood preferring the treatment-only Cox model for non-CV death. With 126 deaths, the main-terms and penalized models did not predict the held-out deaths better, so the discrete selector took the simplest candidate. The initial estimate of the death hazard under $A = 1$ is then the unadjusted one, and the entire correction has to come from the propensity weights in the clever covariate. Double robustness says that works in the limit; it does not say it works with six events.
+
+In an observational analysis there is a simple remedy: do not offer a candidate that omits the confounders. The treatment-only model is a reasonable candidate in a randomized trial, where it is correctly specified for the marginal effect, and that is the setting `concrete`'s defaults were written for. Here we drop it from every hazard library and refit.
+
+```{r}
+#| label: ct-refit
+#| cache: true
+#| message: false
+#| warning: false
+adj_args <- formatArguments(
+  DataTable = cohort[, .(id, age, female, frailty, prior_cvd, egfr, A, time, status)],
+  EventTime = "time", EventType = "status", Treatment = "A", ID = "id",
+  TargetTime = horizons, TargetEvent = 1:2, Intervention = 0:1,
+  CVArg = list(V = 5), Verbose = FALSE
+)
+for (j in c("0", "1", "2")) {
+  adj_args$Model[[j]][["TrtOnly"]] <- NULL        # every candidate must carry the confounders
+  adj_args$Model[[j]][["coxnet"]]  <- "coxnet"
+}
+adj_args <- formatArguments(adj_args)
+set.seed(2027)
+adj_est <- doConcrete(adj_args)
+adj_out <- getOutput(adj_est, Estimand = "Risk", GComp = TRUE, Simultaneous = FALSE)
+
+death_cmp <- merge(
+  truth[Event == 2, .(A, Time, Truth)],
+  rbind(ct_out[Estimand == "Abs Risk" & Event == 2,
+               .(A = as.integer(sub("A=", "", Intervention)), Time, Estimator, Library = "default + coxnet", Risk = `Pt Est`)],
+        adj_out[Estimand == "Abs Risk" & Event == 2,
+                .(A = as.integer(sub("A=", "", Intervention)), Time, Estimator, Library = "no treatment-only model", Risk = `Pt Est`)]),
+  by = c("A", "Time"))
+dcast(death_cmp[A == 1], Time + Truth ~ Library + Estimator, value.var = "Risk") |>
+  knitr::kable(digits = 3, caption = "Non-CV death risk under A = 1: truth, and the g-computation and targeted estimates under the two hazard libraries")
+```
+
+With the confounders in every candidate, the initial (g-computation) estimate already starts much closer to the truth and the targeted estimate at two and three years lands within $0.01$ of it. At one year it is still low. That is the second problem, and no learner fixes it: a correctly specified Cox model fit to these 126 deaths gives a treatment coefficient of about $-0.16$ where the truth is $0$, and predicts a one-year death risk under treatment of about $0.021$, because six treated deaths in the first year are not enough to pin down the hazard for the frail patients the estimand extrapolates to. The pointwise interval at that target is too narrow for the same reason. The practical lessons are in @sec-ct-practice; the short version is that the event-of-interest analysis is sound, the competing-event risk at early horizons in the arm where it is rarest should be reported with its event count next to it, and the simultaneous band, not the pointwise interval, is the honest uncertainty for a table of twelve numbers.
+
+### Looking inside the fit
+
+The `ConcreteEst` object is a list with one element per intervention, and each element holds the targeted hazards and survival for every subject at every time on the grid, the nuisance weights, the plug-in risks, and the per-subject influence function values. Three short calculations show that the estimator is what @sec-ct-estimand and @sec-ct-targeting described.
+
+First, the plug-in. The targeted risk under $A = 1$ is the average over subjects of $\sum_{s \le t} \lambda^B_1(s \mid 1, W_i)\, S^B(s^- \mid 1, W_i)$ with the sum over the grid of observed times:
+
+```{r}
+#| label: ct-inside-plugin
+grid  <- attr(ct_est, "Times")                        # the grid: observed times
+haz1  <- ct_est[["A=1"]]$Hazards[["1"]]               # targeted MACE hazard, grid x subject
+surv  <- ct_est[["A=1"]]$EvntFreeSurv                 # targeted event-free survival S(s)
+surv_lag <- rbind(1, surv[-nrow(surv), , drop = FALSE])  # S(s-)
+keep  <- grid <= 1095
+F1_by_hand <- mean(colSums(haz1[keep, ] * surv_lag[keep, ]))
+c(by_hand = F1_by_hand,
+  reported = ct_out[Estimand == "Abs Risk" & Estimator == "tmle" &
+                    Intervention == "A=1" & Time == 1095 & Event == 1, `Pt Est`])
+```
+
+Second, the standard error, from the stored influence function values:
+
+```{r}
+#| label: ct-inside-se
+IC1 <- ct_est[["A=1"]]$IC[Time == 1095 & Event == 1, IC]     # one value per subject
+IC0 <- ct_est[["A=0"]]$IC[Time == 1095 & Event == 1, IC]
+n   <- length(IC1)
+c(se_risk_A1 = sd(IC1) / sqrt(n),
+  se_RD      = sd(IC1 - IC0) / sqrt(n),
+  reported_se_RD = ct_out[Estimand == "Risk Diff" & Estimator == "tmle" &
+                          Time == 1095 & Event == 1, se])
+```
+
+These per-subject values are the "votes" of @sec-doubly-robust-tmle, one per patient, and the loudest belong to treated patients with low propensity scores who had an early event.
+
+Third, the path the update took. The object stores $\| P_n D^* \|$ after every step:
+
+```{r}
+#| label: fig-ct-convergence
+#| fig-cap: "Norm of the vector of mean efficient influence function values after each one-step update, on a log scale. The initial Super Learner fit starts well away from zero; the multiplicative hazard updates reduce the norm monotonically until every component passes the stopping rule."
+#| fig-width: 6.5
+#| fig-height: 3.5
+#| code-fold: true
+norms <- attr(ct_est, "NormPnEICs")
+ggplot(data.table(step = seq_along(norms) - 1, norm = norms), aes(step, norm)) +
+  geom_line(colour = "steelblue") + geom_point(size = 1.4, colour = "steelblue") +
+  scale_y_log10() +
+  labs(x = "One-step update", y = expression("||" * P[n] * D^"*" * "||")) +
+  theme_minimal()
+```
+
+The per-target check behind "converged" is in `ct_est[["A=1"]]$SummEIC`: each row has the mean EIF, its standard deviation, and the threshold $\widehat{\mathrm{sd}}/(\sqrt{n}\log n)$ it had to fall under.
+
+### A whole curve with simultaneous bands
+
+Nothing restricts the target to three horizons. Targeting a grid of times gives the cumulative incidence curve with a band that holds across all of it, and the one-step update keeps the curve monotone because every point comes from the same updated hazards. The cost is compute, and it grows faster than the number of targets: each update step touches every EIF component, and the update needs more steps when there are more components to drive to zero. Six horizons for both events (24 targets) is what this chapter can afford; a 12-horizon version of the same fit (48 targets) took 468 update steps and over an hour on the same laptop, and a 23-horizon version (92 targets) used all 500 steps in over two hours without converging, against three minutes for the three-horizon fit above.
+
+```{r}
+#| label: ct-curve
+#| cache: true
+#| message: false
+#| warning: false
+curve_times <- seq(180, 1080, by = 180)    # 6 horizons x 2 events x 2 arms = 24 targets
+curve_args  <- formatArguments(
+  DataTable = cohort[, .(id, age, female, frailty, prior_cvd, egfr, A, time, status)],
+  EventTime = "time", EventType = "status", Treatment = "A", ID = "id",
+  TargetTime = curve_times, TargetEvent = 1:2, Intervention = 0:1,
+  CVArg = list(V = 5), Verbose = FALSE
+)
+for (j in c("0", "1", "2")) curve_args$Model[[j]][["coxnet"]] <- "coxnet"
+curve_args <- formatArguments(curve_args)
+set.seed(2028)
+t_start   <- Sys.time()
+curve_est <- doConcrete(curve_args)
+curve_minutes <- as.numeric(difftime(Sys.time(), t_start, units = "mins"))
+curve_out <- getOutput(curve_est, Estimand = "Risk", GComp = FALSE, Simultaneous = TRUE)
+attr(curve_est, "TmleConverged")
+```
+
+The fit converged in `r attr(curve_est, "TmleConverged")$step` steps and took `r round(curve_minutes)` minutes.
+
+```{r}
+#| label: fig-ct-curve
+#| fig-cap: "Targeted cumulative incidence at six horizons by arm and event, with pointwise (dark) and simultaneous (light) 95% bands from the same fit. Dashed black lines are the true counterfactual curves. Where the pointwise band misses the truth (non-CV death under treatment in the first year), the simultaneous band still contains it, and it is the band to quote when the claim is about the curve rather than one pre-specified horizon."
+#| fig-width: 9
+#| fig-height: 4.5
+#| code-fold: true
+truth_curve <- melt(true_cif(curve_times), id.vars = c("A", "Time"),
+                    variable.name = "Event", value.name = "Truth")
+truth_curve[, Event := as.integer(as.character(Event))]
+cv <- curve_out[Estimator == "tmle", .(A = as.integer(sub("A=", "", Intervention)),
+                                       Time, Event, Risk = `Pt Est`,
+                                       lo = `CI Low`, hi = `CI Hi`,
+                                       slo = `SimCI Low`, shi = `SimCI Hi`)]
+cv <- merge(cv, truth_curve, by = c("A", "Time", "Event"))
+cv[, Arm := factor(A, 0:1, c("Sulfonylurea (A=0)", "GLP-1 RA (A=1)"))]
+cv[, Event := factor(Event, 1:2, c("MACE", "Non-CV death"))]
+ggplot(cv, aes(Time)) +
+  geom_ribbon(aes(ymin = slo, ymax = shi), fill = "steelblue", alpha = 0.15) +
+  geom_ribbon(aes(ymin = lo,  ymax = hi),  fill = "steelblue", alpha = 0.35) +
+  geom_line(aes(y = Risk), colour = "steelblue", linewidth = 0.9) +
+  geom_line(aes(y = Truth), colour = "black", linetype = 2) +
+  facet_grid(Event ~ Arm) +
+  labs(x = "Days since initiation", y = "Cumulative incidence") +
+  theme_minimal()
+```
+
+Two reporting rules follow. If the analysis pre-specified one horizon, report the pointwise interval at that horizon. If it reports a curve, or picks out the most impressive of several horizons, the simultaneous band is the honest uncertainty, and `getOutput(..., Simultaneous = TRUE)` gives it without a bootstrap.
+
+### The event coding is the estimand {#sec-ct-coding}
+
+In `concrete`, the status coding decides which cumulative incidence you get; `TargetEvent` does not. Every positive value of the status column is modeled as a competing event and enters the event-free survival $S(s^-)$ in the g-formula, whether or not it is targeted. `TargetEvent` only chooses which risks are updated and reported. To treat an event as censoring, you must recode it to 0, and the moment you do, you have changed the question from "risk of MACE in a world where people also die of other causes" to "risk of MACE in a hypothetical world where non-CV death is prevented", with the identification assumptions that go with it (@sec-tte-competing).
+
+Here is the same cohort with non-CV death recoded as censoring:
+
+```{r}
+#| label: ct-recode
+#| cache: true
+#| message: false
+#| warning: false
+cohort_hyp <- copy(cohort)[, status_hyp := ifelse(status == 2L, 0L, status)]  # death -> censored
+hyp_args <- formatArguments(
+  DataTable = cohort_hyp[, .(id, age, female, frailty, prior_cvd, egfr, A, time, status_hyp)],
+  EventTime = "time", EventType = "status_hyp", Treatment = "A", ID = "id",
+  TargetTime = horizons, TargetEvent = 1, Intervention = 0:1,
+  CVArg = list(V = 5), Verbose = FALSE
+)
+for (j in c("0", "1")) hyp_args$Model[[j]][["coxnet"]] <- "coxnet"
+hyp_args <- formatArguments(hyp_args)
+set.seed(2029)
+hyp_est <- doConcrete(hyp_args)
+hyp_out <- getOutput(hyp_est, Estimand = c("Risk", "RD"), GComp = FALSE, Simultaneous = FALSE)
+
+rbind(ct_out[Estimator == "tmle" & Event == 1 & Estimand %in% c("Abs Risk", "Risk Diff") & Time == 1095,
+             .(Estimand, Intervention, `Pt Est`, `CI Low`, `CI Hi`, Coding = "death = competing event (2)")],
+      hyp_out[Estimator == "tmle" & Time == 1095,
+             .(Estimand, Intervention, `Pt Est`, `CI Low`, `CI Hi`, Coding = "death = censoring (0)")]) |>
+  knitr::kable(digits = 3, caption = "Three-year MACE risk under the two codings of non-CV death")
+```
+
+Each coding has its own truth, and the simulation can supply both. The hypothetical risk is $P(T_1^a \le t)$ for the latent MACE time, ignoring death:
+
+```{r}
+#| label: ct-truth-hyp
+true_hyp <- function(times, N = 2e5, seed = 1) {
+  set.seed(seed)
+  W <- draw_W(N)
+  rbindlist(lapply(0:1, function(a) {
+    T1 <- rweib_ph(N, k_mace, s_mace, lp_mace(W, a))
+    data.table(A = a, Time = times, Truth = sapply(times, function(tt) mean(T1 <= tt)))
+  }))
+}
+merge(truth[Event == 1 & Time == 1095, .(A, `death = competing event` = Truth)],
+      true_hyp(1095)[, .(A, `death = censoring` = Truth)], by = "A") |>
+  knitr::kable(digits = 3, caption = "True three-year MACE risk under each coding")
+```
+
+Recoding death as censoring raises the true MACE risk in both arms, because nobody is removed by death any more; the two true risk differences happen to be close here ($-0.050$ and $-0.054$). The estimates follow the truth in the control arm and undershoot it in the treated arm, the same arm and for the same reason as in the competing-risks fit, and the estimated risk difference moves from $-0.055$ to $-0.074$, further than the truth does. The lesson survives the noise: one line of recoding changed the estimand, its identification assumptions, and the number. Neither coding is wrong. They answer different questions, and only one of them is the question this chapter set out to answer.
+
+::: {.callout-warning}
+## Common mistake: assuming `TargetEvent` sets the estimand
+
+Setting `TargetEvent = 1` does not make the competing event go away. The death hazard is still fitted and still removes patients from the risk pool in every reported MACE risk, which is what a competing event should do. If you want the hypothetical no-death world, recode death to 0 and say so in the methods; if you want the observed world, leave the code positive and report the competing event's cumulative incidence alongside, as @sec-tte-competing recommends. The estimand is set in the status column.
+:::
+
+
+## Diagnostics and practical guidance {#sec-ct-practice}
+
+### Convergence
+
+If the fit reports components that did not converge, first read which ones. A component that stalls at a late horizon in a small arm usually means there are too few subjects still at risk there for the update to move the mean EIF, and the honest response is to move the horizon earlier, not to raise `MaxUpdateIter`. If all components are slowly converging together, raising `MaxUpdateIter` or lowering `OneStepEps` is reasonable. Report the step at which convergence was declared.
+
+### Positivity and nuisance weights
+
+`plot(ct_est)` draws the distribution of the intervention-related nuisance weight $g(a \mid W)\, S_c(t^- \mid a, W)$ for each intervention, with the `MinNuisance` cutoff marked. Weights piled up near the cutoff mean that some subjects have covariate profiles under which the intervention was nearly never observed, or under which they were nearly always censored before the horizon; either way the estimate at that horizon rests on them. The printed summary's bounding percentages say how many were truncated. If the answer is more than a few percent, treat the targeted estimate the way @sec-positivity-overlap treats a weighted estimate with a heavy tail: report the truncation, refit at an earlier horizon, and ask whether the adjustment set or the target population should change [@petersen2012positivity].
+
+```{r}
+#| label: fig-ct-nuisance
+#| fig-cap: "Distribution of the intervention-related nuisance weights under each intervention, with the MinNuisance lower bound marked. Mass near the bound warns of practical positivity violations at the targeted horizons."
+#| fig-width: 7
+#| fig-height: 3.5
+#| code-fold: true
+invisible(plot(ct_est, ask = FALSE))
+```
+
+### Choosing the hazard learners
+
+The hazard Super Learners select one candidate per event by cross-validated partial likelihood. That criterion scores the *hazard*, not the cumulative incidence you report, and with rare events it discriminates weakly, as the non-CV death selection above showed. Four practical rules follow.
+
+- **In observational data, every candidate carries the confounders.** The default library's treatment-only Cox model is there for randomized trials, where it is correctly specified. In a confounded cohort the selector can prefer it for a rare cause, and the targeted estimate then rests on the propensity weights alone; in the worked example, dropping it moved the three-year non-CV death risk under treatment from $0.077$ to $0.090$ against a truth of $0.100$. Remove it with `Model[[j]][["TrtOnly"]] <- NULL`.
+- **Start from Cox variants and add penalization.** The main-terms Cox model is the default; `coxnet` adds an $L_1$/$L_2$-penalized version that protects against many covariates relative to events [@simon2011coxnet]. Both carry a nonparametric baseline hazard, so the shape of the hazard over time is never a modeling decision.
+- **Add a non-proportional-hazards learner when the effect may change over follow-up.** A random survival forest [@ishwaran2008rsf] via `"rsf"` is cheap at moderate sample sizes. With a Cox-only library, a treatment effect that appears late or crosses can be smoothed toward proportionality, and the point estimate at early horizons attenuated even while the intervals still cover; the unadjusted Aalen-Johansen curves are the cross-check. The highly adaptive lasso (`"hal"`) has the convergence rate the theory asks for [@benkeser2016hal], but the implementation expands the data to one row per subject per event time and fits a second-order HAL to the result, which was not feasible at a few thousand subjects.
+- **Compare the targeted estimate with the g-computation plug-in and with Aalen-Johansen.** A large gap between `tmle` and `gcomp` rows means the initial hazards needed a lot of correction, which is what the update is for, but it is also a prompt to look at the learner tables. A large gap between the adjusted and unadjusted curves should be explainable by the confounding you know about.
+
+Flexible learners raise the question of cross-fitting (CV-TMLE, @sec-advanced-tmle). The CRAN release fits nuisances on the full sample; a development version adds a `CrossFit` argument and an ensemble (rather than discrete) hazard Super Learner. With Cox-type libraries and moderate $n$, the full-sample fit is standard practice; with a forest or HAL in the library, cross-fitting is the safer choice when it is available.
+
+### Randomized trials
+
+In a trial the propensity is known, so set the treatment library to the marginal mean (`ct_args$Model[["A"]] <- "SL.mean"`) or a stratification model, and let the covariates do their work through the hazards. Adjustment in a trial is about precision, and the gain depends on how much of the outcome variation the baseline covariates explain. A cardiovascular outcome trial with a few hundred events and weakly prognostic baseline covariates has little variance for adjustment to remove, and the gain can be a few percent; a trial with strongly prognostic covariates can expect much more. Randomization guarantees exchangeability for treatment, not for censoring: the censoring hazard is still modeled and still matters.
+
+::: {.callout-tip}
+## What the SUSTAIN-6 reanalysis taught
+
+@chen2023concrete re-analyzed the SUSTAIN-6 trial of semaglutide [@marso2016sustain6] with three estimands (intent-to-treat, on-treatment with discontinuation censored, and on-treatment with adverse-event discontinuation as a competing event), and three estimators for each (unadjusted Aalen-Johansen, continuous-time TMLE, discrete-time TMLE). The durable lessons, stated without numbers that depend on the version of the analysis:
+
+- Within each estimand, the three estimators agreed closely. Across estimands they did not. The estimand choice moved the answer more than the estimator did, and the competing-event estimand looked the most favorable to semaglutide because adverse-event discontinuation was far more common on semaglutide and removed those patients from its risk set. That is the estimand talking, not the drug.
+- Baseline adjustment bought little precision, because MACE was rare and the baseline covariates explained little of who had one. The same estimator gives large gains when covariates are prognostic; here there was little variance to remove.
+- The value of the continuous-time estimator was robustness by construction: it ran on the native time scale with default settings, needed no bin width and no time basis, and its influence-function intervals held in simulation at trial size, conservative early in follow-up and near nominal at two years.
+- The cross-validated selector chose a treatment-only Cox model for the rare competing cause, as in this chapter's example. In a randomized trial that costs nothing, because the treatment-only model is correctly specified for the marginal effect; in the observational example above it did.
+- Fits took tens of minutes to hours at $n \approx 3{,}300$ with three event types, which put a bootstrap out of reach; plan for that.
+
+<!-- editor note: the precision-gain and coverage statements above are deliberately qualitative. The arXiv preprint (chen2023concrete, v2) reports larger efficiency gains than the revised analysis; align any numbers quoted here, and in @sec-tte-competing, with the manuscript version current at publication. -->
+:::
+
+### Compute and object size
+
+Fitting cost scales with the number of subjects, the number of distinct event times (the grid), the number of event types, and, fastest of all, the number of EIF components (events × times × interventions), because every update step recomputes clever covariates for every subject at every grid time for every component, and more components need more steps. On the 1,500-subject cohort here, the Super Learner stage took under a minute in every fit; the one-step update took about two minutes for 12 targets, `r round(curve_minutes)` minutes for 24, and over an hour for 48. SUSTAIN-6-sized fits with three event types take hours. The `ConcreteEst` object stores the grid-by-subject hazard, survival, and weight matrices for each intervention and was `r round(as.numeric(object.size(ct_est)) / 1e6)` MB for this example, so keep the `getOutput()` table rather than the fit, and set `ReturnModels = FALSE` if you do not need the learner objects.
+
+### What `concrete` does not do
+
+It adjusts for baseline covariates only, so it is not an estimator for time-varying confounding of treatment or of censoring; for that, go to L-TMLE (@sec-illustrated-ltmle) and LMTP (@sec-applied-lmtp), which are discrete-time by design. It does not handle left truncation (delayed entry), interval censoring, or clustered data. It targets static and dynamic interventions on a binary baseline treatment; stochastic interventions and continuous treatments are outside its scope at the time of writing.
+
+### Choosing between the estimators in this handbook
+
+| | Aalen-Johansen | Discrete-time TMLE (`survtmle`) | Continuous-time TMLE (`concrete`) |
+|---|---|---|---|
+| Adjusts for baseline confounding | No | Yes | Yes |
+| Bin width to choose | No | Yes | No |
+| How time enters the hazard model | Not applicable | Analyst-specified covariate | Nonparametric baseline (Cox-type learners) |
+| Several horizons or events | Trivially, no inference across them | Re-targeted per horizon | Jointly, in one update |
+| Simultaneous bands | No | No | Yes |
+| Time-varying confounding | No | No | No |
+| Cost at $n = 3{,}000$ | Seconds | Minutes | Tens of minutes to hours |
+
+: Three estimators for cumulative incidence with a baseline treatment {#tbl-ct-choice}
+
+If you do discretize, two habits limit the damage: give every bin its own baseline hazard rather than a linear term in the bin index, and confirm that the fit with no covariates reproduces the Aalen-Johansen estimate before interpreting the adjusted one.
+
+
+## Reporting checklist {#sec-ct-report}
+
+::: {.callout-tip}
+## What to record for a `concrete` analysis
+
+- [ ] The status coding, as a table: which codes are events, which is censoring, and the estimand that coding implies.
+- [ ] Target events, target times, and whether intervals are pointwise or simultaneous.
+- [ ] The adjustment set (every non-key column of `DataTable`).
+- [ ] The libraries for treatment, censoring, and each event hazard; the cross-validation scheme; which candidate each selector chose.
+- [ ] The convergence step, `MaxUpdateIter`, `OneStepEps`, and `MinNuisance`, with the percentage of bounded nuisance weights per intervention.
+- [ ] Both the targeted and the g-computation estimates, and the unadjusted Aalen-Johansen estimate, at each target.
+- [ ] The competing event's cumulative incidence next to the event of interest's.
+- [ ] Package version, and the commit if it is a development build, plus the seed.
+:::
+
+
+## Check Your Understanding
+
+::: {.callout-caution}
+## Questions
+
+1. **Coding.** A colleague fits `concrete` with `TargetEvent = 1` on data whose status column contains 0, 1, and 2, and describes the result as "MACE risk with death treated as censoring." What did they actually estimate, and what one change would produce what they described?
+
+2. **Clever covariate.** In the bracket of the clever covariate, why does a competing event at time $s$ enter with a minus sign and no indicator term, while a censoring at $s$ does not enter the bracket at all?
+
+3. **Convergence.** A fit reports that the component for intervention $A = 1$, event 2, at the last target time has not converged after 500 steps, with a mean EIF three times its threshold, while all other components converged by step 40. What is the most likely cause, and what should change?
+
+4. **Bands.** An analysis targets eight horizons and highlights the one where the risk difference's pointwise interval excludes zero. Which interval should be reported for that claim, and why?
+
+5. **Discretization.** Name the three things a discrete-time survival TMLE requires the analyst to decide that a continuous-time TMLE does not.
+
+6. **Learner selection.** The selector picks the treatment-only Cox model for the competing-event hazard. Does that invalidate the adjusted estimate of the competing event's risk? What carries the adjustment in that case?
+:::
+
+::: {.callout-tip collapse="true"}
+## Answers
+
+1. They estimated the observed-world MACE risk with death as a competing event: every positive code is modeled as a competing cause and enters event-free survival, and `TargetEvent` only chose what to report. To get the hypothetical no-death estimand, recode death to 0 in the status column (and defend the censoring-exchangeability assumption that comes with it).
+
+2. The bracket measures how an event at $s$ changes the patient's eventual cause-$j$ outcome relative to what was still expected. A competing event settles the outcome as "cause $j$ never happens," so the entire remaining risk $\{F_j(t) - F_j(s)\}/S(s)$ is lost and nothing is added. A censoring settles nothing about the outcome; it only stops observation, and it is accounted for through the censoring-survival factor $S_c(s^-)$ in the denominator, not through the bracket.
+
+3. Sparsity at that target: few subjects under $A = 1$ still at risk of event 2 near the last horizon, so the update cannot move that component's mean EIF. Raising `MaxUpdateIter` rarely helps. Move the last target time earlier, check the nuisance-weight plot for that intervention, and consider whether event 2 is rare enough that its risk at that horizon should be reported at all.
+
+4. The simultaneous band. Picking the best of eight horizons is a selection over eight tests, and the pointwise interval at the selected one does not have 95% coverage for the claim actually being made. `getOutput(..., Simultaneous = TRUE)` provides the band that does.
+
+5. A bin width (which fixes the estimable horizons); a rule for ordering events and censorings tied within a bin; and a functional form for time in the per-bin hazard model.
+
+6. Not in the limit: TMLE is doubly robust, so if the propensity and censoring models are consistent the targeted risk is consistent even with a hazard model that ignores the covariates, and the update corrects the initial plug-in through the clever covariate. In a finite sample the correction can fall short, as it did for non-CV death in the worked example, because the adjustment then rests entirely on the propensity weights of the few, heavily weighted patients who carry the information. The fix is to give every hazard candidate the confounders; the diagnostic is a `gcomp`-to-`tmle` gap much larger for that event than for the others.
+:::
+
+
+## Glossary {#sec-ct-glossary}
+
+**Counting process.** For event type $j$, $N_j(t) = \mathbb{1}(\tilde T \le t, \tilde\Delta = j)$, a step function that jumps from 0 to 1 when the event occurs. The observed data as a set of jump times.
+
+**Intensity / hazard.** The instantaneous rate at which a counting process jumps, given the past. The cause-specific hazard is the intensity of $N_j$ among those still at risk.
+
+**Martingale residual.** $dN_l(s) - \mathbb{1}(\tilde T \ge s)\lambda_l(s)\,ds$: what happened at $s$ minus what was expected to happen. The continuous-time counterpart of "observed minus predicted."
+
+**Nuisance weight.** The product $g(a \mid W)\, S_c(s^- \mid a, W)$ in the denominator of the clever covariate; small values flag practical positivity problems. `MinNuisance` is its floor.
+
+**One-step TMLE.** A TMLE that updates all nuisance components along a single one-dimensional path (the universal least favorable submodel) in small steps, rather than by separate fluctuations per target, until the vector of mean EIFs is small enough.
+
+**Simultaneous confidence band.** A set of intervals across several targets constructed so that, with the stated confidence, all of them cover at once. Obtained here from the joint normal approximation of the EIF vector.
+
+**Universal least favorable submodel.** The path through the space of hazards along which the mean EIF decreases fastest at every point; following it in small steps is what makes the one-step update monotone.
+
+
+## Sources and Further Reading
+
+- @chen2023concrete: the `concrete` package paper, with the formulas for the EIF, clever covariate, and one-step update used in this chapter, and the SUSTAIN-6 application
+- @rytgaard2022tmle: identification and TMLE for survival and competing-risks estimands in continuous time, including the full set of identification assumptions
+- @rytgaard2023estimation: the continuous-time TMLE for time-specific intervention effects, with the theory behind the estimator's efficiency
+- @rytgaard2021onestep: the one-step TMLE for cause-specific absolute risks and survival curves that `concrete` implements
+- @rytgaard2021continuous: continuous-time TMLE for intervention-specific means with time-varying treatments and confounders, the longitudinal extension that baseline-only software does not yet cover
+- @vanderlaan2016onestep: one-step TMLE and universal least favorable submodels in general
+- @cai2020onestep: a one-step TMLE for a single time-to-event outcome, a gentler entry point to the same idea
+- @andersen1993counting: counting processes and martingales for survival analysis
+- @polley2011survivalSL and @keogh2025survivalSL: Super Learner for right-censored data, including why the loss function matters when the target is a risk rather than a hazard
+- @phillips2023superlearner: practical guidance on specifying a Super Learner library and cross-validation scheme
+- @sofrygin2019daily, @ferreira2020discretization, and @sloma2021discrete: how the choice of time discretization affects discrete-time survival estimators
+- @petersen2012positivity: diagnosing and responding to positivity violations
+- @chen2023beyond: the Causal Roadmap applied to a cardiovascular outcome trial, and the case for risk-based estimands over hazard ratios

@@ -1,0 +1,355 @@
+---
+subtitle: "End-to-end workflow for a dynamic treatment rule in the HIV cohort"
+format: html
+---
+
+# From Question to Estimate: An Applied Longitudinal Analysis with LMTP {#sec-applied-lmtp}
+
+*Estimated reading time: 55 minutes*
+
+```{r}
+#| include: false
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4,
+  fig.align = "center"
+)
+```
+
+By this point the moving parts of a longitudinal targeted-learning analysis are already in hand: the backwards sequential-regression logic of longitudinal TMLE (@sec-illustrated-ltmle), the shift-function and `lmtp_tmle` workflow for modified treatment policies (@sec-adherence-shift), and the positivity diagnostics that decide whether any of it can be trusted (@sec-positivity-overlap). This chapter does not re-teach that machinery. It spends its length on the one thing the method chapters do not: a single analysis carried from a clinical question to a defended estimate, with every decision in view.
+
+The thread is a dynamic treatment rule, initiate HAART when CD4 falls below a clinically meaningful threshold, estimated with the `lmtp` package [@diaz2021lmtp]. A dynamic rule is a sharper question than the adherence-distribution shift of @sec-adherence-shift or the static "treat everyone" contrast of the earlier chapters, and it is the kind of question clinical guidelines actually pose.
+
+
+## The causal question
+
+Clinical guidelines for HIV treatment have evolved over time, but a recurring question is: **what would mortality look like if HAART were initiated whenever a patient's CD4 count fell below 350 cells/µL, compared to the observed treatment pattern where initiation depends on clinical judgment?**
+
+This is a dynamic treatment rule. The intervention depends on the patient's evolving health status, not just baseline characteristics. It corresponds to a clinically interpretable policy: "start treatment when the immune system shows meaningful decline." The comparison is between this threshold-based rule and the natural course (whatever clinicians actually did).
+
+The estimand is the risk difference in mortality under the two regimes, marginalized over the study population. In the language of modified treatment policies, we are shifting the treatment process so that HAART is initiated at any visit where CD4 falls below the threshold, for patients who were not already on treatment.
+
+
+## Why a simpler analysis would be inadequate
+
+A static point-treatment comparison (ever-treated vs. never-treated) ignores the timing and clinical context of treatment initiation. Two patients who both "ever started HAART" may have initiated at very different times, for very different reasons, with very different prognoses at initiation. The static comparison conflates the effect of early initiation in healthier patients with late initiation in sicker patients.
+
+A dynamic-rule analysis asks instead what would happen if initiation followed one clinical rule applied consistently to everyone, which is closer to what guideline developers need. Because CD4 both responds to past treatment and drives future treatment, this is the treatment-confounder-feedback setting of @sec-longitudinal-confounding, and it needs the longitudinal g-methods developed there and in @sec-illustrated-ltmle. The identification assumptions are their longitudinal versions: sequential exchangeability, positivity at each visit, and consistency of the dynamic rule. Informative censoring, sicker patients dropping out, is handled by the same machinery.
+
+
+## Data setup
+
+The real `haartdat` cohort (introduced in the [Running Case Study](00-case-study.qmd)) follows 1,200 patients over irregularly spaced visits, but it contains only 31 deaths spread across up to 38 visits. That extreme outcome sparsity makes a short-horizon longitudinal estimator unstable, so for a fully reproducible end-to-end run we use a **simulated extension of the cohort**: a balanced three-visit panel calibrated to the same clinical story (CD4 drives both treatment initiation and mortality, and HAART raises subsequent CD4). The simulation preserves the feature that matters pedagogically here, treatment-confounder feedback, while guaranteeing the estimator has enough events and enough low-CD4-untreated person-time to estimate the contrast.
+
+```{r}
+#| label: lmtp-simulate
+#| code-fold: show
+#| message: false
+#| warning: false
+library(dplyr)
+library(lmtp)
+
+set.seed(2024)
+n <- 700
+cd4_threshold <- 350  # cells/µL: the initiation rule we will evaluate
+
+# Baseline covariates
+age <- round(rnorm(n, 40, 9))
+sex <- rbinom(n, 1, 0.45)
+
+# Visit 1: CD4, then treatment (more likely to start if CD4 is low)
+L_1 <- pmax(50, rnorm(n, 420, 140))
+A_1 <- rbinom(n, 1, plogis(-0.5 + 1.2 * (L_1 < cd4_threshold) + 0.01 * (40 - age)))
+
+# Visit 2: CD4 responds to treatment; HAART is absorbing (once on, stays on)
+L_2 <- pmax(50, L_1 + ifelse(A_1 == 1, 60, -30) + rnorm(n, 0, 80))
+A_2 <- ifelse(A_1 == 1, 1, rbinom(n, 1, plogis(-0.5 + 1.2 * (L_2 < cd4_threshold))))
+
+# Visit 3
+L_3 <- pmax(50, L_2 + ifelse(A_2 == 1, 60, -30) + rnorm(n, 0, 80))
+A_3 <- ifelse(A_2 == 1, 1, rbinom(n, 1, plogis(-0.5 + 1.2 * (L_3 < cd4_threshold))))
+
+# Death by end of follow-up: driven by low CD4 and lack of treatment
+lp <- -1.6 + 1.4 * (L_3 < 250) + 0.8 * (L_2 < 250) - 0.7 * (A_1 + A_2 + A_3) / 3
+died <- rbinom(n, 1, plogis(lp))
+
+dat_wide <- data.frame(
+  age, sex,
+  L_1, L_2, L_3,   # time-varying CD4 (confounder), measured before treatment each visit
+  A_1, A_2, A_3,   # HAART indicator at each visit (absorbing)
+  Y = died
+)
+
+dat_wide |>
+  summarise(
+    patients = n(),
+    deaths = sum(Y),
+    pct_died = round(100 * mean(Y), 1),
+    pct_treated_by_v3 = round(100 * mean(A_3), 1)
+  ) |>
+  as.data.frame()
+```
+
+
+### Defining the dynamic rule
+
+The modified treatment policy we evaluate is: **initiate HAART at the first visit where CD4 count falls below 350 cells/µL, for patients not already on treatment.** Once initiated, HAART continues for all subsequent visits (the absorbing property).
+
+In `lmtp`, the shift function receives the full data frame and the name of the *current* treatment node. We parse the visit index from that name, look at all CD4 measurements up to and including that visit, and set the treatment to 1 if CD4 has ever fallen below the threshold (or the patient was already treated). This makes the rule absorbing by construction.
+
+```{r}
+#| label: lmtp-shift
+#| code-fold: show
+shift_cd4_rule <- function(data, trt) {
+  t <- as.integer(sub("A_", "", trt))         # visit index for this node
+  L_cols <- paste0("L_", seq_len(t))           # CD4 at this and all prior visits
+  ever_low <- Reduce(`|`, lapply(L_cols, function(cc) data[[cc]] < 350))
+  as.numeric(data[[trt]] == 1 | ever_low)
+}
+```
+
+This function has the `(data, trt)` signature that `lmtp` expects. Because it modifies the treatment value based on the patient's evolving CD4 (rather than a fixed assignment), it defines a *modified treatment policy* rather than a static intervention, which is why we pass `mtp = TRUE` below.
+
+
+### Specifying the LMTP node structure
+
+`lmtp` needs the treatment nodes in temporal order, a list of the time-varying covariates measured before each treatment node, and the baseline covariates. Our simulated frame is already in the wide, one-row-per-patient format `lmtp` expects.
+
+```{r}
+#| label: lmtp-nodes
+#| code-fold: show
+trt_vars  <- c("A_1", "A_2", "A_3")        # treatment in temporal order
+time_vary <- list("L_1", "L_2", "L_3")     # time-varying confounder at each visit
+baseline  <- c("age", "sex")               # fixed baseline covariates
+```
+
+
+## Estimation with LMTP
+
+With the data prepared and the shift function defined, estimation follows the same `lmtp` workflow used in @sec-adherence-shift: estimate the counterfactual mortality risk under the dynamic rule, estimate it under the natural course (`shift = NULL`), and contrast the two.
+
+```{r}
+#| label: lmtp-estimate
+#| code-fold: show
+#| message: false
+#| warning: false
+#| cache: true
+
+set.seed(42)
+fit_rule <- lmtp_tmle(
+  data = dat_wide,
+  trt = trt_vars,
+  outcome = "Y",
+  baseline = baseline,
+  time_vary = time_vary,
+  shift = shift_cd4_rule,
+  mtp = TRUE,
+  outcome_type = "binomial",
+  learners_outcome = c("SL.glm", "SL.mean"),
+  learners_trt = c("SL.glm", "SL.mean"),
+  folds = 5
+)
+
+fit_natural <- lmtp_tmle(
+  data = dat_wide,
+  trt = trt_vars,
+  outcome = "Y",
+  baseline = baseline,
+  time_vary = time_vary,
+  shift = NULL,                 # natural course: no intervention
+  mtp = TRUE,
+  outcome_type = "binomial",
+  learners_outcome = c("SL.glm", "SL.mean"),
+  learners_trt = c("SL.glm", "SL.mean"),
+  folds = 5
+)
+
+fit_rule
+fit_natural
+```
+
+The call pattern is the one from @sec-adherence-shift: `lmtp_tmle()` fits a sequentially doubly robust estimator with cross-fitting, calling the shift function at each visit to set the counterfactual treatment, with `mtp = TRUE` because the shifted value depends on the natural one. What is new here is only the rule that shift function encodes.
+
+The contrast turns the two intervention-specific risks into the policy-relevant risk difference:
+
+```{r}
+#| label: lmtp-contrast
+#| code-fold: show
+ct <- lmtp_contrast(fit_rule, ref = fit_natural, type = "additive")
+ct
+```
+
+The `estimate` column is the marginal risk difference: how much the CD4 < 350 initiation rule would change mortality relative to observed practice, with a negative value indicating fewer deaths under the rule. Here the rule changes mortality by an estimated `r round(ct$estimates$estimate, 4)` (95% CI `r round(ct$estimates$conf.low, 4)` to `r round(ct$estimates$conf.high, 4)`).
+
+
+## Diagnostics and empirical support
+
+Before interpreting the results, several diagnostic checks are important.
+
+### Is the dynamic rule well-supported by the data?
+
+The rule initiates HAART when CD4 drops below 350. For this to be estimable, we need person-visits where CD4 was below 350 but the patient did *not* start HAART (the counterfactual contrast). If every patient with low CD4 was immediately treated, there is no empirical support for the comparison, and the estimator relies entirely on model extrapolation.
+
+```{r}
+#| label: lmtp-support
+#| code-fold: show
+# Count person-visits where CD4 < 350 but the patient was not (yet) treated:
+# these are the observations the rule would shift, and where support lives.
+support <- with(dat_wide,
+  (L_1 < 350 & A_1 == 0) +
+  (L_2 < 350 & A_2 == 0) +
+  (L_3 < 350 & A_3 == 0)
+)
+data.frame(
+  shiftable_person_visits = sum(support),
+  patients_with_any_shift = sum(support > 0)
+)
+```
+
+If the rule would shift very few observations (most patients with low CD4 are already treated), the analysis has limited power. If the rule would shift many observations but the natural treatment probability is near 1 in that stratum, positivity is thin and the estimate is fragile.
+
+### Propensity score overlap
+
+The treatment mechanism at each visit should show adequate overlap. Estimated probabilities of treatment near 0 or 1 at any visit indicate positivity concerns that compound across time points. The block below fits the per-visit initiation model among patients still at risk of initiating (those not already on HAART) and reports the range of fitted probabilities at each visit.
+
+```{r}
+#| label: lmtp-overlap
+#| code-fold: show
+# Treatment-initiation probability at each visit, among patients still at risk
+# of initiating. Values near 0 or 1 flag positivity strain; because the
+# longitudinal estimand chains across visits, thin overlap at any single visit
+# propagates into the contrast.
+g1 <- predict(glm(A_1 ~ age + sex + L_1, binomial, dat_wide), type = "response")
+
+at_risk2 <- dat_wide$A_1 == 0
+g2 <- predict(glm(A_2 ~ age + sex + L_2, binomial, dat_wide[at_risk2, ]),
+              type = "response")
+
+at_risk3 <- dat_wide$A_2 == 0
+g3 <- predict(glm(A_3 ~ age + sex + L_3, binomial, dat_wide[at_risk3, ]),
+              type = "response")
+
+data.frame(
+  visit     = c("A_1", "A_2", "A_3"),
+  n_at_risk = c(nrow(dat_wide), sum(at_risk2), sum(at_risk3)),
+  g_min     = round(c(min(g1), min(g2), min(g3)), 3),
+  g_max     = round(c(max(g1), max(g2), max(g3)), 3)
+)
+```
+
+### Effective sample size
+
+In longitudinal settings, the effective sample size can shrink rapidly because the cumulative product of inverse-probability weights grows with the number of visits. Even with TMLE-based estimation (which avoids explicit weight products), near-positivity violations at individual time points can inflate the influence of a few observations. The visit-1 weights below illustrate the idea; the effective sample size is the squared sum of weights over the sum of squared weights, and it falls further once weights are multiplied across visits.
+
+```{r}
+#| label: lmtp-ess
+#| code-fold: show
+# Inverse-probability weights for the observed (natural-course) treatment at
+# visit 1, and the resulting effective sample size. An ESS well below the
+# nominal n means a few person-histories dominate the estimate.
+w1   <- ifelse(dat_wide$A_1 == 1, 1 / g1, 1 / (1 - g1))
+ess1 <- sum(w1)^2 / sum(w1^2)
+
+data.frame(
+  nominal_n     = nrow(dat_wide),
+  max_weight_v1 = round(max(w1), 1),
+  ess_visit1    = round(ess1, 1)
+)
+```
+
+A large gap between `nominal_n` and `ess_visit1`, or a large `max_weight_v1`, at any visit is the longitudinal analogue of the point-treatment positivity problem: the contrast is being carried by a small number of person-histories, and the confidence interval understates the true fragility.
+
+
+## Interpretation
+
+The contrast from `lmtp_contrast()` estimates the risk difference in mortality under the CD4 < 350 initiation rule versus the natural course. A negative value indicates that the rule would reduce mortality.
+
+Several points matter for interpretation:
+
+**The estimand is policy-relevant.** Unlike a static "always treat" intervention, which may be clinically impossible, this rule corresponds to something a clinician could actually follow. The estimate answers: how many deaths per 100 patients would be prevented if HAART were initiated at CD4 < 350 rather than at the discretion of individual clinicians?
+
+**The estimate depends on identification assumptions.** Sequential exchangeability (no unmeasured time-varying confounders), positivity at each visit, and consistency of the dynamic rule must all hold. If unmeasured factors (substance use, housing instability, clinic-specific prescribing norms) affect both treatment timing and mortality, the estimate is biased regardless of the estimator.
+
+**Support limitations constrain the estimate.** If the rule is very different from observed practice (for example, if most patients with CD4 < 350 were already treated), the estimate relies on extrapolation. Sensitivity to the rule threshold (e.g., comparing CD4 < 250 vs CD4 < 350 vs CD4 < 500) can help assess whether the result is robust or driven by sparse data in a particular region.
+
+
+## Sensitivity and robustness checks
+
+### Alternative rule thresholds
+
+Running the analysis at multiple CD4 thresholds provides a dose-response perspective on early vs. late initiation. The helper below rebuilds the shift function for a given threshold and returns the contrast against the natural course.
+
+```{r}
+#| label: lmtp-threshold-sweep
+#| code-fold: show
+#| message: false
+#| warning: false
+#| cache: true
+
+contrast_at <- function(thresh) {
+  shift_t <- function(data, trt) {
+    t <- as.integer(sub("A_", "", trt))
+    L_cols <- paste0("L_", seq_len(t))
+    ever_low <- Reduce(`|`, lapply(L_cols, function(cc) data[[cc]] < thresh))
+    as.numeric(data[[trt]] == 1 | ever_low)
+  }
+  set.seed(42)
+  fit_t <- lmtp_tmle(
+    data = dat_wide, trt = trt_vars, outcome = "Y",
+    baseline = baseline, time_vary = time_vary,
+    shift = shift_t, mtp = TRUE, outcome_type = "binomial",
+    learners_outcome = c("SL.glm", "SL.mean"),
+    learners_trt = c("SL.glm", "SL.mean"), folds = 2
+  )
+  ct <- lmtp_contrast(fit_t, ref = fit_natural, type = "additive")
+  data.frame(threshold = thresh,
+             risk_diff = round(ct$estimates$estimate, 4),
+             conf_low = round(ct$estimates$conf.low, 4),
+             conf_high = round(ct$estimates$conf.high, 4))
+}
+
+threshold_results <- do.call(rbind, lapply(c(250, 350, 500), contrast_at))
+threshold_results
+```
+
+```{r}
+#| label: fig-threshold-doseresponse
+#| fig-cap: "Risk difference versus the natural course for CD4-based initiation rules at three thresholds, with 95% confidence intervals. Reading left to right traces a dose-response curve for earlier initiation; the dashed line marks no benefit over the observed treatment pattern."
+#| code-fold: true
+library(ggplot2)
+ggplot(threshold_results, aes(factor(threshold), risk_diff)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_pointrange(aes(ymin = conf_low, ymax = conf_high)) +
+  labs(x = "CD4 initiation threshold (cells/mm³)",
+       y = "Risk difference vs. natural course",
+       title = "Dose-response across CD4 initiation thresholds") +
+  theme_minimal()
+```
+
+If the estimated benefit increases smoothly with earlier initiation, this supports the clinical intuition. If the estimate becomes unstable or reverses at very early thresholds, this likely reflects positivity violations rather than a genuine clinical effect reversal.
+
+### Nuisance model sensitivity
+
+The `lmtp` estimator is sequentially doubly robust, but in finite samples, the choice of learner library matters. Running the analysis with different Super Learner libraries (e.g., GLM-only vs. a richer library including random forests and LASSO) assesses model sensitivity. Large changes in the estimate across libraries suggest that the nuisance functions are poorly estimated and the result should be interpreted cautiously.
+
+
+## Key lessons
+
+This analysis integrates every major concept from the handbook into a single applied example:
+
+1. **The causal question comes first.** The dynamic rule was defined before any model was fit. The estimand, a marginal risk difference under a threshold-based initiation policy, was chosen because it answers a question that clinicians and guideline developers care about.
+
+2. **Longitudinal methods are necessary.** The treatment-confounder feedback between HAART and CD4 means that no cross-sectional analysis can correctly estimate the effect of a dynamic rule. The `lmtp` framework handles this by modeling the treatment, covariate, and censoring processes sequentially at each visit.
+
+3. **Diagnostics matter as much as estimation.** Whether the dynamic rule is well-supported by the data, whether positivity holds at each time point, and whether the influence of individual observations is bounded all determine whether the estimate is credible. A precisely estimated quantity from a poorly supported intervention is not useful.
+
+4. **Interpretation requires restraint.** The estimate is a causal claim only if the identification assumptions hold. In observational HIV cohort data, unmeasured confounding from clinical judgment, adherence patterns, and social determinants of health is a real concern. Sensitivity analysis and negative controls are not optional additions. They are part of the analysis.
+
+
+## Sources and further reading
+
+- @diaz2021lmtp introduces the LMTP framework for realistic longitudinal interventions that depend on the natural treatment value.
+- @petersen2014causal and @dang2023causal develop the Causal Roadmap and its extension to real-world evidence.
+- `lmtp` R package: [CRAN](https://cran.r-project.org/package=lmtp)
