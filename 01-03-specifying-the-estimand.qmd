@@ -18,7 +18,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-Two analysts are handed the same claims database and the same protocol sentence: estimate the effect of drug A versus drug B on twelve-month mortality. The first analyst counts every death after the index prescription, whether or not the patient stayed on the drug. The second censors patients when they stop filling prescriptions and weights the remainder back up. They report 4.1 and 9.8 deaths averted per thousand. Neither made an error. They answered different questions, and the protocol sentence was not specific enough to tell them apart.
+Two analysts are handed the same claims database and the same protocol sentence: estimate the effect of drug A versus drug B on twelve-month mortality. The first analyst counts every death after the index prescription, whether or not the patient stayed on the drug. The second censors patients when they stop filling prescriptions and weights the remainder back up. They report 16 and 34 deaths averted per thousand. Neither made an error. They answered different questions, and the protocol sentence was not specific enough to tell them apart.
 
 @sec-roadmap sets out the seven steps and shows how the target trial protocol pins down the question. This chapter takes the third step and slows it down, because in real pharmacoepidemiology that step is where most of the disagreement lives. The ICH E9(R1) addendum gives a vocabulary for it that regulators, trial statisticians, and increasingly journal reviewers already use [@ich2019estimands].
 
@@ -46,7 +46,7 @@ An estimand is the quantity to be estimated, described precisely enough that two
 
 : The five attributes of an estimand, filled in for the running case study {#tbl-estimand-attributes}
 
-Four of the five are familiar from any well-written protocol. The fourth attribute is what separated the two analysts in the opening paragraph, and it is the one a protocol sentence almost never contains.
+Most of these appear in any well-written protocol. The fourth, intercurrent events, is what separated the two analysts in the opening paragraph, and it is the one a protocol sentence almost never contains.
 
 The treatment condition also carries a quiet assumption: that a patient's outcome depends on their own assignment and nobody else's. @sec-roadmap sets out when that fails and what to target instead.
 
@@ -71,7 +71,7 @@ ICH E9(R1) names five strategies. Stated without reference to any particular stu
 
 : The five ICH E9(R1) strategies for intercurrent events {#tbl-ice-strategies}
 
-@sec-tte-competing maps these onto survival TMLE, where the intercurrent event has a time attached and the implementation column gets considerably more interesting. The point here is that the choice is prior to the estimator and applies to a plain binary endpoint at twelve months just as much as to a time-to-event analysis.
+@sec-tte-competing maps these onto survival TMLE, where the intercurrent event has a time attached and the implementation column gets considerably more interesting. The choice comes before the estimator, and it applies to a plain binary endpoint at twelve months as much as to a time-to-event analysis.
 
 ::: {.callout-tip}
 ## Censoring is a tool, not a question
@@ -176,7 +176,7 @@ ggplot(estimands, aes(reorder(Strategy, `Risk difference`), `Risk difference`)) 
 disc_rates <- c(A = mean(D1), B = mean(D0))
 ```
 
-Discontinuation by month six runs at `r sprintf("%.0f%%", 100 * disc_rates["A"])` under drug A and `r sprintf("%.0f%%", 100 * disc_rates["B"])` under drug B, and that difference drives the spread. The hypothetical estimand describes a clinical world that does not exist, in which every patient tolerates whatever they are given; it is the largest benefit and the least useful number for a formulary decision. The treatment-policy estimand takes the drug as it is actually used, tolerability problems included, and reports a smaller benefit. The composite estimand changes sign, because it counts stopping the drug as a bad outcome and drug A is stopped nearly twice as often.
+Discontinuation by month six runs at `r sprintf("%.0f%%", 100 * disc_rates["A"])` under drug A and `r sprintf("%.0f%%", 100 * disc_rates["B"])` under drug B, and that difference drives the spread. The hypothetical estimand describes a clinical world that does not exist, in which every patient tolerates whatever they are given; it is the largest benefit and the least useful number for a formulary decision. The treatment-policy estimand takes the drug as it is actually used, tolerability problems included, and reports a smaller benefit. These are the two analysts from the opening paragraph: the first computed the treatment-policy estimand, the second the hypothetical one. The composite estimand changes sign, because it counts stopping the drug as a bad outcome and drug A is stopped nearly twice as often.
 
 None of these is the correct answer. A regulator reviewing a safety signal wants the treatment-policy number. A clinician deciding what to prescribe to a patient who has already tolerated both drugs wants something closer to the principal-stratum number. A trialist choosing a primary endpoint might reasonably pick the composite. What none of them can do is read a single number off a paper that did not say which one it computed.
 
@@ -251,23 +251,29 @@ sh <- c(always = mean(always), helped = mean(S1 == 1 & S0 == 0),
 
 The naive survivor contrast reports about `r round(naive)` cells against a true effect of 40. The drug keeps alive a group of frail patients who would have died without it, `r sprintf("%.0f%%", 100 * sh["helped"])` of the cohort, and those patients have low CD4 for reasons that have nothing to do with the drug. Adding them to the treated survivor pool drags its average down. No amount of adjustment for measured baseline covariates fixes this, because the offending variable is unmeasured frailty and the damage is done by conditioning on survival.
 
-The survivor average causal effect, the effect among patients who would survive under either assignment, is a well-defined causal quantity and the simulation recovers it exactly. The catch is that membership in that stratum is not observable. A patient who was treated and survived may be an always-survivor or may be someone the drug saved, and nothing in the data distinguishes them. Estimating the SACE requires either an extra assumption, such as monotonicity plus a model for the stratum membership, or a willingness to report bounds instead of a point estimate [@rubin2006censoring].
+The survivor average causal effect (SACE), the effect among patients who would survive under either assignment, is a well-defined causal quantity and the simulation recovers it exactly. The catch is that membership in that stratum is not observable. A patient who was treated and survived may be an always-survivor or may be someone the drug saved, and nothing in the data distinguishes them. Estimating the SACE requires either an extra assumption, such as monotonicity plus a model for the stratum membership, or a willingness to report bounds instead of a point estimate [@rubin2006censoring].
 
-The practical options, in the order most analyses should consider them, are to make the endpoint a composite that death cannot truncate (a ranked outcome with death as the worst rank, or days alive and out of hospital), to switch to a time-to-event estimand that treats death as a competing event (@sec-tte-competing), or to target the SACE and accept the extra assumptions. Reporting the survivor contrast and calling it a treatment effect is the one option with no defence.
+The practical options, in the order most analyses should consider them:
+
+1. Make the endpoint a composite that death cannot truncate: a ranked outcome with death as the worst rank, or days alive and out of hospital.
+2. Switch to a time-to-event estimand that treats death as a competing event (@sec-tte-competing).
+3. Target the SACE and accept the extra assumptions.
+
+Reporting the survivor contrast and calling it a treatment effect is the one option with no defense.
 
 
 ## Principal strata
 
 The always-survivors are an instance of a principal stratum: a subgroup defined by how a patient would respond to *both* assignments, not by anything observed [@frangakis2002principal]. The same construction gives the never-discontinuers in the earlier simulation, and the compliers of instrumental-variable analysis (@sec-beyond-exchangeability), where the stratum is patients who would take the drug if encouraged and not otherwise.
 
-Principal strata are attractive because they are the only subgroups that stay fixed across the two arms, which makes a contrast within them genuinely causal. They are awkward because membership depends on a counterfactual. Every principal-stratum analysis pays for that with an assumption that cannot be checked from the data: monotonicity, a parametric model for stratum membership, or an exclusion restriction. State which one you are buying, and report how the answer moves when it is relaxed.
+Principal strata are attractive because they are the only subgroups that stay fixed across the two arms, which makes a contrast within them causal. They are awkward because membership depends on a counterfactual. Every principal-stratum analysis pays for that with an assumption that cannot be checked from the data: monotonicity, a parametric model for stratum membership, or an exclusion restriction. State which one you are buying, and report how the answer moves when it is relaxed.
 
 A subgroup defined by something observed after treatment, such as "patients who responded at month three", is not a principal stratum and is not a causal subgroup. It is the survivor contrast in different clothes.
 
 
 ## From causal estimand to statistical estimand
 
-Once the five attributes are fixed, the estimand is a function of counterfactual quantities and still not computable. Identification turns it into a function of the observed data distribution, which is step four of @sec-roadmap, and estimation then targets that function. Keeping the three levels apart is what lets a reviewer see where an analysis went wrong: a mis-specified estimand cannot be rescued by a better estimator, and a well-specified estimand can survive a crude one.
+Once the five attributes are fixed, the estimand is a function of counterfactual quantities and still not computable. Identification turns it into a function of the observed data distribution, which is step four of @sec-roadmap, and estimation then targets that function. Keeping the three levels apart is what lets a reviewer see where an analysis went wrong: a misspecified estimand cannot be rescued by a better estimator, and a well-specified estimand can survive a crude one.
 
 The discipline that makes this concrete is writing the estimand table before looking at the outcome data. @sec-clean-room builds an entire workflow around that idea, with the outcome masked until the design is locked. @sec-design-time-zero takes the same table and asks what the data have to look like for it to be estimable at all.
 
@@ -275,7 +281,7 @@ The discipline that makes this concrete is writing the estimand table before loo
 ## Check your understanding
 
 <details>
-<summary><strong>Q1. A trial protocol says "the primary endpoint is death within one year, analysed as intention to treat." Which attributes are still unspecified?</strong></summary>
+<summary><strong>Q1. A trial protocol says "the primary endpoint is death within one year, analyzed as intention to treat." Which attributes are still unspecified?</strong></summary>
 
 The endpoint, the population-level summary, and the intercurrent-event handling are all underspecified. "Death within one year" does not say from when, so time zero is missing. "Intention to treat" names an analysis population rather than a strategy, and it says nothing about switching or rescue therapy; the treatment-policy strategy is probably intended, but only for discontinuation. The summary measure is absent, and a hazard ratio and a risk difference at twelve months answer different questions. Only the population and the treatment condition are reasonably pinned down, and even the population lacks an eligibility moment.
 
@@ -310,4 +316,4 @@ The composite endpoint counts discontinuation as an event alongside death. Drug 
 
 ## What comes next
 
-An estimand is a promise about a study that could have been run. @sec-design-time-zero asks what it takes to keep that promise in a registry: when the clock starts, who is eligible and when, and how a grace period for treatment initiation stops the analysis from manufacturing immortal time.
+An estimand describes a study that could have been run. @sec-design-time-zero asks what it takes to emulate that study in a registry: when the clock starts, who is eligible and when, and how a grace period for treatment initiation stops the analysis from manufacturing immortal time.

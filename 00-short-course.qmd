@@ -88,7 +88,7 @@ The workshop and the rest of the handbook share these symbols.
 | 4 | ~50 min | Realistic interventions and diagnostics | Set up an `lmtp` modified treatment policy; run the positivity diagnostic; know what sensitivity analysis adds |
 :::
 
-The exercises are inline, each with a collapsible solution right beside it, so you can attempt one and check it before moving on rather than flipping to an answer key at the back.
+Each exercise has its solution in a collapsible block right beside it, so you can try it and check your reasoning before moving on.
 
 ---
 
@@ -139,7 +139,7 @@ Identification (Step 4) is the argument that, under stated assumptions, the unob
 
 - **Consistency.** The observed outcome $Y$ equals the potential outcome $Y(a)$ under the treatment $A = a$ actually received. This requires treatment to be **well-defined**. "Initiate HAART at this visit" is reasonably well-defined; a vague exposure like "good adherence" is not, because it would come in many versions with different effects.
 - **Exchangeability.** Conditional on the measured covariates $W$, treatment $A$ is independent of the potential outcomes, meaning there are no unmeasured confounders. In HAART terms, this is the claim that *after adjusting for age, sex, and baseline CD4, who started HAART is as good as random*. It is the hardest assumption to defend, because physicians initiate therapy in response to clinical signals, and any such signal not in $W$ (frailty, viral load, physician judgment) breaks it.
-- **Positivity.** Every covariate stratum has a nonzero probability of each treatment: $0 < P(A = a \mid W) < 1$. If the sickest patients (very low CD4) are essentially always treated, they have no comparable untreated counterparts, and the effect is not supported by data in that stratum.
+- **Positivity.** Every covariate stratum has a nonzero probability of each treatment: $0 < P(A = a \mid W) < 1$. If the sickest patients (very low CD4) are almost always treated, they have no comparable untreated counterparts, and the effect is not supported by data in that stratum.
 
 When all three hold, the ATE is identified by the **g-computation formula** [@robins1986gformula]:
 
@@ -147,7 +147,7 @@ $$
 E[Y(1)] - E[Y(0)] = E_W\!\left[E[Y \mid A=1, W] - E[Y \mid A=0, W]\right]
 $$
 
-Read this as a two-step recipe. The inner expectation $E[Y \mid A=a, W] = Q(a, W)$ is the **modeling step**: fit a model for the outcome within levels of treatment and covariates. The outer expectation $E_W$ is the **averaging (standardization) step**: use that model to predict each person's outcome twice, once as if everyone were treated ($A=1$) and once as if no one were ($A=0$), then take the difference of the two averages. If the assumptions hold, that difference is the ATE. Module 2 implements this recipe.
+Read this as a two-step recipe. The inner expectation $E[Y \mid A=a, W] = Q(a, W)$ is the **modeling step**: fit a model for the outcome within levels of treatment and covariates. The outer expectation $E_W$ is the **averaging (standardization) step**. Use that model to predict each person's outcome twice, once as if everyone were treated ($A=1$) and once as if no one were ($A=0$), then take the difference of the two averages. If the assumptions hold, that difference is the ATE. Module 2 implements this recipe.
 
 :::{.callout-note}
 ## Exercise 1.1: map the variables and stress-test an assumption
@@ -164,7 +164,7 @@ glimpse(haart_baseline)
 - **$A$ (treatment):** `ever_haart`.
 - **$Y$ (outcome):** `died`.
 - **$W$ (baseline confounders):** `age`, `sex`, and baseline CD4 (`cd4_baseline` or its square-root `cd4_sqrt_baseline`). (`total_fup_days` and `dropout` are administrative/censoring variables, not confounders to condition on as covariates here.)
-- **Most at-risk assumption:** **exchangeability**. HAART is initiated in response to declining clinical status, and the snapshot measures only age, sex, and *baseline* CD4. Any driver of both initiation and death that is not captured by those three, such as viral load, comorbidity, frailty, or the evolving CD4 trajectory after baseline, leaves residual confounding. Positivity is a secondary worry (very low-CD4 patients are nearly always treated), but unmeasured confounding is the central threat. This is exactly why the longitudinal methods in Module 3 exist.
+- **Most at-risk assumption:** **exchangeability**. HAART is initiated in response to declining clinical status, and the snapshot measures only age, sex, and *baseline* CD4. Any driver of both initiation and death that is not captured by those three, such as viral load, comorbidity, frailty, or the evolving CD4 trajectory after baseline, leaves residual confounding. Positivity is a secondary worry (very low-CD4 patients are nearly always treated), but unmeasured confounding is the central threat. The evolving CD4 trajectory is the part of that threat the longitudinal methods of Module 3 can address; drivers that were never measured, such as frailty, call for the sensitivity analyses of @sec-sensitivity-analysis.
 
 </details>
 :::
@@ -173,7 +173,7 @@ glimpse(haart_baseline)
 
 ## Module 2 (~60 min): Point-treatment estimation on the HAART cohort
 
-This module estimates the same effect, the risk difference in mortality between universal and no HAART initiation, four ways, all on `haart_baseline`. Watching the estimates land close together is the point: it builds trust that the number is a property of the data and the estimand, not of one modeling choice.
+This module estimates the same effect, the risk difference in mortality between universal and no HAART initiation, four ways, all on `haart_baseline`. When four estimators that fail in different ways land close together, the number is unlikely to be an artifact of any one modeling choice.
 
 ### G-computation in three steps
 
@@ -198,7 +198,7 @@ cat("G-computation ATE (risk difference):", round(gcomp_ate, 4), "\n")
 
 ### IPTW: the treatment-model counterpart
 
-**Why it exists.** Instead of modeling the outcome, IPTW models *who got treated* and reweights the sample so that, in the weighted pseudo-population, treatment looks as if it were randomized given $W$ [@robins2000msm]. It depends on the propensity score $g(W) = P(A = 1 \mid W)$, each patient's probability of being treated given their covariates, rather than on the outcome model, so it fails and succeeds under different conditions than g-computation does. That contrast is what motivates combining the two.
+**Why it exists.** Instead of modeling the outcome, IPTW models *who got treated* and reweights the sample so that, in the weighted pseudo-population, treatment looks as if it were randomized given $W$ [@robins2000msm]. It depends on the propensity score $g(W) = P(A = 1 \mid W)$, each patient's probability of being treated given their covariates, and not on the outcome model at all. So it fails under different conditions than g-computation does, and that difference is what motivates combining the two.
 
 ```{r}
 #| label: m2-iptw
@@ -231,13 +231,13 @@ tibble(ps = ps, haart = factor(haart_baseline$ever_haart,
   theme_minimal()
 ```
 
-**What good overlap looks like** (@fig-sc-overlap): the two densities cover the same range, even if their peaks differ. That is the visual signature of positivity holding. Two curves that barely touch would warn of extreme weights and an unstable estimate. The stabilized IPTW estimate above, about `r round(iptw_ate, 3)`, lands close to the g-computation value, an early sign that the number is a property of the data rather than of one modeling choice. We keep IPTW brief here, since @sec-iptw covers it in full. Its job in this workshop is to set up the doubly robust methods next.
+**What good overlap looks like** (@fig-sc-overlap): the two densities cover the same range, even if their peaks differ. That is the visual signature of positivity holding. Two curves that barely touch would warn of extreme weights and an unstable estimate. The stabilized IPTW estimate above, about `r round(iptw_ate, 3)`, lands close to the g-computation value, the first of the agreements this module is looking for. We keep IPTW brief here, since @sec-iptw covers it in full. Its job in this workshop is to set up the doubly robust methods next.
 
 ### TMLE by hand
 
 **Why it exists.** G-computation trusts the outcome model; IPTW trusts the treatment model. TMLE uses *both* and is **doubly robust** [@vanderLaan2006tmle]: it stays consistent if either one is correct. It starts from the g-computation outcome model and adds one targeting step.
 
-First, the intuition for that step. TMLE builds a **clever covariate** from the propensity score and uses it to nudge the initial outcome predictions. The nudge is largest exactly where treatment was least expected given the covariates: a treated patient with a tiny $g(W)$, or an untreated patient with a tiny $1 - g(W)$. Those are the patients the outcome model is most likely to have wrong, because few similar patients received the same treatment, so the update leans hardest on them. The propensity score enters *only* through this nudge.
+First, the intuition for that step. TMLE builds a **clever covariate** from the propensity score and uses it to nudge the initial outcome predictions. The nudge is largest where treatment was least expected given the covariates: a treated patient with a tiny $g(W)$, or an untreated patient with a tiny $1 - g(W)$. Those are the patients the outcome model is most likely to have wrong, because few similar patients received the same treatment, so the update leans hardest on them. The propensity score enters *only* through this nudge.
 
 ```{r}
 #| label: m2-tmle-byhand
@@ -286,7 +286,7 @@ cat("ATE:", round(tmle_ate, 4),
     "| 95% CI: [", round(ci[1], 4), ",", round(ci[2], 4), "]\n")
 ```
 
-**Reading the standard error:** think of it as the standard deviation of one number per patient, divided by $\sqrt{n}$. Most patients contribute a value near zero and barely move the estimate; a handful with extreme propensity scores contribute large values and set the width of the interval. If the confidence interval excludes zero, there is evidence at the 95% level that HAART changes mortality risk.
+**Reading the output.** If the confidence interval excludes zero, there is evidence at the 95% level that HAART changes mortality risk. When an interval is wider than you expected, look first at the patients with extreme propensity scores: they contribute the largest per-patient values.
 
 ### Software TMLE and a by-hand check
 
@@ -314,11 +314,11 @@ cat("Package TMLE ATE: ", round(fit$estimates$ATE$psi, 4),
     round(fit$estimates$ATE$CI[2], 4), ")\n")
 ```
 
-The two estimates match closely. The small differences come from the Super Learner library the package uses for the nuisance fits, versus the single GLM we used by hand.
+The two estimates match closely. The small differences come from the Super Learner library the package uses for its outcome and treatment models, versus the single logistic regression we fit by hand.
 
-### Super Learner: flexible nuisances in one orientation paragraph
+### Super Learner: flexible outcome and treatment models
 
-The code above fit the outcome and treatment models with `glm`, which assumes the relationships are linear on the logit scale. When they are not, both nuisance estimates are biased and so is the causal estimate. **Super Learner** [@vanderLaan2007superlearner] replaces a single guessed model with a library of candidate algorithms (for example a logistic regression, a spline model, and a random forest) and uses cross-validation to weight them by how well each predicts data it did not see. In large samples the ensemble is about as accurate as the best candidate in the library, without you having to know in advance which one that is. Super Learner estimates the nuisance models and TMLE does the targeting on top, swapped in through the `Q.SL.library` and `g.SL.library` arguments above. @sec-superlearner covers it in full.
+The code above fit the outcome and treatment models with `glm`, which assumes the relationships are linear on the logit scale. When they are not, both nuisance estimates are biased and so is the causal estimate. **Super Learner** [@vanderLaan2007superlearner] replaces a single guessed model with a library of candidate algorithms, for example a logistic regression, a spline model, and a random forest. It uses cross-validation to weight them by how well each predicts data it did not see. In large samples the ensemble is about as accurate as the best candidate in the library, without you having to know in advance which one that is. The outcome and treatment models are called **nuisance models**, because we need them only as a route to the causal effect; Super Learner fits them and TMLE does the targeting on top, through the `Q.SL.library` and `g.SL.library` arguments above. @sec-superlearner covers it in full.
 
 :::{.callout-note}
 ## Exercise 2.1: give TMLE a richer learner library
@@ -346,7 +346,7 @@ cat("With SL.glmnet:    ", round(fit_sl$estimates$ATE$psi, 4),
     round(fit_sl$estimates$ATE$CI[2], 4), ")\n")
 ```
 
-**What to notice:** on this cohort the relationships are close to linear, so adding `SL.glmnet` barely moves the point estimate or the interval. That is the reassuring case. The richer library earns its keep when the truth is nonlinear: there, the ensemble protects you from the misspecification a single GLM would silently suffer. Either way, the cross-validated ensemble is the safer default.
+**What to notice:** on this cohort the relationships are close to linear, so adding `SL.glmnet` barely moves the point estimate or the interval. That is the reassuring case. The richer library earns its keep when the truth is nonlinear, because the ensemble then protects you from the misspecification a single logistic regression would silently suffer. Either way, the cross-validated ensemble is the safer default.
 
 </details>
 :::
@@ -388,7 +388,7 @@ ggdag(long_dag, text = FALSE, use_labels = "label") +
   labs(title = "Longitudinal DAG with treatment-confounder feedback")
 ```
 
-To estimate the effect of treatment at the **second** visit, we *must* condition on CD4 measured before it: CD4 there is a confounder of the second treatment decision, and conditioning on it deconfounds that decision. But CD4 at that visit is itself a **consequence** of treatment at the **first** visit. So if we also condition on it when estimating the effect of the *first* treatment, we block the very pathway (HAART raises CD4, higher CD4 lowers death) through which the first treatment helps, throwing away part of the effect we are trying to measure. A single pooled regression has to make one choice for CD4 and apply it everywhere, so it cannot both deconfound the later decision and preserve the earlier mediated effect. Adjust for time-varying CD4 and you block the mediated benefit; leave it out and you keep the confounding. Neither is right, which is why feedback requires g-methods rather than one regression.
+To estimate the effect of treatment at the **second** visit, we *must* condition on CD4 measured before it: CD4 there is a confounder of the second treatment decision, and conditioning on it deconfounds that decision. But CD4 at that visit is itself a **consequence** of treatment at the **first** visit. So if we also condition on it when estimating the effect of the *first* treatment, we block the pathway through which that treatment helps: HAART raises CD4, and higher CD4 lowers death. A single pooled regression has to make one choice for CD4 and apply it everywhere. Adjust for time-varying CD4 and you block the mediated benefit; leave it out and you keep the confounding. No single regression can do both, and g-methods can.
 
 ### Longitudinal g-computation by hand
 
@@ -470,7 +470,7 @@ Time-varying CD4 plays two incompatible roles. For the *later* treatment decisio
 
 ### Why modified treatment policies exist
 
-Static regimes like "treat everyone" or "treat no one" often violate positivity: there may be no data on what happens when a patient who would essentially never be treated is treated anyway, so the estimate has to extrapolate. A **modified treatment policy** [@diaz2021lmtp; @haneuse2013mtp] changes treatment by a feasible amount relative to what each patient would naturally have received, for example "shift each patient's adherence up by 10 percentage points." Because every shifted value stays within the observed support (no one is pushed to an impossible level), the intervention respects positivity where "treat everyone" does not. The `lmtp` package estimates such policies for longitudinal data.
+Static regimes like "treat everyone" or "treat no one" often violate positivity: there may be no data on what happens when a patient who would almost never be treated is treated anyway, so the estimate has to extrapolate. A **modified treatment policy** [@diaz2021lmtp; @haneuse2013mtp] changes treatment by a feasible amount relative to what each patient would naturally have received, for example "shift each patient's adherence up by 10 percentage points." Because every shifted value stays within the observed support (no one is pushed to an impossible level), the intervention respects positivity where "treat everyone" does not. The `lmtp` package estimates such policies for longitudinal data.
 
 The example below runs on a small, fully specified longitudinal **teaching simulation** in the shape `lmtp` expects, with a known data-generating process so the numbers are reproducible. The roles mirror the running cohort: adherence (`PDC`) is the time-varying treatment, standing in for HAART, and a CD4-like indicator (`L`) is the time-varying confounder. The code defines the data object, then *both* regime functions (the shift and the natural course), fits *both* regimes, and only then contrasts them. The regime is deliberately small (two visits, `folds = 2`, a tiny learner library) so the whole chunk runs in a few seconds.
 
@@ -549,7 +549,7 @@ The `shift_up` function defines the intervention: raise each patient's adherence
 
 ### Diagnostics: positivity, worked
 
-**Why it exists.** Every estimator in this workshop assumes positivity. The fastest check is to look at the propensity scores: if they pile up near 0 or 1, some covariate strata have essentially no comparison patients, and the estimand is poorly supported there. Here is that check on the real HAART propensity scores from Module 2 (@fig-sc-positivity).
+**Why it exists.** Every estimator in this workshop assumes positivity. The fastest check is to look at the propensity scores: if they pile up near 0 or 1, some covariate strata have almost no comparison patients, and the estimand is poorly supported there. @fig-sc-positivity runs that check on the real HAART propensity scores from Module 2.
 
 ```{r}
 #| label: fig-sc-positivity
@@ -570,7 +570,7 @@ cat("Propensity score range: [", round(min(ps), 3), ",", round(max(ps), 3), "]\n
 
 **How to read it:** the scores sit away from the 0 and 1 boundaries, with no spike against either edge, so there are both treated and untreated patients across the covariate range, and positivity is reasonable for this cohort. If you saw a pile-up against a dashed line, the fixes are weight truncation, restricting to the overlap region, or a support-respecting intervention like the shift policy above. Positivity has a dedicated chapter, @sec-positivity-overlap.
 
-**Other diagnostics, briefly.** Check model fit: which learners Super Learner is weighting, calibration of the outcome and treatment models, whether the TMLE $\hat{\epsilon}$ is unusually large. Assess sensitivity to unmeasured confounding with E-values [@vanderweele2017evalue] (how strong a hidden confounder would have to be to explain away the result) and negative-control outcomes (does the pipeline return null where it should). Vary your analytic choices too, such as the Super Learner library, truncation threshold, or number of time points, and report a range if the estimate moves. @sec-advanced-diagnostics develops these tools.
+**Other diagnostics, briefly.** Check model fit: which learners Super Learner is weighting, calibration of the outcome and treatment models, whether the TMLE $\hat{\epsilon}$ is unusually large. Assess sensitivity to unmeasured confounding with E-values [@vanderweele2017evalue] (how strong a hidden confounder would have to be to explain away the result) and negative-control outcomes (does the pipeline return null where it should). Vary your analytic choices too, such as the Super Learner library, truncation threshold, or number of time points, and report a range if the estimate moves. @sec-advanced-diagnostics and @sec-sensitivity-analysis develop these tools.
 
 :::{.callout-note}
 ## Exercise 4.1: change the shift magnitude
@@ -579,7 +579,7 @@ Suppose you change the adherence shift from 10 percentage points to 5, and separ
 <details>
 <summary><strong>Show solution</strong></summary>
 
-A **larger** shift (20 points) intervenes more aggressively, so the expected effect on survival is **larger in magnitude**, but it also pushes more patients further from their natural adherence, toward the edge of the observed support. That strains positivity: the data carry less information about those shifted values, so the estimate's **uncertainty grows** (wider confidence interval) and it leans more on extrapolation. A **smaller** shift (5 points) does the opposite. The expected effect is smaller, but the shift stays well inside the support, so the contrast is estimated more precisely and more credibly. The general lesson is a tradeoff between effect size and data support: bigger interventions promise bigger effects but are harder to support from data. That is exactly why feasible, support-respecting shifts are the appeal of modified treatment policies in the first place.
+A **larger** shift (20 points) intervenes more aggressively, so the expected effect on survival is **larger in magnitude**, but it also pushes more patients further from their natural adherence, toward the edge of the observed support. That strains positivity: the data carry less information about those shifted values, so the estimate's **uncertainty grows** (wider confidence interval) and it leans more on extrapolation. A **smaller** shift (5 points) does the opposite. The expected effect is smaller, but the shift stays well inside the support, so the contrast is estimated more precisely and more credibly. The general lesson is a tradeoff between effect size and data support: bigger interventions promise bigger effects but are harder to support from data. Modified treatment policies exist so that you can choose a shift the data can actually support.
 
 </details>
 :::
@@ -588,23 +588,18 @@ A **larger** shift (20 points) intervenes more aggressively, so the expected eff
 
 ## Wrap-up
 
-You have now estimated one effect on one cohort with g-computation, IPTW, and TMLE, seen why time-varying confounding needs g-methods, set up a realistic modified-treatment-policy intervention, and run the positivity diagnostic. The threads connect because they all run on the same HAART data.
-
-:::{.callout-note}
-## A note on the solutions
-Every exercise has its worked solution in a collapsible block right next to it, not collected at the end. Attempt the exercise first, then expand the solution to check your reasoning while the context is fresh.
-:::
+You have now estimated one effect on one cohort with g-computation, IPTW, and TMLE, seen why time-varying confounding needs g-methods, set up a realistic modified-treatment-policy intervention, and run the positivity diagnostic.
 
 ### Where to go next
 
-Each module above is a doorway into a part of the full handbook. The most direct continuations are these.
+Each module has a fuller treatment in the handbook:
 
 - **Module 1 → Part I.** Why regression coefficients are not causal effects (@sec-regression-vs-causal) and the full seven-step roadmap (@sec-roadmap).
 - **Module 2 → Part II.** G-computation (@sec-gcomputation), IPTW (@sec-iptw), AIPW and TMLE (@sec-doubly-robust-tmle), and Super Learner (@sec-superlearner), each with diagnostics and worked code.
 - **Module 3 → Part III.** Time-varying confounding and longitudinal TMLE (@sec-longitudinal-confounding, @sec-illustrated-ltmle).
-- **Module 4 → Parts IV and V.** Positivity and overlap (@sec-positivity-overlap), diagnostics and sensitivity analysis (@sec-advanced-diagnostics), and the end-to-end applied `lmtp` workflow (@sec-applied-lmtp).
+- **Module 4 → Parts IV and V.** Positivity and overlap (@sec-positivity-overlap), diagnostics (@sec-advanced-diagnostics) and sensitivity analysis (@sec-sensitivity-analysis), and the end-to-end applied `lmtp` workflow (@sec-applied-lmtp).
 
-Every part builds on the running HAART case study, so you can keep watching what changes when the *question* changes rather than the dataset.
+Every part builds on the running HAART case study, so you can watch what changes when the *question* changes while the data stay the same.
 
 ## What comes next
 

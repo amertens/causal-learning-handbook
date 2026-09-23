@@ -2,12 +2,12 @@
 
 *Estimated reading time: 30 minutes*
 
-::: {.callout-tip}
-## Learning Objectives
+::: {.callout-note}
+## Learning objectives
 
 After completing this chapter, you will be able to:
 
-1. Explain why standard TMLE can break down when nuisance models are fit with aggressive machine learning, and how cross-validation fixes this
+1. Explain why standard targeted maximum likelihood estimation (TMLE) can break down when nuisance models are fit with aggressive machine learning, and how cross-validation fixes this
 2. Describe the non-technical intuition behind cross-validated TMLE (CV-TMLE), collaborative TMLE (C-TMLE), and adaptive TMLE (A-TMLE)
 3. Identify practical scenarios where each variant is preferred over standard TMLE
 4. Implement CV-TMLE and C-TMLE in R using available packages
@@ -38,18 +38,18 @@ knitr::opts_chunk$set(
 ```
 
 
-## The Problem That Motivates All Three Variants {#sec-why-advanced}
+## The problem that motivates all three variants {#sec-why-advanced}
 
 Recall the standard TMLE recipe from @sec-doubly-robust-tmle:
 
 1. **Initial estimation**: Fit an outcome model $\hat{Q}(A, W)$ and a propensity score $\hat{g}(W)$, typically using Super Learner.
-2. **Targeting step**: Update $\hat{Q}$ along a least-favorable parametric submodel, using $\hat{g}$ to build the clever covariate. The submodel is the one-parameter logistic fluctuation from @sec-doubly-robust-tmle. It is called least favorable because its score is the efficient influence function, which makes it the hardest one-dimensional direction in which to estimate the target parameter, and moving $\hat{Q}$ along it is what removes the plug-in bias.
+2. **Targeting step**: Update $\hat{Q}$ along a least-favorable parametric submodel, using $\hat{g}$ to build the clever covariate. The submodel is the one-parameter logistic fluctuation from @sec-doubly-robust-tmle. It is called least favorable because its score is the efficient influence function, which makes it the hardest one-dimensional direction in which to estimate the target parameter. Moving $\hat{Q}$ along it removes the plug-in bias.
 3. **Plug in**: Compute the causal effect estimate from the updated $\hat{Q}^*$.
 
 The asymptotic guarantees of TMLE (consistency, efficiency, valid confidence intervals) depend on regularity conditions for the nuisance estimators $\hat{Q}$ and $\hat{g}$. The most important is the **Donsker condition**, which roughly requires that the nuisance estimators not overfit the data too aggressively. Formally, it asks that the nuisance estimators stay within a class of functions of bounded complexity (a Donsker class), so that the empirical process terms in the TMLE expansion vanish; see the [Glossary](glossary.qmd) entry and @vanderLaan2011targeted for the precise statement.
 
 ::: {.callout-important}
-## When Standard TMLE Can Fail
+## When standard TMLE can fail
 
 Standard TMLE's theoretical guarantees assume the nuisance estimators fall in a **Donsker class**, a set of functions with controlled complexity. This is satisfied by parametric models and many regularized estimators, but can be violated by:
 
@@ -63,13 +63,13 @@ When the Donsker condition fails, the influence-curve-based variance estimator m
 Each of the three variants addresses a different facet of this problem.
 
 
-## CV-TMLE: Cross-Validated TMLE {#sec-cv-tmle}
+## CV-TMLE: Cross-validated TMLE {#sec-cv-tmle}
 
 ### The intuition
 
-CV-TMLE [@zheng2011crossvalidated; @zheng2010cvtmle] solves the Donsker problem through **sample splitting**. The idea is simple. If you fit your nuisance models on one part of the data and evaluate the targeting step on a held-out part, the nuisance estimator is a fixed function when applied to the validation data, and fixed functions are trivially Donsker. This is the same insight that powers cross-validation and, more recently, double/debiased machine learning (DML) [@chernozhukov2018dml].
+CV-TMLE [@zheng2011crossvalidated; @zheng2010cvtmle] solves the Donsker problem through **sample splitting**. If you fit your nuisance models on one part of the data and evaluate the targeting step on a held-out part, the nuisance estimator is a fixed function when applied to the validation data, and fixed functions are trivially Donsker. This is the same insight that powers cross-validation and, more recently, double/debiased machine learning (DML) [@chernozhukov2018dml].
 
-In practice, CV-TMLE uses V-fold cross-validation [@zheng2010cvtmle; @levy2018easy]:
+The usual implementation uses V-fold cross-validation [@zheng2010cvtmle; @levy2018easy]:
 
 1. Split the data into V folds.
 2. For each fold $v$, fit $\hat{Q}^{(-v)}$ and $\hat{g}^{(-v)}$ on the *training* data (all folds except $v$).
@@ -78,11 +78,11 @@ In practice, CV-TMLE uses V-fold cross-validation [@zheng2010cvtmle; @levy2018ea
 5. Run the TMLE targeting step on the full (stacked) dataset using the cross-validated predictions.
 6. Compute the estimate and influence-curve-based inference.
 
-Because the nuisance models are fit on training data and the targeting happens on validation data, CV-TMLE removes the Donsker requirement entirely [@zivich2021crossfit]. You can reach for arbitrarily complex machine learning (deep Super Learners, the highly adaptive lasso (HAL), neural networks) without worrying that overfitting will invalidate your inference. One caveat: cross-fitting removes the complexity (Donsker) condition, but it does not remove the nuisance rate condition or the requirement that the nuisance estimators be consistent. The product of the outcome-model and treatment-model L2 convergence rates must still be faster than $n^{-1/2}$ (roughly $n^{-1/4}$ each), so arbitrarily flexible does not mean arbitrarily slow to converge. The price is a modest increase in computational cost, since you fit V models instead of one.
+Because the nuisance models are fit on training data and the targeting happens on validation data, CV-TMLE removes the Donsker requirement entirely [@zivich2021crossfit]. You can use much more flexible machine learning (deep Super Learners, the highly adaptive lasso (HAL), neural networks) without the overfitting itself invalidating your inference. One caveat: cross-fitting removes the complexity (Donsker) condition, but it does not remove the nuisance rate condition or the requirement that the nuisance estimators be consistent. The product of the outcome-model and treatment-model L2 convergence rates (how fast their prediction errors shrink) must still be faster than $n^{-1/2}$ (roughly $n^{-1/4}$ each), so arbitrarily flexible does not mean arbitrarily slow to converge. The price is a modest increase in computational cost, since you fit V models instead of one.
 
-### CV-TMLE vs. Double Machine Learning
+### CV-TMLE vs. double machine learning
 
-Double/debiased machine learning (DML) [@chernozhukov2018dml] is the name the econometrics and machine learning literature uses for a closely related recipe: fit the nuisance models on one part of the data, then evaluate an AIPW-style estimating equation on the held-out part. Readers will meet it under that name in economics and computer science, and it is the closest relative of CV-TMLE, which is why the two are compared here. Both use sample splitting, and both achieve semiparametric efficiency [@vanderlaan2019cvtmledml]. The difference lies in the estimator type:
+Double/debiased machine learning (DML) [@chernozhukov2018dml] is a closely related recipe, and economists and computer scientists know it under that name. It fits the nuisance models on one part of the data, then evaluates an augmented inverse probability weighting (AIPW) estimating equation on the held-out part. It is the closest relative of CV-TMLE, so the two are compared here. Both use sample splitting, and both achieve semiparametric efficiency [@vanderlaan2019cvtmledml]. The difference lies in the estimator type:
 
 | Property | CV-TMLE | DML |
 |:---------|:--------|:----|
@@ -95,7 +95,7 @@ In practice, the substitution property of CV-TMLE matters when the outcome is ra
 
 ### When to use CV-TMLE
 
-- **A safe default**: Asymptotically, CV-TMLE is never worse than standard TMLE, and it is strictly better when the nuisance models rely on aggressive ML. Many practitioners now use it as their default.
+- **A safe default**: Asymptotically, CV-TMLE is never worse than standard TMLE, and it is strictly better when the nuisance models rely on aggressive machine learning.
 - **Large Super Learner libraries**: If your library includes dozens of candidates or highly adaptive algorithms (HAL, deep learners), CV-TMLE is the safer choice.
 - **High-dimensional covariates**: When the number of potential confounders is large relative to sample size.
 
@@ -140,7 +140,7 @@ cat(sprintf("Standard TMLE ATE: %.4f (95%% CI: %.4f, %.4f)\n",
 
 #### Doubly robust cross-check: TMLE vs. AIPW
 
-TMLE and AIPW (augmented inverse-probability weighting) are both doubly robust and asymptotically equivalent: built from the same nuisance models, they should give nearly identical point estimates. (The `AIPW` CRAN package is not available in this build, so we compute the AIPW estimator directly from the nuisance fits, which makes the equivalence transparent.)
+TMLE and AIPW (augmented inverse-probability weighting) are both doubly robust and asymptotically equivalent: built from the same nuisance models, they should give nearly identical point estimates. We compute the AIPW estimator directly from the nuisance fits, which makes the equivalence transparent.
 
 ```{r}
 #| label: adv-tmle-aipw
@@ -173,7 +173,7 @@ cat(sprintf("AIPW ATE:          %.4f (95%% CI: %.4f, %.4f)\n",
             ate_aipw, ate_aipw - 1.96 * se_aipw, ate_aipw + 1.96 * se_aipw))
 ```
 
-The two estimates agree to the third decimal place, as expected for two doubly robust estimators sharing the same nuisance models. The difference here is structural, not numerical. TMLE is a *substitution* estimator, so its estimate is guaranteed to respect the natural bounds of the parameter (a risk difference implied by probabilities in $[0, 1]$), whereas the AIPW estimating-equation form carries no such guarantee and can stray out of range when the outcome is rare or weights are extreme. Note that the AIPW estimator here is computed without cross-fitting; fitting the same nuisance models on training folds and evaluating this AIPW estimating equation on held-out folds is exactly the double machine learning (DML) estimator discussed above.
+The two estimates agree to the third decimal place, as expected for two doubly robust estimators sharing the same nuisance models. What separates them is how they are built. TMLE is a *substitution* estimator, so its estimate always respects the natural bounds of the parameter (a risk difference implied by probabilities in $[0, 1]$). The AIPW estimating-equation form carries no such guarantee and can stray out of range when the outcome is rare or weights are extreme. The AIPW estimator here is computed without cross-fitting; fitting the same nuisance models on training folds and evaluating this estimating equation on held-out folds gives the double machine learning (DML) estimator discussed above.
 
 #### Cross-validated targeting: standard TMLE vs. CV-TMLE
 
@@ -297,10 +297,10 @@ Standard TMLE fits the propensity score $\hat{g}(W)$ independently of the outcom
 
 The propensity score enters TMLE only through the clever covariate $H = A/g(W) - (1-A)/(1-g(W))$. When $g(W)$ falls very close to 0 or 1 for some patients (near-positivity violations), the clever covariate explodes and the targeting step becomes unstable, even if the propensity score fits the data beautifully.
 
-C-TMLE [@vanderlaan2010ctmle] takes a different tack. Instead of fitting $g$ to predict treatment well, it builds a sequence of increasingly complex propensity score models and selects the one that produces the best *outcome model fit* for the target parameter. The propensity score, in other words, *collaborates* with the outcome model.
+C-TMLE [@vanderlaan2010ctmle] takes a different tack. Instead of fitting $g$ to predict treatment well, it builds a sequence of increasingly complex propensity score models and selects the one that produces the best *outcome model fit* for the target parameter. The propensity score *collaborates* with the outcome model, hence the name.
 
 ::: {.callout-important}
-## The Collaboration Principle
+## The collaboration principle
 
 In standard TMLE, the propensity score and outcome model are fit independently. C-TMLE breaks this independence:
 
@@ -322,7 +322,7 @@ The selected propensity score is the one that, when plugged into the targeting s
 
 The original greedy C-TMLE algorithm considers adding one variable at a time and evaluates the targeting step at each step. With $p$ covariates, this is $O(p^2)$, which is prohibitive for high-dimensional data. Scalable C-TMLE [@ju2017scalable] uses **pre-ordering strategies** to reduce complexity to $O(p)$:
 
-- **LASSO-C-TMLE**: Order covariates by the LASSO regularization path for the propensity score. Evaluate the targeting step at each point along the path.
+- **LASSO-C-TMLE**: Order covariates by the regularization path of a LASSO (penalized, variable-selecting) regression for the propensity score. Evaluate the targeting step at each point along the path.
 - **Univariate pre-ordering**: Rank covariates by their univariate association with treatment, then add them in that order.
 
 ### Implementation in R
@@ -376,14 +376,14 @@ cat(sprintf("Best lambda index: %d (of %d along path)\n",
 cat("Compare to standard TMLE above---C-TMLE may differ when\n")
 cat("it selects a simpler propensity score to stabilize estimation.\n")
 ```
-1. `ctmleGlmnet` expects the initial outcome model as a **two-column matrix** `cbind(Q(0, W), Q(1, W))`: predictions under $A=0$ in the first column and under $A=1$ in the second. The columns are read by *position*, not by name, so column order is what matters (any names are ignored). Internally the function reconstructs the observed-treatment prediction itself via `QAW <- (1 - A) * Q[, 1] + A * Q[, 2]`, so passing a separate `QAW` column would shift every column out of position and corrupt the estimate.
+1. `ctmleGlmnet` expects the initial outcome model as a **two-column matrix** `cbind(Q(0, W), Q(1, W))`: predictions under $A=0$ in the first column and under $A=1$ in the second. The columns are read by *position*, not by name, so column order is what matters (any names are ignored). Internally the function reconstructs the observed-treatment prediction itself through `QAW <- (1 - A) * Q[, 1] + A * Q[, 2]`, so passing a separate `QAW` column would shift every column out of position and corrupt the estimate.
 
 The gap between standard TMLE and C-TMLE is most visible when near-positivity violations are present. In the ART cohort, patients with very low CD4 counts are almost always treated, which creates such near-violations. C-TMLE automatically finds the propensity score complexity that balances confounding adjustment against the instability of extreme weights.
 
 
 ## A-TMLE: Adaptive TMLE {#sec-a-tmle}
 
-CV-TMLE and C-TMLE refine the *same* single-sample analysis, giving better inference under aggressive ML and better behavior under near-positivity. A-TMLE answers a different *design* question: how to combine data sources. It is really a special-topics method for hybrid designs, included here to keep the TMLE variants together; the full development of hybrid RCT plus real-world-data designs appears in @sec-hybrid-designs.
+CV-TMLE and C-TMLE refine the *same* single-sample analysis, giving better inference under aggressive machine learning and better behavior under near-positivity. A-TMLE answers a different *design* question: how to combine data sources. It belongs with the hybrid designs of @sec-hybrid-designs, which combine randomized controlled trials (RCTs) with real-world data, and appears here only to keep the TMLE variants together.
 
 ### The intuition
 
@@ -391,16 +391,16 @@ A-TMLE [@vanderlaan2024atmle] tackles the problem of safely borrowing strength f
 
 The trouble is that the observational data may differ from the trial population in unmeasured ways. Naive pooling can introduce bias, while ignoring the external data wastes information.
 
-A-TMLE steers a principled middle course:
+A-TMLE takes a middle course:
 
-1. **Decompose the estimand**: Write the ATE as the difference between a "pooled ATE" (using both RCT and external data) and a "bias term" (the effect of being in the RCT on the outcome, conditional on treatment and covariates).
+1. **Decompose the estimand**: Write the average treatment effect (ATE) as the difference between a "pooled ATE" (using both RCT and external data) and a "bias term" (the effect of being in the RCT on the outcome, conditional on treatment and covariates).
 2. **Data-adaptively estimate the bias**: Use machine learning to learn a working model for the bias term. If the bias is simple (e.g., explained by measured covariates), large efficiency gains are possible.
 3. **Guarantee no harm**: By construction, A-TMLE is always at least as efficient as using the RCT data alone. If the external data are badly biased, A-TMLE learns to ignore them.
 
 ::: {.callout-important}
-## The "No Harm" Guarantee
+## The "no harm" guarantee
 
-A-TMLE's defining property is that borrowing external data can help but never hurt. The asymptotic variance of the A-TMLE estimator is at most equal to the variance of the TMLE using RCT data alone. This is because the working model for the bias (the difference between the external data and the trial) is selected by cross-validation: if no model improves on the intercept-only model (which corresponds to ignoring external data), the estimator falls back to the RCT-only analysis.
+A-TMLE's defining property is that borrowing external data can help but never hurt. The asymptotic variance of the A-TMLE estimator is at most equal to the variance of the TMLE using RCT data alone. The reason is that the working model for the bias (the difference between the external data and the trial) is selected by cross-validation. If no model improves on the intercept-only model, which corresponds to ignoring the external data, the estimator falls back to the RCT-only analysis.
 
 This makes A-TMLE particularly attractive for regulatory settings, where borrowing from external controls must be justified.
 :::
@@ -443,12 +443,12 @@ A-TMLE is a relatively recent development. Implementation is available in the `t
 ```
 
 
-## Putting It All Together: When to Use Which {#sec-when-to-use}
+## Putting it all together: When to use which {#sec-when-to-use}
 
 ::: {.callout-tip}
-## Decision Guide
+## Decision guide
 
-**Start with CV-TMLE as your default.** It is never worse than standard TMLE and provides valid inference with aggressive machine learning. Then consider:
+**Start with CV-TMLE as your default.** Asymptotically it is never worse than standard TMLE and provides valid inference with aggressive machine learning. Then consider:
 
 | Scenario | Recommended variant | Why |
 |:---------|:-------------------|:----|
@@ -462,7 +462,7 @@ These variants are not mutually exclusive. CV-C-TMLE (cross-validated collaborat
 :::
 
 
-## Comparison Table: Standard TMLE, CV-TMLE, C-TMLE, A-TMLE
+## Comparison table: Standard TMLE, CV-TMLE, C-TMLE, A-TMLE
 
 | Feature | Standard TMLE | CV-TMLE | C-TMLE | A-TMLE |
 |:--------|:-------------|:--------|:-------|:-------|
@@ -494,7 +494,7 @@ A maximally flexible propensity score will fit the data perfectly, but estimated
 </details>
 
 <details>
-<summary><strong>Q3. CV-TMLE vs. DML: Both CV-TMLE and double machine learning use cross-fitting. What is the key structural difference, and when does it matter?</strong></summary>
+<summary><strong>Q3. CV-TMLE vs. DML: Both CV-TMLE and double machine learning use cross-fitting. What is the main structural difference, and when does it matter?</strong></summary>
 
 CV-TMLE is a substitution estimator: it updates the outcome model and plugs it in, so estimates always respect natural bounds (e.g., probabilities in [0,1]). DML is an estimating equation estimator: it adds a bias-correction term to a plug-in estimate, which can produce values outside the parameter space. This matters most when outcomes are rare (probabilities near 0), when sample sizes are small, or when the treatment effect is bounded.
 
@@ -508,11 +508,11 @@ CV-TMLE is a substitution estimator: it updates the outcome model and plugs it i
 </details>
 
 
-## Sources and Further Reading
+## Sources and further reading
 
 - @zheng2010cvtmle: Foundational theory for CV-TMLE; proves asymptotic linearity and efficiency without the Donsker condition
 - @levy2018easy: Simplified implementation of CV-TMLE by stacking cross-validated predictions
-- @vanderlaan2019cvtmledml: Formal comparison of CV-TMLE and double machine learning, showing both achieve semiparametric efficiency via sample splitting
+- @vanderlaan2019cvtmledml: Formal comparison of CV-TMLE and double machine learning, showing both achieve semiparametric efficiency through sample splitting
 - @zivich2021crossfit: Practical introduction to cross-fitting for doubly robust estimation
 - @vanderlaan2010ctmle: Original C-TMLE paper; collaborative propensity score estimation guided by the outcome model
 - @ju2017scalable: Scalable C-TMLE with pre-ordering strategies for high-dimensional data; the `ctmle` R package

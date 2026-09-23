@@ -15,16 +15,16 @@ format: html
 - Compare IPTW with g-computation and say when each is the safer choice
 :::
 
-Inverse probability of treatment weighting (IPTW) is a core method in modern causal inference [@robins2000msm; @cole2008ipw]. Instead of modeling the outcome directly as in g-computation, IPTW uses a model for **treatment assignment** to create a pseudo-population where treatment is independent of confounders. This is still point treatment only; longitudinal extensions come later.
+Inverse probability of treatment weighting (IPTW) is a core method in modern causal inference [@robins2000msm; @cole2008ipw]. Instead of modeling the outcome directly as in g-computation, IPTW uses a model for **treatment assignment** to create a pseudo-population where treatment is independent of confounders. This chapter covers a single, point treatment; @sec-longitudinal-confounding extends weighting to treatment that changes over time.
 
 ---
 
-## Intuition: Reweighting to Mimic a Trial
+## Intuition: Reweighting to mimic a trial
 
-IPTW reweights observational data so that, in the weighted sample, treatment appears as if it were randomized given measured covariates. Patients whose treatment assignment was unlikely for their covariate pattern receive large weights; patients whose assignment was predictable receive small weights. The result is a **pseudo-population** where confounders are balanced across treatment groups, just as in a randomized trial.
+IPTW reweights observational data so that, in the weighted sample, treatment appears as if it were randomized given measured covariates. Patients whose treatment assignment was unlikely for their covariate pattern receive large weights; patients whose assignment was predictable receive small weights. The result is a **pseudo-population** where confounders are balanced across treatment groups, as in a randomized trial.
 
 :::{.callout-note}
-## Definition: The Propensity Score
+## Definition: The propensity score
 
 The **propensity score** [@rosenbaum1983propensity] is the probability of receiving treatment given measured covariates:
 
@@ -39,15 +39,15 @@ IPTW weights are constructed from the propensity score:
 - For treated:  \( \displaystyle w_i = \frac{1}{g(W_i)} \)
 - For control: \( \displaystyle w_i = \frac{1}{1 - g(W_i)} \)
 
-The propensity score is a **balancing score**: conditioning on it balances the measured covariates $W$ across treatment groups just as conditioning on $W$ itself would, so it removes confounding by those covariates only under the separately assumed exchangeability given $W$. This is why a single scalar summary can replace adjustment for many covariates.
+The propensity score is a **balancing score**: conditioning on it balances the measured covariates $W$ across treatment groups as well as conditioning on $W$ itself would. That property lets a single number stand in for adjustment on many covariates, although it removes confounding by those covariates only under the separately assumed exchangeability given $W$.
 :::
 
 ---
 
-## Identification Using IPTW
+## Identification using IPTW
 
 :::{.callout-note}
-## The IPTW Identification Result
+## The IPTW identification result
 
 Under the same identification assumptions from @sec-roadmap (consistency, exchangeability, and positivity), the average potential outcome under treatment can be expressed as
 
@@ -68,9 +68,9 @@ This is a **Horvitz-Thompson type** estimator: it has the same structure as the 
 
 ---
 
-## Data Example
+## Data example
 
-We use the HIV antiretroviral therapy cohort from `_data/load-haart-cohort.R` [@vanderwal2011ipw], the same dataset used throughout the handbook: ever initiating highly active antiretroviral therapy (HAART) (`ever_haart`, A=1) vs never initiating HAART (A=0) for mortality (`died`), with confounding by age, sex, and baseline CD4 count (`cd4_sqrt_baseline`).
+We use the running HIV cohort [@vanderwal2011ipw], loaded from `_data/load-haart-cohort.R`. The treatment is ever initiating highly active antiretroviral therapy (HAART; `ever_haart`, A = 1) versus never initiating it (A = 0), the outcome is death (`died`), and the confounders are age, sex, and baseline CD4 count (`cd4_sqrt_baseline`).
 
 ```{r}
 #| interactive: true
@@ -84,11 +84,11 @@ dat %>% head()
 
 ---
 
-## Estimating the Propensity Score
+## Estimating the propensity score
 
 We model the probability of receiving treatment given covariates.
 
-In practice, one might use logistic regression, SuperLearner [@vanderLaan2007superlearner], or other ML. Here we start with logistic regression for clarity.
+In practice you might use logistic regression, Super Learner [@vanderLaan2007superlearner], or another machine-learning method. We start with logistic regression for clarity.
 
 ```{r}
 #| interactive: true
@@ -127,9 +127,9 @@ ggplot(dat, aes(x = ps, fill = factor(ever_haart))) +
 
 
 :::{.callout-important}
-## Reading the Propensity Score Overlap Plot
+## Reading the propensity score overlap plot
 
-In this example (@fig-ps-overlap), the propensity score distributions for treated and untreated overlap substantially. This is what **good overlap** looks like. The two density curves cover mostly the same range of propensity scores, even though their peaks differ. For most covariate patterns there are both treated and untreated patients, which is exactly what positivity requires.
+In this example (@fig-ps-overlap), the propensity score distributions for treated and untreated overlap substantially. This is what **good overlap** looks like. The two density curves cover mostly the same range of propensity scores, even though their peaks differ. For most covariate patterns there are both treated and untreated patients, which is what positivity requires.
 
 **Bad overlap** looks like two density curves that barely touch, with the treated group concentrated at high propensity scores and the untreated group concentrated at low ones. When this happens:
 
@@ -142,7 +142,7 @@ As a rule of thumb, be concerned if propensity scores for either group pile up n
 
 ---
 
-## Constructing IPTW Weights
+## Constructing IPTW weights
 
 **Definition.** Unstabilized weights are the simplest form of IPTW weights. For each individual, the weight is the inverse of the probability of receiving the treatment they actually received: for the treated ($A = 1$), $w_i = 1 / g(W_i)$; for the untreated ($A = 0$), $w_i = 1 / (1 - g(W_i))$.
 
@@ -165,9 +165,9 @@ Keep an eye on
 - Very large weights (suggest near-violations of positivity)
 - Range and extreme quantiles (the 99th percentile should not be orders of magnitude larger than the median)
 
-#### Stabilized weights
+### Stabilized weights
 
-Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment** [@hernan2025whatif; @cole2008ipw] (the overall proportion of patients who received the treatment they actually received, ignoring covariates). This rescaling brings the weights closer to 1 on average and reduces their variance without affecting consistency for the marginal causal effect.
+Stabilized weights multiply the standard IPTW weights by the **marginal probability of treatment** [@hernan2025whatif; @cole2008ipw] (the overall proportion of patients in each patient's own treatment group, ignoring covariates). This rescaling brings the weights closer to 1 on average and reduces their variance without affecting consistency for the marginal causal effect.
 
 For a binary treatment, the stabilized weight for individual $i$ is:
 
@@ -175,9 +175,9 @@ $$
 SW_i = \frac{P(A = 1)}{g(W_i)} \quad \text{if } A_i = 1, \qquad SW_i = \frac{P(A = 0)}{1 - g(W_i)} \quad \text{if } A_i = 0
 $$
 
-where $P(A = 1)$ is the marginal probability of treatment (estimated as the sample proportion treated) and $P(A = 0) = 1 - P(A = 1)$ is the marginal probability of control. Note that the numerator uses the marginal probability of the treatment *actually received*: $P(A = 1)$ for treated, $P(A = 0)$ for untreated, not a single value for both groups.
+where $P(A = 1)$ is the marginal probability of treatment (estimated as the sample proportion treated) and $P(A = 0) = 1 - P(A = 1)$ is the marginal probability of control. The numerator uses the marginal probability of the treatment *actually received*: $P(A = 1)$ for treated, $P(A = 0)$ for untreated, not a single value for both groups.
 
-Unstabilized weights create a pseudo-population larger than the original sample, which inflates standard errors. Stabilized weights preserve the original sample size in expectation. The result is narrower confidence intervals and more stable point estimates.
+Unstabilized weights create a pseudo-population larger than the original sample, which inflates standard errors. Stabilized weights preserve the original sample size in expectation. For Horvitz-Thompson estimators and weighted regressions, the result is narrower confidence intervals and more stable point estimates.
 
 In epidemiologic practice, stabilized weights are often preferred for the Horvitz-Thompson estimator. The choice is not automatic, though:
 
@@ -217,7 +217,7 @@ ggplot(dat, aes(sw_ipw, fill = factor(ever_haart, labels = c("No HAART", "HAART"
 
 ---
 
-## Estimating the Average Treatment Effect (ATE) via IPTW
+## Estimating the average treatment effect (ATE) via IPTW
 
 There are several equivalent ways to use the weights.
 
@@ -246,7 +246,7 @@ $$
 
 This is the Hajek (self-normalized) estimator, which divides by the sum of weights rather than by $n$. The Horvitz-Thompson estimator divides by $n$ instead. The Hajek estimator is preferred in practice because it is more stable and does not require weights to sum to $n$.
 
-The direct weighted mean above gives a point estimate but no standard error. Two approaches to inference are common. The first is a **nonparametric bootstrap**: resample the data with replacement, re-estimate the propensity score and the weighted ATE on each bootstrap sample, and take the 2.5th and 97.5th percentiles as the 95% CI. The second is **robust (sandwich) standard errors**: fit a weighted regression model and use `sandwich::vcovHC()` to obtain variance estimates that account for the weights. The bootstrap is simple but computationally intensive. Sandwich SEs are faster and are the standard approach in practice. The weighted regression in the next section demonstrates that second option.
+The direct weighted mean above gives a point estimate but no standard error. Two approaches to inference are common. The first is a **nonparametric bootstrap**: resample the data with replacement, re-estimate the propensity score and the weighted ATE on each bootstrap sample, and take the 2.5th and 97.5th percentiles as the 95% CI. The second is **robust (sandwich) standard errors**: fit a weighted regression model and use `sandwich::vcovHC()` to obtain variance estimates that account for the weights. The bootstrap is simple but computationally intensive. Sandwich standard errors are faster and are the usual choice. The weighted regression in the next section demonstrates that second option.
 
 ### Weighted regression model
 
@@ -268,14 +268,13 @@ coeftest(fit_ipw, cov_ipw)
 
 Interpretation
 
-- The coefficient of `ever_haart` (on the log odds scale) estimates a marginal log-odds ratio in the pseudo-population. Note that this is on the odds ratio scale, not the risk difference scale. To obtain the marginal risk difference, predict from the weighted model under each treatment value and average, as shown in the g-computation chapter.
-- You can compute marginal risk differences or ratios by predicting from the model at `ever_haart=1` and `ever_haart=0` and standardizing
+- The coefficient of `ever_haart` (on the log odds scale) estimates a marginal log-odds ratio in the pseudo-population. Note that this is on the odds ratio scale, not the risk difference scale. To obtain a marginal risk difference or risk ratio, predict from the weighted model at `ever_haart=1` and `ever_haart=0` and average, as in @sec-gcomputation.
 
 ---
 
-## Comparing IPTW and G Computation
+## Comparing IPTW and g-computation
 
-We can compare the IPTW ATE to the g computation ATE from the previous chapter.
+We can compare the IPTW ATE to the g-computation ATE from the previous chapter.
 
 ```{r}
 #| interactive: true
@@ -301,14 +300,14 @@ G-computation depends on correctly specifying the outcome model $E[Y \mid A, W]$
 
 ---
 
-## Diagnostics and Practical Tips {#sec-iptw-diagnostics}
+## Diagnostics and practical tips {#sec-iptw-diagnostics}
 
 
-#### Check propensity score overlap
+### Check propensity score overlap
 
 To assess positivity, plot propensity score densities by treatment group and flag regions where one group is missing or sparse. For example, if elderly patients with prior cardiovascular disease are almost never prescribed the newer drug, you will see a gap in the treated distribution at high-risk covariate values. If the treated and untreated distributions do not overlap, the ATE may not be identifiable in that region. Consider restricting inference to the overlap population or reporting the average treatment effect on the treated (ATT) instead.
 
-#### Check weights
+### Check weights
 
 ```{r}
 #| interactive: true
@@ -322,7 +321,7 @@ dat %>%
 ```
 
 :::{.callout-warning}
-## When Extreme Weights Signal Trouble
+## When extreme weights signal trouble
 
 Large extreme weights are a red flag. Watch for these warning signs:
 
@@ -332,10 +331,10 @@ Large extreme weights are a red flag. Watch for these warning signs:
 
 When you see extreme weights, consider: (1) improving your propensity score model, (2) checking for data errors in the extreme-weight observations, and (3) applying weight truncation (see below).
 
-To make this concrete: if an untreated patient has an estimated propensity score of 0.95, their IPTW weight is 1/(1-0.95) = 20. That single patient counts as 20 people in the pseudo-population. If their outcome happens to be unusual, they can shift the entire ATE estimate. When a handful of observations carry weights above 10 or 20, the estimate is fragile, depending heavily on a few individuals whose treatment assignment was highly predictable.
+Recall the untreated patient with a propensity score of 0.95, who counts as 20 people in the pseudo-population. If that patient's outcome happens to be unusual, it can shift the entire ATE estimate. When a handful of observations carry weights above 10 or 20, the estimate depends heavily on a few individuals whose treatment assignment was highly predictable.
 :::
 
-#### Consider truncation
+### Consider truncation
 
 You can truncate weights at a chosen percentile, for example the 1st and 99th percentiles.
 
@@ -359,7 +358,7 @@ c(ate_truncated = ate_trunc)
 ```
 
 :::{.callout-warning}
-## The Truncation Trade-Off: Bias vs. Variance
+## The truncation trade-off: Bias vs. variance
 
 Truncation (also called "winsorizing") reduces variance at the cost of introducing some bias [@cole2008ipw]. Capping extreme weights amounts to saying: "I am willing to accept a small amount of bias in exchange for a much more stable estimate."
 
@@ -385,7 +384,7 @@ Under severe truncation, the estimator implicitly targets a modified estimand: t
 
 ## Watch it fail: poor overlap inflates the variance
 
-The warnings about extreme weights are easier to trust as numbers. Below we hold the true effect fixed and change only how strongly treatment depends on the covariate, then compare the IPTW estimate, the largest weight, and a bootstrap standard error. The true risk difference is known by construction, so we can see exactly how far each estimate strays.
+The warnings about extreme weights are easier to trust as numbers. Below we hold the true effect fixed and change only how strongly treatment depends on the covariate, then compare the IPTW estimate, the largest weight, and a bootstrap standard error. The true risk difference is known by construction, so we can see how far each estimate strays.
 
 ```{r}
 #| code-fold: show
@@ -435,7 +434,7 @@ The two failure modes call for different responses. Poor overlap is a positivity
 ## Summary
 
 :::{.callout-tip}
-## Chapter Takeaways
+## Chapter takeaways
 
 - IPTW reweights observational data to mimic a randomized trial using propensity scores; **stabilized weights** are often preferred for variance reduction, but the choice depends on the estimator and estimand
 - IPTW depends on a correctly specified treatment model; never skip overlap and weight diagnostics
@@ -464,7 +463,7 @@ Without diagnostics, several problems can go undetected. Near-violations of posi
 <details>
 <summary><strong>Q3. What is the difference between stabilized and unstabilized weights, and why do we prefer stabilized weights?</strong></summary>
 
-Unstabilized weights are simply $1 / g(W)$ for the treated and $1 / (1 - g(W))$ for the untreated. Stabilized weights multiply these by the marginal probability of treatment: $P(A) / g(W)$ for the treated and $(1 - P(A)) / (1 - g(W))$ for the untreated. This rescaling brings the weights closer to 1 on average and preserves the original sample size in expectation. Stabilized weights produce narrower confidence intervals and more stable point estimates without introducing bias for the marginal causal effect. In practice, stabilized weights should be the default choice.
+Unstabilized weights are $1 / g(W)$ for the treated and $1 / (1 - g(W))$ for the untreated. Stabilized weights multiply these by the marginal probability of treatment: $P(A) / g(W)$ for the treated and $(1 - P(A)) / (1 - g(W))$ for the untreated. This rescaling brings the weights closer to 1 on average and preserves the original sample size in expectation. With Horvitz-Thompson estimators and weighted regressions, stabilized weights produce narrower confidence intervals and more stable point estimates without introducing bias for the marginal causal effect; with the self-normalized Hajek estimator they leave the point estimate unchanged. Either way they are a sensible default.
 
 </details>
 

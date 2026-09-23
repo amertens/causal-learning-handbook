@@ -17,14 +17,14 @@ knitr::opts_chunk$set(
 
 ## A cautionary tale from pharmacoepidemiology
 
-A research team set out to estimate the effect of highly active antiretroviral
+Picture a research team that set out to estimate the effect of highly active antiretroviral
 therapy (HAART) initiation on mortality
-in an HIV cohort. They assembled a claims-derived dataset, adjusted for
+in an HIV cohort. They assembled clinic records, adjusted for
 dozens of confounders, and ran an inverse probability of treatment weighting
 (IPTW) analysis. The result was startling: a risk
 ratio of 0.12 for mortality, implying HAART cut the death rate by 88%. Clinicians
-welcomed the magnitude, but treatment epidemiologists were skeptical. When the
-analysts inspected the propensity score distribution they found the problem.
+welcomed the magnitude, but epidemiologists were skeptical. When the
+analysts inspected the propensity score distribution, they found the problem.
 Patients with very low CD4 counts and recent opportunistic infections were
 essentially *always* started on HAART under the guidelines in force at the time.
 A small number who never initiated despite meeting those criteria looked
@@ -46,13 +46,13 @@ After completing this chapter you will be able to:
 1. State the positivity assumption formally and intuitively.
 2. Distinguish structural from practical positivity violations.
 3. Diagnose positivity problems using propensity score plots, overlap statistics, and effective sample size.
-4. Explain how positivity violations distort IPTW, G-computation, and TMLE.
+4. Explain how positivity violations distort IPTW, g-computation, and TMLE.
 5. Apply practical remedies including population restriction, weight truncation, and modified treatment policies.
 :::
 
 ---
 
-## What Positivity Means {#sec-positivity-defn}
+## What positivity means {#sec-positivity-defn}
 
 ### Intuition first
 
@@ -78,7 +78,7 @@ is bounded away from zero and one.
 
 ### Connection to identification
 
-Recall the G-computation identification formula from @sec-roadmap:
+Recall the g-computation identification formula from @sec-roadmap:
 
 $$
 \psi = E_W\!\Big[\,E[Y \mid A=1, W] - E[Y \mid A=0, W]\,\Big]
@@ -95,17 +95,17 @@ Positivity is a bit like having a restaurant review for every item on the menu. 
 
 The formal definition above is stated for discrete $W$, where we require $P(A = a \mid W = w) > 0$ at every support point. When $W$ is continuous or high-dimensional, the condition generalizes to positivity **almost surely**: the propensity score $g(W) = P(A = 1 \mid W)$ must be bounded away from 0 and 1 with probability one in the analysis population.
 
-**Practical restatement.** There exist constants $0 < \delta_L \leq \delta_U < 1$ such that $\delta_L \leq g(W) \leq \delta_U$ almost surely. In applied work, this means the estimated propensity scores should be bounded away from the boundaries, not just on average, but for every observation that contributes to the analysis.
+**In symbols.** There exist constants $0 < \delta_L \leq \delta_U < 1$ such that $\delta_L \leq g(W) \leq \delta_U$ almost surely. In applied work, this means the estimated propensity scores should stay away from 0 and 1 for every observation that contributes to the analysis, not just on average.
 
 When propensity scores approach 0 or 1 for a non-negligible fraction of the sample, the effective sample size shrinks, influence-function-based variance estimates grow, and the causal estimand becomes poorly identified in the tails of the covariate distribution. If elderly patients with renal impairment are almost never prescribed the new drug, the propensity score for that group approaches zero, and estimates for their subgroup rest entirely on model extrapolation.
 
-When positivity fails for a subpopulation, the most principled response is often to **revise the estimand** rather than truncate weights or extrapolate. Modified treatment policies and stochastic interventions (see @sec-adherence-shift) define interventions that stay within the observed data support by construction, so there is no need to estimate treatment effects in regions where the data are sparse.
+When positivity fails for a subpopulation, the better response is often to **revise the estimand** instead of truncating weights or extrapolating. Modified treatment policies and stochastic interventions (see @sec-adherence-shift) define interventions that stay within the observed data support by construction, so there is no need to estimate treatment effects in regions where the data are sparse.
 
 Alternatively, one can restrict the target population to the subset with adequate overlap, acknowledging that the resulting estimate answers a different (but well-defined) causal question. This often arises in claims-based studies when certain comorbidity profiles are strongly associated with one treatment, leaving little or no overlap for the alternative.
 
 ---
 
-## Structural vs. Practical Positivity Violations
+## Structural vs. practical positivity violations
 
 The distinction between structural and
 practical violations [@westreichcole2010positivity] matters because the appropriate
@@ -147,14 +147,14 @@ estimator is being forced to extrapolate.
 ## Adjusting for more confounders can make positivity worse
 
 Adding covariates reduces confounding bias (good) but splits the data into finer
-strata, each with fewer patients (bad for positivity). There is a genuine tension
-between exchangeability and positivity. Targeted Learning methods help manage this
-trade-off, but they cannot eliminate it.
+strata, each with fewer patients (bad for positivity). Exchangeability and positivity
+pull against each other. Collaborative TMLE (@sec-c-tmle) helps manage this
+trade-off, but no method can eliminate it.
 :::
 
 ---
 
-## How to Diagnose Positivity Problems {#sec-diagnose}
+## How to diagnose positivity problems {#sec-diagnose}
 
 Let us build a simulated dataset with a deliberate positivity problem, then work
 through the diagnostic toolkit on it.
@@ -254,6 +254,8 @@ dat |>
   knitr::kable(digits = 4, caption = "Propensity score distribution by treatment group")
 ```
 
+Read the table down the minimum and 5th-percentile columns. A treated group whose lowest scores sit near 0, or an untreated group whose highest scores sit near 1, contains patients with almost no counterparts in the other arm.
+
 ### Identifying problematic covariate strata
 
 Beyond the propensity score, inspect the raw covariate-treatment cross-tabulation.
@@ -276,7 +278,7 @@ dat |>
 
 ### A reusable data-support report
 
-The individual checks above are easier to run as a single routine that returns the numbers most worth seeing before you trust any weighted or standardized estimate. Pass the treatment, the estimated propensity score, and a covariate frame; the report gives back the propensity mass in the tails, the largest stabilized weight, the effective sample size, and the covariate balance before and after weighting. Later chapters call back to this report rather than re-derive the pieces.
+It is easier to run the checks above as a single routine that returns the numbers to look at before you trust any weighted or standardized estimate. Pass the treatment, the estimated propensity score, and a covariate frame; the report gives back the propensity mass in the tails, the largest stabilized weight, the effective sample size, and the covariate balance before and after weighting. Later chapters refer back to these checks instead of re-deriving them.
 
 ```{r}
 #| code-fold: show
@@ -306,12 +308,12 @@ Read it as a checklist. Any appreciable mass with a propensity below 0.05 or abo
 
 ---
 
-## How Positivity Problems Affect Different Estimators {#sec-estimator-effects}
+## How positivity problems affect different estimators {#sec-estimator-effects}
 
 Using our simulated data, let us see how each estimator behaves when positivity is
-violated. The true average treatment effect (ATE) in the data-generating process depends on the covariate
-distribution, so we will judge the estimates by their *stability* and *plausibility*
-rather than against a single truth.
+violated. Instead of comparing each estimate of the average treatment effect (ATE) with the
+true value, we judge the estimates by their *stability* and *plausibility*, because
+in real data the truth is unknown and these are the only signals you have.
 
 ### IPTW: extreme weights
 
@@ -377,14 +379,14 @@ cat("G-computation ATE estimate:", round(ate_gcomp, 3), "\n")
 ```
 
 G-computation may look stable, but that stability is an illusion. It rests entirely on
-the parametric model being correct in the extrapolation region, and there is no data to
+the parametric model being correct in the extrapolation region, and there are no data to
 check it there. The model might predict that a 90-year-old with severe comorbidities would benefit from treatment, but if no such patient was ever treated, that prediction is speculation dressed up as an estimate.
 
 ### TMLE: clever covariate instability
 
 TMLE (@sec-doubly-robust-tmle) updates the initial outcome model
 using a "clever covariate" $H(A, W) = A / g(W) - (1-A) / (1 - g(W))$. When $g(W)$
-is near zero, this clever covariate explodes, just like the IPTW weight. TMLE
+is near zero, this clever covariate explodes, as the IPTW weight does. TMLE
 inherits the instability of IPTW through its targeting step, even though it also uses
 an outcome model. In practice, you might see one or two observations with clever-covariate values ten times larger than the rest, a sign that those few patients are driving the entire estimate.
 
@@ -410,11 +412,11 @@ No estimator is immune to positivity violations. IPTW shows the problem as weigh
 
 ---
 
-## Practical Responses to Positivity Violations {#sec-responses}
+## Practical responses to positivity violations {#sec-responses}
 
 ### Redefine the target population
 
-The most principled response is to restrict the analysis to the population where
+The most direct response is to restrict the analysis to the population where
 overlap exists [@crump2009trimming]. You are changing the *question*, not patching the estimator.
 
 ```{r}
@@ -492,7 +494,7 @@ If the ATE estimate barely moves as you relax the truncation threshold, the resu
 
 Instead of asking "What if everyone received treatment?", you can ask "What if
 everyone's probability of treatment were shifted slightly upward?" This sidesteps
-counterfactual scenarios that violate positivity. Later chapters work through these in detail; for now, hold on to the idea: if the static intervention
+counterfactual scenarios that violate positivity. @sec-adherence-shift works through these in detail. For now, hold on to the idea: if the static intervention
 $\text{do}(A=1)$ creates positivity problems, a *stochastic* or *shift* intervention
 may not.
 
@@ -508,9 +510,9 @@ The responses above are not a menu to pick from at random; the diagnosis points 
 | A static "treat everyone" regime has no support | Switch to a stochastic or modified treatment policy (@sec-adherence-shift, @sec-applied-lmtp) | The target becomes a feasible, support-respecting intervention |
 | A longitudinal regime loses support across visits | Use a feasible shift rule rather than a fixed path | As above, defined visit by visit |
 
-A positivity problem tells you the data cannot answer the original question. The honest move is to answer a nearby question the data can support, and to state plainly which question that is.
+A positivity problem tells you the data cannot answer the original question. The defensible move is to answer a nearby question the data can support, and to state plainly which question that is.
 
-### Honest reporting
+### What to report
 
 When positivity problems remain after reasonable adjustments, the most important
 response is transparency. Report:
@@ -523,7 +525,7 @@ response is transparency. Report:
 
 ---
 
-## Effective Sample Size {#sec-ess}
+## Effective sample size {#sec-ess}
 
 Extreme weights inflate variance, and they also reduce the amount of information in
 your sample. The **effective sample size (ESS)** tells you how many equally weighted
@@ -564,7 +566,7 @@ tibble(
 
 ### Threshold guidance
 
-There is no universal cutoff, but common recommendations include:
+There is no universal cutoff. These rough rules of thumb are a starting point:
 
 - **ESS < 50% of actual sample size**: warning flag; inspect weights.
 - **ESS < 20% of actual sample size**: serious concern; consider trimming or population restriction.
@@ -580,9 +582,9 @@ and covariate-specific tables shown in @sec-diagnose.
 
 ---
 
-## Running Example: Antiretroviral Therapy Cohort {#sec-running-example}
+## Running example: Antiretroviral therapy cohort {#sec-running-example}
 
-See the [Running Case Study](00-case-study.qmd) for the full data description. The HAART cohort gives a clear illustration of practical positivity violations. Clinicians initiate HAART based on declining CD4 counts, so patients with very low baseline CD4 are nearly always treated. The untreated group then has little or no representation in the low-CD4 region, exactly the pattern we diagnosed in the simulated examples above.
+See the [Running Case Study](00-case-study.qmd) for the full data description. The HAART cohort gives a clear illustration of practical positivity violations. Clinicians initiate HAART based on declining CD4 counts, so patients with very low baseline CD4 are nearly always treated. The untreated group then has little or no representation in the low-CD4 region, the same pattern we diagnosed in the simulated example above.
 
 ```{r}
 #| label: fig-ps-overlap-haart
@@ -666,11 +668,11 @@ Each visit on its own looks tolerable, but the cumulative probability grows a lo
 3. **Diagnosis toolkit**: propensity score overlap plots, covariate-by-treatment
    tables, effective sample size.
 
-4. **All estimators suffer**: IPTW through extreme weights, G-computation through
+4. **All estimators suffer**: IPTW through extreme weights, g-computation through
    hidden extrapolation, TMLE through clever covariate instability.
 
 5. **Practical responses**: restrict to the overlap population, truncate weights with
-   sensitivity analysis, consider shift interventions, and report limitations honestly.
+   sensitivity analysis, consider shift interventions, and report the limitations openly.
 
 6. **Effective sample size** quantifies information loss from extreme weights and
    works as a quick summary diagnostic.
@@ -678,9 +680,9 @@ Each visit on its own looks tolerable, but the cumulative probability grows a lo
 
 ---
 
-## Check Your Understanding
+## Check your understanding
 
-**Question 1.** A colleague argues: "I use G-computation, so I don't need to worry
+**Question 1.** A colleague argues: "I use g-computation, so I don't need to worry
 about positivity because I never compute weights." Why is this wrong?
 
 <details>
@@ -706,11 +708,14 @@ propensity scores between 0.15 and 0.85, but 5% of treated patients have scores 
 First, investigate *who* those 5% are. Check which covariate patterns produce
 near-zero propensity scores and ask whether those patients should be in the target
 population at all (structural violation) or whether treatment is merely rare there
-(practical violation). Then consider: (a) restricting to the overlap region
-(PS > 0.02 or stricter), which changes the estimand to the sub-population with
-adequate support; (b) truncating weights and running a sensitivity analysis across
-several thresholds; (c) reporting the effective sample size with and without those
-patients. Whatever you choose, be transparent that the ATE for the full population
+(practical violation). Then consider:
+
+- restricting to the overlap region (PS > 0.02 or stricter), which changes the
+  estimand to the sub-population with adequate support;
+- truncating weights and running a sensitivity analysis across several thresholds;
+- reporting the effective sample size with and without those patients.
+
+Whatever you choose, be transparent that the ATE for the full population
 is poorly supported by the data.
 
 </details>
@@ -721,18 +726,19 @@ this mean positivity holds?
 <details>
 <summary>Show answer</summary>
 
-Not necessarily. ESS is a global summary. It is possible for a small subgroup to
-have severe positivity problems that are diluted by the well-behaved majority. For
-example, if 950 patients have moderate weights (around 1) and 50 patients in a
-specific stratum have weights of 3 to 5, the overall ESS could still look healthy
-while that stratum is poorly supported. Always supplement ESS with overlap plots and
-covariate-specific tables to identify localized problems.
+Not necessarily. ESS is a global summary, and it can only react to weights that
+exist. Suppose 50 patients in one stratum all went untreated because treatment is
+almost never given there. Each of them gets a weight near 1, so the ESS stays high,
+yet the data contain no treated patients to compare them with. A small subgroup can
+have severe positivity problems that the well-behaved majority hides. Always
+supplement ESS with overlap plots and covariate-specific tables to identify
+localized problems.
 
 </details>
 
 ---
 
-## What Comes Next
+## What comes next
 
 Now that you know when your data can and cannot support a causal question, you
 are ready to see these ideas at work. Part III opens with @sec-longitudinal-confounding, where the treatment decision repeats at every visit and positivity has to hold visit by visit. The adherence shift chapter that closes that part (@sec-adherence-shift)

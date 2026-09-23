@@ -27,7 +27,7 @@ Guidelines for when to start antiretroviral therapy moved over two decades from 
 - State the optimal-rule estimand and the value of a treatment rule in plain language
 - See why an optimal rule is built directly from the conditional treatment effect
 - Estimate a treat-if-benefit rule and its value, and compare it to treat-all and treat-none
-- Learn a shallow, interpretable rule with `policytree` and value it honestly
+- Learn a shallow, interpretable rule with `policytree` and value it on data it was not fitted to
 - Recognize the two failure modes that matter most: positivity inside the subgroups a rule creates, and instability for patients whose benefit is near zero
 :::
 
@@ -51,7 +51,7 @@ $$
 
 the expected counterfactual outcome when each person receives the treatment $d$ assigns to someone with their covariates. For a beneficial outcome we want the largest value; for a harmful outcome such as death we want the smallest. The **optimal rule** $d^{*}$ is the rule with the best value among those we are willing to consider.
 
-The connection to the CATE is direct. Write the CATE on the additive scale as $\tau(W) = E[Y^1 - Y^0 \mid W]$. If treatment is beneficial exactly when $\tau(W)$ points in the helpful direction, then the rule that maximizes value is the **treat-if-benefit** rule: treat the patients whose estimated benefit is favourable, withhold from the rest. In the HIV example, if starting HAART lowers a patient's predicted mortality the rule starts it, and if the predicted effect is nil or unfavourable once side effects and competing risks are counted, it does not. An optimal-rule analysis therefore reuses the CATE estimates from @sec-effect-modification and adds a decision and a value on top.
+The connection to the CATE is direct. Write the CATE on the additive scale as $\tau(W) = E[Y^1 - Y^0 \mid W]$. The rule that maximizes value is the **treat-if-benefit** rule: treat the patients whose $\tau(W)$ points in the helpful direction, and withhold treatment from the rest. In practice $\tau(W)$ is estimated, so the rule treats the patients whose estimated benefit is favorable. In the HIV example, if starting HAART lowers a patient's predicted mortality the rule starts it, and if the predicted effect is nil or unfavorable once side effects and competing risks are counted, it does not. An optimal-rule analysis therefore reuses the CATE estimates from @sec-effect-modification and adds a decision and a value on top.
 
 
 ## Identification
@@ -65,7 +65,7 @@ Positivity has to hold for the treatment the rule assigns, within the covariate 
 
 ## Two routes to a rule
 
-The first route estimates the CATE and thresholds it. Fit the conditional treatment effect with Super Learner or a causal forest as in @sec-effect-modification, then treat wherever the estimated benefit is favourable. This reuses tools already covered and is easy to explain. Its weakness is that the decision depends on the *sign* of an estimated quantity, so wherever the true benefit is close to zero, small estimation errors flip the decision back and forth.
+The first route estimates the CATE and thresholds it. Fit the conditional treatment effect with Super Learner or a causal forest as in @sec-effect-modification, then treat wherever the estimated benefit is favorable. This reuses tools already covered and is easy to explain. Its weakness is that the decision depends on the *sign* of an estimated quantity, so wherever the true benefit is close to zero, small estimation errors flip the decision back and forth.
 
 The second route, **policy learning**, skips the intermediate CATE and searches directly over a restricted class of simple rules for the one with the best estimated value. A shallow decision tree gives rules like "treat if CD4 is below this cutpoint and age is above that one", which a clinician can read and apply. Restricting to shallow rules also guards against overfitting, because there are far fewer candidates to choose among. The `policytree` package implements this on top of the doubly robust scores that `grf` already computes.
 
@@ -131,7 +131,7 @@ ggplot(data.frame(tau = tau_hat), aes(tau)) +
   theme_minimal()
 ```
 
-Value the rule with the augmented estimator, using a propensity model and an outcome model for the nuisance pieces. The helper values any 0/1 rule on any subset of patients, which the honest evaluation below needs.
+Value the rule with the augmented estimator, using a propensity model and an outcome model for the nuisance pieces. The helper values any 0/1 rule on any subset of patients, which the held-out evaluation below needs.
 
 ```{r}
 #| label: otr-value
@@ -153,7 +153,7 @@ blanket <- c(`Treat all`    = value_of(rep(1L, nrow(hb))),
 round(blanket, 4)
 ```
 
-Read these as mortality risks under each policy, so lower is better. Treating everyone beats treating no one, which is the expected direction for HAART. The CATE rule sits essentially on top of treat-all, and with 31 deaths in 1,200 patients that similarity is the honest result: there is not enough information in this cohort to improve on the blanket policy.
+Read these as mortality risks under each policy, so lower is better. Treating everyone beats treating no one, which is the expected direction for HAART. The CATE rule sits essentially on top of treat-all, and with 31 deaths in 1,200 patients that is all the data can support: there is not enough information in this cohort to improve on the blanket policy.
 
 ### A rule a clinician could read
 
@@ -173,7 +173,7 @@ c(`share treated` = round(mean(tree_rule), 3),
   `value, same data that fit the tree` = round(value_of(tree_rule), 4))
 ```
 
-That number looks spectacular next to treat-all. It is also meaningless, because the tree was chosen to maximize value on exactly the patients it is now being valued on. Split the sample and the picture changes.
+That number looks spectacular next to treat-all. It is also meaningless, because the tree was chosen to maximize value on the same patients it is now being valued on. Split the sample and the picture changes.
 
 ```{r}
 #| label: otr-honest
@@ -219,7 +219,7 @@ ggplot(vals, aes(reorder(policy, risk), risk, fill = kind)) +
   theme_minimal() + theme(legend.position = "bottom")
 ```
 
-The positivity warning is concrete here. The treat-if-benefit rule assigns HAART to the sickest, lowest-CD4 patients, which is fine because almost all of them were in fact treated. The trouble runs the other way: if the rule ever assigns *no treatment* to a low-CD4 group in which essentially everyone was treated, the value estimate for that group rests on almost no untreated patients and is extrapolation rather than evidence. Run the per-stratum positivity check from @sec-positivity-overlap on the groups the rule creates, not only on the cohort as a whole, and treat a rule that depends on a near-empty treatment arm as a hypothesis rather than a recommendation.
+The positivity warning is concrete here. The treat-if-benefit rule assigns HAART to the sickest, lowest-CD4 patients, which is fine because almost all of them were in fact treated. The trouble runs the other way: if the rule ever assigns *no treatment* to a low-CD4 group in which essentially everyone was treated, the value estimate for that group rests on almost no untreated patients and is extrapolation, not evidence. Run the per-stratum positivity check from @sec-positivity-overlap on the groups the rule creates, not only on the cohort as a whole. A rule that depends on a near-empty treatment arm is a hypothesis, not a recommendation.
 
 
 ## Where these analyses fail
