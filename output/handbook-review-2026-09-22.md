@@ -160,12 +160,12 @@ From the earlier scoping review, still open after the four new chapters: **SUTVA
 | 4 | "What comes next" in the chapters missing it | Student | **Done.** 12 substantive chapters gained one; the other 7 without one are the index and appendices |
 | 5 | Coverage-over-replications figure for the headline estimators | Expert | **Done.** 500 replications in 02-03: g-computation 0% coverage, IPTW 98%, AIPW 97%, TMLE 96% |
 | 6 | Spread `interactive: true` beyond Part II | Student | **Done.** 4 chapters to 9; the new cells are self-contained and use only packages WebR can load |
-| 7 | Split 03-05 into diagnostics and sensitivity analysis | Both | Open. Still 12,690 words |
+| 7 | Split 03-05 into diagnostics and sensitivity analysis | Both | **Done 2026-09-23.** 03-05 keeps the diagnostics and its `#sec-advanced-diagnostics` slug; 03-05b takes E-values, quantitative bias analysis, partial identification, outcome-blind simulation, estimand adaptation, and reporting |
 | 8 | Move the "In development" warning off the four mature Part VI chapters | Both | Open |
 | 9 | Expand the synthesis chapter into a real capstone with an estimate table | Both | Open. It now has learning objectives and a forward pointer, but is still 931 words |
 | 10 | Turn on the executable examples that can run | Expert | **Partly done.** 03-06 from 53% to 35% dead, 03-05 from 65% to 59%, book from 16% to 14%. The rest need `moments` or are template snippets referencing undefined objects |
 | 11 | Visual map of the book on the landing page | Student | **Done.** `fig-book-map` |
-| 12 | A section on SUTVA and interference | Expert | Open |
+| 12 | A section on SUTVA and interference | Expert | **Done 2026-09-23.** A no-interference subsection in the roadmap's identification step, with the HIV treatment-as-prevention case that the running cohort raises |
 | 13 | Expand or split 03-14 (1,560 words for IV, negative controls, and proximal) | Expert | Open |
 
 ## What changed on 2026-09-22, after this review
